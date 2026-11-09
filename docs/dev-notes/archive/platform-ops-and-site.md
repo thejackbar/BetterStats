@@ -368,7 +368,7 @@ Honest limit: an `active` Core row cannot tell a paid subscription from one a Su
 
 Proved against a real Postgres (16, schema from the ORM) with `backend/verification/verify_trusted_clubs.py`: 29 checks through the shipped route body, pairing every "not listed" check with a club that is listed; the control run on the previous commit reports the route missing and exits 1. `audit_route_access` still passes and the route is registered on the real app. The strip itself was driven in Chromium with the endpoint stubbed (20 distinct clubs with no repeat of a curated one, fallback to the 8 curated on a 500 and on an empty list, scroll duration scaling, initials for a broken crest). Not run: the endpoint behind the real nginx, or against production data.
 
-## v9.140.0.4: marketing site UI tidy-up (2026-11-09)
+## v9.140.2: marketing site UI tidy-up (2026-11-09)
 
 Prompted by a short UI-tips video the owner shared (delete filler badges, mono only where necessary, tabular numerals, text contrast, no random italics). Audited `pages/marketing` and `components/marketing` and made only the changes that needed no design call:
 
@@ -381,3 +381,9 @@ Prompted by a short UI-tips video the owner shared (delete filler badges, mono o
 Left alone on purpose: the "Get Your Club on BetterCricket today!" CTA copy (set deliberately in v8.11.0), "Limited onboarding spots" (needs the owner to confirm it is true), and the many `font-mono` labels inside Mockups and TeaserPreview, which imitate the product UI.
 
 Not done, needs a decision: `--pb-faint` (#5b6072 on #0a0d14) is about 3.1:1 and fails AA for small text; about 148 marketing uses. A marketing-scoped token override is the clean fix.
+
+### v9.140.2 follow-up: contrast tokens and the owner's answers
+
+- Contrast fixed as a marketing-only token override. `ThemeContext` sets `data-surface="marketing"` on `<html>` for `isMarketingPath` plus `rendersOwnMarketingNav` (so `/trial`, `/demo`, `/preview/*`); `styles/theme.css` re-points `--pb-dim`, `--pb-faint`, `--pb-faintest` under it. Dark: dim #9ba1b3, faint #80869a, faintest #656b7e (dim and faint clear 4.5:1 on bg, surface and surface2). Light selectors cover `/demo`'s own `data-theme="light"` wrapper and a visitor-forced light `<html>`: dim #4d5263, faint #636a7d. Club pages keep the default tokens.
+- Owner decisions: no "Limited onboarding spots" badge (signing up should feel easy); the main CTA is "Get your club on BetterCricket" (sentence case, no "today!"); the hero line "We do cricket... Better." stays; remaining `font-mono` labels on marketing pages moved to the normal font, except the fake address bar in `ModuleDetail`. Mockups, TeaserPreview, TeaserCard and the admin VideoManager keep mono because they imitate product UI.
+- Screenshot check: every `/marketing/...` path in `src` that is rendered exists in `frontend/public/marketing`, and every `SCREENSHOT_PATHS.*` key used is defined. Only `/marketing/leaderboard.png` (two doc comments) and the unused `aboutFounder` key point at missing files, so no marketing page falls back to a mock.

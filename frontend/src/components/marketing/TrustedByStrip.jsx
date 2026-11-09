@@ -55,7 +55,7 @@ export default function TrustedByStrip({ compact = false }) {
   return (
     <section className={`px-4 sm:px-6 lg:px-10 border-y pb-hairline ${compact ? 'py-6' : 'py-12'}`}>
       <div className="max-w-[1200px] mx-auto flex flex-col sm:flex-row sm:items-center gap-x-10 gap-y-3">
-        <p className={`uppercase tracking-wide3 font-medium shrink-0 text-pb-faint text-xs`}>
+        <p className="uppercase tracking-wide3 font-medium shrink-0 text-pb-faint text-xs">
           Trusted by clubs at
         </p>
         <div className="logo-marquee">
