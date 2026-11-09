@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=1920, height=1080">
+<title>BetterSocials, template by template</title>
+<script src="assets/gsap.min.js"></script>
+<style>@font-face{font-family:'AC';src:url('assets/fonts/applecross-display.ttf') format('truetype');font-weight:100 900;font-style:normal}
+:root{--acc:#ec4899;--hot:#f472b6;--soft:#f9a8d4}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:1920px;height:1080px;overflow:hidden;background:#04070b;font-family:'Inter',sans-serif;color:#fff}
+#root{position:absolute;left:0;top:0;width:1920px;height:1080px;overflow:hidden}
+#bg{position:absolute;inset:0;background:#04070b}
+#wm{display:none;position:absolute;left:-150px;top:520px;width:760px;opacity:.05;filter:grayscale(1) brightness(2)}
+#bug{position:absolute;right:64px;top:40px;display:flex;align-items:center;gap:16px;opacity:0;z-index:50}
+#bug img{width:60px;height:51px;object-fit:contain}
+#bug span{font:800 italic 30px/1 'AC',sans-serif;text-transform:uppercase;letter-spacing:.5px;padding-right:.16em}
+#prog{position:absolute;left:0;bottom:0;width:1920px;height:8px;background:rgba(255,255,255,.07);z-index:60}
+#prog i{position:absolute;left:0;top:0;width:1920px;height:8px;background:#ec4899;transform-origin:0 0;transform:scaleX(0)}
+.scene{position:absolute;left:0;top:0;width:1920px;height:1080px;overflow:hidden;opacity:0}
+#s0{opacity:1}
+.kick{font:700 28px 'JetBrains Mono',monospace;letter-spacing:7px;text-transform:uppercase;color:var(--soft)}
+.ttl{font:800 italic 96px/1.0 'AC','Montserrat',sans-serif;text-transform:uppercase;letter-spacing:-1px;padding-right:.16em}
+.ttl em{font-style:italic;color:var(--hot)}
+.sub{font:500 42px/1.3 'Inter',sans-serif;color:#e5e7eb}
+.col{position:absolute;left:110px;width:960px}
+/* phone */
+#phone{position:absolute;left:0;top:0;width:438px;height:915px;opacity:0}
+#ph-body{position:absolute;inset:0;border-radius:68px;background:linear-gradient(145deg,#2b2f38,#0b0c10 40%,#1c1f26);box-shadow:0 40px 90px rgba(0,0,0,.65),0 0 0 2px rgba(236,72,153,.55) inset,0 0 0 3px rgba(236,72,153,.18)}
+#ph-screen{position:absolute;left:14px;top:14px;width:410px;height:887px;border-radius:54px;overflow:hidden;background:#0a0d14}
+.ly{position:absolute;left:0;top:0;width:410px;height:887px;overflow:hidden;opacity:0}
+.ly img.full{position:absolute;left:0;top:0;width:410px;height:887px;opacity:0}
+#dash-scroll{position:absolute;left:0;top:0;width:410px}
+#dash-scroll img{position:absolute;left:0;top:0;width:410px}
+#ph-status{position:absolute;left:0;top:0;width:410px;height:46px;background:linear-gradient(#0a0d14 40%,rgba(10,13,20,0));z-index:30;font:700 15px 'Inter',sans-serif;color:#fff}
+#ph-status .tm{position:absolute;left:34px;top:15px}
+#ph-status .ic{position:absolute;right:30px;top:17px;display:flex;gap:6px;align-items:center}
+#ph-status .ic i{display:block;background:#fff;border-radius:2px}
+#ph-cam{position:absolute;left:50%;top:12px;width:12px;height:12px;margin-left:-6px;border-radius:50%;background:#000;z-index:31;box-shadow:0 0 0 2px #15171c}
+#tap{position:absolute;left:0;top:0;width:70px;height:70px;margin:-35px 0 0 -35px;border-radius:50%;border:4px solid rgba(255,255,255,.9);background:rgba(255,255,255,.25);opacity:0;z-index:40}
+/* chat mocks */
+.ly.chat{background:#0b141a}
+.ch-h{position:absolute;left:0;top:0;width:410px;height:112px;background:#1f2c34;padding:50px 20px 0;display:flex;align-items:center;gap:12px;z-index:3}
+.ch-h .av{width:44px;height:44px;border-radius:50%;background:#2d6a5a;display:grid;place-items:center;font:700 16px 'Inter',sans-serif}
+.ch-h b{font:700 18px 'Inter',sans-serif}.ch-h span{display:block;font:500 12px 'Inter',sans-serif;color:#9bb0b8;margin-top:2px}
+.ch-body{position:absolute;left:0;top:112px;width:410px;height:775px;padding:14px 14px;overflow:hidden}
+.msg{max-width:300px;border-radius:14px;padding:8px 12px 9px;margin-bottom:10px;font:500 16px/1.3 'Inter',sans-serif;background:#1f2c34;color:#e9edef;opacity:0}
+.msg b{display:block;font:700 12px 'Inter',sans-serif;margin-bottom:2px}
+.msg.me{margin-left:auto;background:#0b5a4b}
+.msg.link{padding:6px;width:310px}
+.msg .lk{display:flex;gap:12px;align-items:center;background:rgba(0,0,0,.28);border-radius:10px;padding:10px}
+.msg .lk img{width:50px;height:50px;object-fit:contain;background:#0f1218;border-radius:10px;padding:5px}
+.msg .lk div{font:700 15px 'Inter',sans-serif}.msg .lk span{display:block;font:500 12px 'Inter',sans-serif;color:#9bb0b8;margin-top:2px}
+.unread{position:absolute;right:16px;top:60px;min-width:44px;height:30px;border-radius:15px;background:#e5484d;font:700 15px 'Inter',sans-serif;display:grid;place-items:center;z-index:4;opacity:0}
+
+/* strip above the whiteboard */
+.strip{position:absolute;left:160px;top:34px;width:1300px}
+.strip .kick{font-size:24px;letter-spacing:6px}
+.strip .ttl{font-size:56px;margin-top:8px;white-space:nowrap}
+.strip .ttl.alt{position:absolute;left:0;top:30px;margin-top:0}
+/* whiteboard window */
+#wb{position:absolute;left:160px;top:150px;width:1600px;height:900px;transform-origin:0 0;opacity:0;border-radius:14px;overflow:hidden;background:#0a0d14;box-shadow:0 30px 80px rgba(0,0,0,.6),0 0 0 2px rgba(236,72,153,.55)}
+#wbi{position:absolute;left:0;top:0;width:1600px;height:900px;transform-origin:0 0}
+#wbi img.s,#wbi video{position:absolute;left:0;top:0;width:1600px;height:900px;display:block}
+#wbi img.s{opacity:0}
+.cap{position:absolute;left:0;right:0;bottom:34px;text-align:center;opacity:0;z-index:20}
+.cap span{display:inline-block;padding:12px 30px;border-radius:999px;font:700 32px/1.15 'Inter',sans-serif;background:#db2777;color:#fff;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+.wr{position:absolute;border:4px solid #f472b6;border-radius:12px;box-shadow:0 0 0 6px rgba(236,72,153,.16);opacity:0;z-index:6}
+.wtag{position:absolute;z-index:8;padding:10px 24px;border-radius:999px;font:700 30px/1.15 'Inter',sans-serif;background:#ec4899;color:#04130d;opacity:0;white-space:nowrap;box-shadow:0 10px 30px rgba(0,0,0,.45)}
+.wtag.amber{background:#f5a524}.wtag.blue{background:#4cc2ff}.wtag.dark{background:#101a17;color:#fff;border:2px solid #ec4899}
+#wdim{position:absolute;left:0;top:0;width:1600px;height:900px;background:rgba(4,7,11,.78);opacity:0;z-index:4}
+.zi{position:absolute;opacity:0;z-index:5;border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,.6)}
+#toast{position:absolute;z-index:21;right:34px;top:34px;display:flex;align-items:center;gap:16px;padding:14px 26px 14px 16px;border-radius:18px;background:#101a17;border:2px solid #ec4899;font:600 30px 'Inter',sans-serif;color:#fff;opacity:0;box-shadow:0 14px 40px rgba(0,0,0,.55)}
+#toast i{width:46px;height:46px;border-radius:50%;background:#db2777;display:grid;place-items:center;font:800 28px 'Inter',sans-serif;font-style:normal;color:#fff}
+/* scenes: left column steps */
+.pt{display:flex;gap:26px;align-items:center;margin-top:30px;opacity:0}
+.pt i{flex:none;width:64px;height:64px;border-radius:50%;background:rgba(236,72,153,.16);border:2px solid #ec4899;font:800 30px 'Inter',sans-serif;font-style:normal;display:grid;place-items:center;color:#fff}
+.pt span{font:600 44px/1.15 'Inter',sans-serif}
+.pt span small{display:block;font:500 28px 'Inter',sans-serif;color:#cbd5e1;margin-top:6px}
+.ben{display:flex;align-items:center;gap:26px;margin-top:34px;opacity:0}
+.ben i{flex:none;width:70px;height:70px;border-radius:50%;background:#db2777;display:grid;place-items:center;font:800 40px 'Inter',sans-serif;font-style:normal;color:#fff}
+.ben span{font:600 52px/1.15 'Inter',sans-serif}
+#end-logo{position:absolute;left:110px;top:150px;width:200px;height:170px;object-fit:contain;opacity:0}
+#end-w{position:absolute;left:340px;top:205px;font:800 italic 66px/1 'AC',sans-serif;text-transform:uppercase;padding-right:.16em;opacity:0}
+#end-t{position:absolute;left:110px;top:380px;opacity:0}
+#end-t .ttl{font-size:118px}
+#end-s{position:absolute;left:110px;top:740px;font:500 52px 'Inter',sans-serif;color:#e5e7eb;opacity:0}
+#end-u{position:absolute;left:110px;top:850px;font:700 30px 'JetBrains Mono',monospace;letter-spacing:6px;text-transform:uppercase;color:var(--soft);opacity:0}
+.col{position:absolute;left:110px;width:960px}
+
+#ly-dash{opacity:0}
+
+
+/* aurora (BetterSocials pink, violet, rose) */
+#aur{position:absolute;inset:0;overflow:hidden}
+.ab{position:absolute;border-radius:50%}
+#ab1{width:1200px;height:1200px;left:-380px;top:-480px;background:radial-gradient(circle,rgba(236,72,153,.5),rgba(236,72,153,0) 66%)}
+#ab2{width:1000px;height:1000px;left:1100px;top:-200px;background:radial-gradient(circle,rgba(139,92,246,.38),rgba(139,92,246,0) 66%)}
+#ab3{width:1100px;height:1100px;left:380px;top:520px;background:radial-gradient(circle,rgba(251,113,133,.30),rgba(251,113,133,0) 66%)}
+#ab4{width:900px;height:900px;left:1250px;top:480px;background:radial-gradient(circle,rgba(192,38,211,.34),rgba(192,38,211,0) 66%)}
+.col .ttl{white-space:nowrap}
+#fan{position:absolute;left:0;top:0;width:1920px;height:1080px;pointer-events:none}
+.fp{position:absolute;width:400px;height:400px;border-radius:14px;overflow:hidden;box-shadow:0 28px 70px rgba(0,0,0,.6),0 0 0 2px rgba(255,255,255,.1);opacity:0}
+.fp img{width:400px;height:400px;display:block}
+#gal,#ts{position:absolute;left:160px;top:150px;width:1600px;height:900px;border-radius:14px;background:rgba(10,13,20,.8);box-shadow:0 30px 80px rgba(0,0,0,.6),0 0 0 2px rgba(244,114,182,.5);opacity:0;overflow:hidden}
+.gp{position:absolute;width:232px;height:232px;opacity:0}
+.gp img{width:232px;height:232px;border-radius:10px;display:block;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+.nw{position:absolute;top:10px;right:10px;padding:4px 14px;border-radius:999px;background:#ec4899;color:#fff;font:800 22px 'Inter',sans-serif;letter-spacing:1px;opacity:0}
+#ts h3{position:absolute;margin:0;font:800 italic 50px/1 'AC',sans-serif;text-transform:uppercase;padding-right:.16em;color:#fff;opacity:0}
+#ts h3 em{font-style:italic;color:#f472b6}
+.chip{position:absolute;left:80px;width:660px;height:78px;border-radius:14px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);display:flex;align-items:center;padding-left:28px;font:600 34px 'Inter',sans-serif;color:#e5e7eb;opacity:0}
+.chip i{font-style:normal;margin-right:18px;color:#94a3b8;font-size:30px}
+.bar{position:absolute;height:26px;border-radius:13px;transform-origin:0 50%}
+.blab{position:absolute;font:600 32px 'Inter',sans-serif;color:#cbd5e1;opacity:0}
+#bigbtn{position:absolute;left:860px;top:150px;width:660px;height:120px;border-radius:60px;background:#ec4899;color:#fff;font:800 42px 'Inter',sans-serif;display:grid;place-items:center;box-shadow:0 0 60px rgba(236,72,153,.55);opacity:0}
+#minip{position:absolute;left:1000px;top:310px;width:380px;height:380px;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.6);opacity:0}
+#okc{position:absolute;left:1340px;top:280px;width:96px;height:96px;border-radius:50%;background:#16c784;color:#04130d;display:grid;place-items:center;font:800 60px 'Inter',sans-serif;opacity:0;z-index:3}
+.sweepbox{position:absolute;left:669px;top:149px;width:685px;height:685px;overflow:hidden;pointer-events:none;z-index:7;border-radius:6px}
+.sweep{position:absolute;top:-10%;left:-45%;width:36%;height:120%;background:linear-gradient(100deg,rgba(255,255,255,0),rgba(255,255,255,.55),rgba(244,114,182,.35),rgba(255,255,255,0));transform:skewX(-14deg);opacity:0}
+.pulse{position:absolute;left:669px;top:149px;width:685px;height:685px;border:5px solid #f472b6;border-radius:8px;opacity:0;z-index:7;box-shadow:0 0 40px rgba(244,114,182,.6)}
+.strip .ttl.alt{position:absolute;left:0;top:30px;margin-top:0}
+#st2{position:absolute;left:0;top:0;width:1600px;height:900px;opacity:0}
+
+.cap{left:0;right:0;bottom:12px;z-index:30}
+.cap span{font-size:30px;padding:10px 28px}
+#wb{top:140px}
+</style></head><body>
+<div id="root" data-composition-id="main" data-start="0" data-duration="273.55" data-width="1920" data-height="1080">
+<div id="bg"></div>
+<div id="aur"><div class="ab" id="ab1"></div><div class="ab" id="ab2"></div><div class="ab" id="ab3"></div><div class="ab" id="ab4"></div></div>
+<div id="bug"><img src="assets/img/bettercricket-logo.png" alt=""><span>BetterCricket</span></div>
+<div id="prog"><i></i></div>
+
+<div id="fan"><div class="fp" id="fp0" style="left:1130px;top:250px;transform:rotate(-8deg)"><img src="assets/sc/t11.jpg" alt=""></div><div class="fp" id="fp1" style="left:1280px;top:90px;transform:rotate(5deg)"><img src="assets/sc/fx3.jpg" alt=""></div><div class="fp" id="fp2" style="left:1480px;top:300px;transform:rotate(-4deg)"><img src="assets/sc/ms1.jpg" alt=""></div><div class="fp" id="fp3" style="left:1190px;top:520px;transform:rotate(6deg)"><img src="assets/sc/rr2.jpg" alt=""></div><div class="fp" id="fp4" style="left:1500px;top:560px;transform:rotate(-7deg)"><img src="assets/sc/tw1.jpg" alt=""></div></div>
+
+<div id="wb">
+  <div id="wbi">
+    <img class="s" id="st" src="assets/sc/start.jpg" alt="">
+    <video id="v-t11" class="clip" muted playsinline data-start="14.2" data-duration="14.1" data-track-index="3" src="assets/clips/t11_c.mp4"></video><video id="v-t12" class="clip" muted playsinline data-start="29.7" data-duration="17.37" data-track-index="3" src="assets/clips/t12_c.mp4"></video><video id="v-fx1" class="clip" muted playsinline data-start="48.470000000000006" data-duration="16.77" data-track-index="3" src="assets/clips/fx1_c.mp4"></video><video id="v-fx3" class="clip" muted playsinline data-start="66.64" data-duration="11.67" data-track-index="3" src="assets/clips/fx3_c.mp4"></video><video id="v-c4" class="clip" muted playsinline data-start="79.71000000000001" data-duration="11.2" data-track-index="3" src="assets/clips/c4_c.mp4"></video><video id="v-rs7" class="clip" muted playsinline data-start="92.31" data-duration="17.93" data-track-index="3" src="assets/clips/rs7_c.mp4"></video><video id="v-rr7" class="clip" muted playsinline data-start="111.64" data-duration="13.07" data-track-index="3" src="assets/clips/rr7_c.mp4"></video><video id="v-rr2" class="clip" muted playsinline data-start="126.11" data-duration="12.47" data-track-index="3" src="assets/clips/rr2_c.mp4"></video><video id="v-ms1" class="clip" muted playsinline data-start="139.98" data-duration="12.8" data-track-index="3" src="assets/clips/ms1_c.mp4"></video><video id="v-ms2" class="clip" muted playsinline data-start="154.17999999999998" data-duration="13.6" data-track-index="3" src="assets/clips/ms2_c.mp4"></video><video id="v-tw1" class="clip" muted playsinline data-start="169.17999999999998" data-duration="8.5" data-track-index="3" src="assets/clips/tw1_c.mp4"></video><video id="v-tw2" class="clip" muted playsinline data-start="179.07999999999998" data-duration="11.2" data-track-index="3" src="assets/clips/tw2_c.mp4"></video><video id="v-events" class="clip" muted playsinline data-start="191.67999999999998" data-duration="20.7" data-track-index="3" src="assets/clips/events_c.mp4"></video><video id="v-c5" class="clip" muted playsinline data-start="213.78" data-duration="12.97" data-track-index="3" src="assets/clips/c5_c.mp4"></video><video id="v-dnd" class="clip" muted playsinline data-start="228.14999999999998" data-duration="22.2" data-track-index="3" src="assets/clips/dnd_c.mp4"></video>
+    <div class="wr" id="r-t11-0" style="left:706.0px;top:267.0px;width:282.0px;height:404.0px"></div><div class="wr" id="r-t11-1" style="left:1280.0px;top:378.0px;width:32.0px;height:26.0px"></div><div class="wr" id="r-t11-2" style="left:1267.0px;top:407.0px;width:45.0px;height:27.0px"></div><div class="wr" id="r-t11-3" style="left:1236.0px;top:347.0px;width:76.0px;height:30.0px"></div><div class="wr" id="r-t11-4" style="left:685.0px;top:692.0px;width:315.0px;height:48.0px"></div><div class="wr" id="r-t11-5" style="left:1048.0px;top:684.0px;width:264.0px;height:99.0px"></div><div class="wr" id="r-fx3-0" style="left:757.0px;top:320.0px;width:160.0px;height:62.0px"></div><div class="wr" id="r-fx3-1" style="left:1071.0px;top:320.0px;width:190.0px;height:62.0px"></div><div class="wr" id="r-fx3-2" style="left:757.0px;top:494.0px;width:160.0px;height:62.0px"></div><div class="wr" id="r-fx3-3" style="left:1071.0px;top:494.0px;width:190.0px;height:62.0px"></div><div class="wr" id="r-fx3-4" style="left:757.0px;top:668.0px;width:160.0px;height:62.0px"></div><div class="wr" id="r-fx3-5" style="left:1071.0px;top:668.0px;width:190.0px;height:62.0px"></div><div class="wr" id="r-s0" style="left:172.8px;top:196.1px;width:250.0px;height:158.3px"></div><div class="wr" id="r-s1" style="left:423.9px;top:196.1px;width:250.0px;height:158.3px"></div><div class="wr" id="r-s2" style="left:675.0px;top:196.1px;width:250.0px;height:158.3px"></div><div class="wr" id="r-s3" style="left:926.1px;top:196.1px;width:250.0px;height:158.3px"></div><div class="wr" id="r-s4" style="left:1177.2px;top:196.1px;width:250.0px;height:158.3px"></div><div class="wr" id="r-s5" style="left:172.8px;top:355.6px;width:250.0px;height:158.3px"></div><div class="wr" id="r-s6" style="left:423.9px;top:355.6px;width:250.0px;height:158.3px"></div><div class="wr" id="r-s7" style="left:675.0px;top:355.6px;width:250.0px;height:158.3px"></div><div class="wr" id="r-s8" style="left:926.1px;top:355.6px;width:250.0px;height:158.3px"></div><div class="wr" id="r-s9" style="left:1177.2px;top:355.6px;width:250.0px;height:158.3px"></div><div class="wr" id="r-s10" style="left:172.8px;top:515.0px;width:250.0px;height:158.3px"></div>
+    <div class="pulse" id="pulse"></div>
+    <div class="sweepbox"><div class="sweep" id="sweep"></div></div>
+  </div>
+</div>
+<div class="cap" id="c-t11-0"><span>The player photo, pulled in</span></div><div class="cap" id="c-t11-1"><span>Captain, keeper and debut tags</span></div><div class="cap" id="c-t11-2"><span>Milestone watch, worked out for you</span></div><div class="cap" id="c-t11-3"><span>Your sponsor, added automatically</span></div><div class="cap" id="c-t12-0"><span>Captain, debut and milestone tags, automatic</span></div><div class="cap" id="c-t12-1"><span>The sponsors you already add to Stats</span></div><div class="cap" id="c-t12-2"><span>Tick to add more to the post</span></div><div class="cap" id="c-fx1-0"><span>Every opposition crest pulls through</span></div><div class="cap" id="c-fx1-1"><span>The layout reflows across pages</span></div><div class="cap" id="c-fx3-0"><span>Opposition crests, found automatically</span></div><div class="cap" id="c-c4-0"><span>Both crests, scores and top performers</span></div><div class="cap" id="c-rs7-0"><span>Add a background photo</span></div><div class="cap" id="c-rs7-1"><span>Glass card over your own photo</span></div><div class="cap" id="c-rr7-0"><span>The whole round, pulled in</span></div><div class="cap" id="c-rr7-1"><span>Switch layout, keep the data</span></div><div class="cap" id="c-rr2-0"><span>Latest results, one click</span></div><div class="cap" id="c-rr2-1"><span>Opposition crests on every result</span></div><div class="cap" id="c-ms1-0"><span>Real career milestones, one click</span></div><div class="cap" id="c-ms2-0"><span>A list layout for more names</span></div><div class="cap" id="c-tw1-0"><span>The best performers, picked for you</span></div><div class="cap" id="c-tw2-0"><span>Same round, a compact layout</span></div><div class="cap" id="c-events-0"><span>Eleven layouts and ready-made examples</span></div><div class="cap" id="c-events-1"><span>One post for the whole calendar</span></div><div class="cap" id="c-events-2"><span>Add a new event in seconds</span></div><div class="cap" id="c-c5-0"><span>Choose a player, the photo pulls in</span></div><div class="cap" id="c-c5-1"><span>Giant type, your club colours</span></div><div class="cap" id="c-dnd-0"><span>Add shapes, text and photos</span></div><div class="cap" id="c-dnd-1"><span>Drag them into place</span></div><div class="cap" id="c-dnd-2"><span>Reorder layers by dragging</span></div>
+<div id="gal"><div class="cap" id="cap-lay"><span>70+ layouts, and new ones added all the time</span></div><div class="gp" id="g0" style="left:54px;top:82px"><img src="assets/sc/t11.jpg" alt=""><span class="nw" id="nw0">NEW</span></div><div class="gp" id="g1" style="left:306px;top:82px"><img src="assets/sc/t12.jpg" alt=""><span class="nw" id="nw1">NEW</span></div><div class="gp" id="g2" style="left:558px;top:82px"><img src="assets/sc/fx1.jpg" alt=""><span class="nw" id="nw2">NEW</span></div><div class="gp" id="g3" style="left:810px;top:82px"><img src="assets/sc/fx3.jpg" alt=""><span class="nw" id="nw3">NEW</span></div><div class="gp" id="g4" style="left:1062px;top:82px"><img src="assets/sc/c4.jpg" alt=""><span class="nw" id="nw4">NEW</span></div><div class="gp" id="g5" style="left:1314px;top:82px"><img src="assets/sc/rs7.jpg" alt=""><span class="nw" id="nw5">NEW</span></div><div class="gp" id="g6" style="left:54px;top:334px"><img src="assets/sc/rr7.jpg" alt=""><span class="nw" id="nw6">NEW</span></div><div class="gp" id="g7" style="left:306px;top:334px"><img src="assets/sc/rr2.jpg" alt=""><span class="nw" id="nw7">NEW</span></div><div class="gp" id="g8" style="left:558px;top:334px"><img src="assets/sc/ms1.jpg" alt=""><span class="nw" id="nw8">NEW</span></div><div class="gp" id="g9" style="left:810px;top:334px"><img src="assets/sc/ms2.jpg" alt=""><span class="nw" id="nw9">NEW</span></div><div class="gp" id="g10" style="left:1062px;top:334px"><img src="assets/sc/tw1.jpg" alt=""><span class="nw" id="nw10">NEW</span></div><div class="gp" id="g11" style="left:1314px;top:334px"><img src="assets/sc/tw2.jpg" alt=""><span class="nw" id="nw11">NEW</span></div><div class="gp" id="g12" style="left:54px;top:586px"><img src="assets/sc/events.jpg" alt=""><span class="nw" id="nw12">NEW</span></div><div class="gp" id="g13" style="left:306px;top:586px"><img src="assets/sc/c5.jpg" alt=""><span class="nw" id="nw13">NEW</span></div><div class="gp" id="g14" style="left:558px;top:586px"><img src="assets/sc/dnd.jpg" alt=""><span class="nw" id="nw14">NEW</span></div></div>
+
+<div id="s0" class="clip scene" data-start="0" data-duration="6.5" data-track-index="1">
+  <div class="col" style="top:170px;width:900px">
+    <div id="i-kick" class="kick" style="opacity:0">Introducing</div>
+    <div id="i-brand" style="display:flex;align-items:center;gap:26px;margin-top:34px;opacity:0"><img src="assets/img/bettersocials.svg" style="width:112px;height:112px" alt=""><span style="font:800 italic 84px/1 'AC',sans-serif;text-transform:uppercase;padding-right:.16em">Better<span style="color:#f472b6">Socials</span></span></div>
+    <div id="i-title" style="margin-top:34px"><div class="ttl i-a" style="font-size:120px;opacity:0">Posts in</div><div class="ttl i-b" style="font-size:120px;color:var(--hot);opacity:0">one click.</div></div>
+    <div id="i-sub" class="sub" style="margin-top:50px;opacity:0">Lineups, fixtures, results<br>and milestones, ready to share.</div>
+  </div>
+</div>
+
+<div id="s-start" class="clip scene" data-start="6.5" data-duration="7.0" data-track-index="1">
+  <div class="strip"><div class="kick">BetterPosts</div><div class="ttl">One tap to pick your post.</div></div>
+</div>
+
+<div id="sc-t11" class="clip scene" data-start="13.5" data-duration="15.7" data-track-index="1"><div class="strip"><div class="kick">T11 · Applecross</div><div class="ttl alt" id="tt-t11-0" style="opacity:0">Lineups, built for you.</div></div></div>
+<div id="sc-t12" class="clip scene" data-start="29.0" data-duration="18.970000000000002" data-track-index="1"><div class="strip"><div class="kick">T12 · Hilton Bicton</div><div class="ttl alt" id="tt-t12-0" style="opacity:0">Match day cards, ready.</div><div class="ttl alt" id="tt-t12-1" style="opacity:0">Sponsors, from your Stats data.</div></div></div>
+<div id="sc-fx1" class="clip scene" data-start="47.77" data-duration="18.37" data-track-index="1"><div class="strip"><div class="kick">FX1 · Scarborough</div><div class="ttl alt" id="tt-fx1-0" style="opacity:0">Fixtures, with crests.</div><div class="ttl alt" id="tt-fx1-1" style="opacity:0">More fixtures? Add a page.</div></div></div>
+<div id="sc-fx3" class="clip scene" data-start="65.94" data-duration="13.27" data-track-index="1"><div class="strip"><div class="kick">FX3 · Kalamunda</div><div class="ttl alt" id="tt-fx3-0" style="opacity:0">A grid for every round.</div></div></div>
+<div id="sc-c4" class="clip scene" data-start="79.01" data-duration="12.799999999999999" data-track-index="1"><div class="strip"><div class="kick">C4 · Applecross</div><div class="ttl alt" id="tt-c4-0" style="opacity:0">Final scores, one click.</div></div></div>
+<div id="sc-rs7" class="clip scene" data-start="91.61" data-duration="19.53" data-track-index="1"><div class="strip"><div class="kick">RS7 · Hilton Bicton</div><div class="ttl alt" id="tt-rs7-0" style="opacity:0">Add your own photo.</div></div></div>
+<div id="sc-rr7" class="clip scene" data-start="110.94" data-duration="14.67" data-track-index="1"><div class="strip"><div class="kick">RR7 · Applecross</div><div class="ttl alt" id="tt-rr7-0" style="opacity:0">Round results, ready.</div></div></div>
+<div id="sc-rr2" class="clip scene" data-start="125.41" data-duration="14.07" data-track-index="1"><div class="strip"><div class="kick">RR2 · Bannockburn</div><div class="ttl alt" id="tt-rr2-0" style="opacity:0">Results with crests.</div></div></div>
+<div id="sc-ms1" class="clip scene" data-start="139.28" data-duration="14.4" data-track-index="1"><div class="strip"><div class="kick">MS1 · Hilton Bicton</div><div class="ttl alt" id="tt-ms1-0" style="opacity:0">Milestones, picked for you.</div></div></div>
+<div id="sc-ms2" class="clip scene" data-start="153.48" data-duration="15.2" data-track-index="1"><div class="strip"><div class="kick">MS2 · Scarborough</div><div class="ttl alt" id="tt-ms2-0" style="opacity:0">Same data, new layout.</div></div></div>
+<div id="sc-tw1" class="clip scene" data-start="168.48" data-duration="10.1" data-track-index="1"><div class="strip"><div class="kick">TW1 · Kalamunda</div><div class="ttl alt" id="tt-tw1-0" style="opacity:0">Team of the week.</div></div></div>
+<div id="sc-tw2" class="clip scene" data-start="178.38" data-duration="12.799999999999999" data-track-index="1"><div class="strip"><div class="kick">TW2 · High Wycombe</div><div class="ttl alt" id="tt-tw2-0" style="opacity:0">A list for the week.</div></div></div>
+<div id="sc-events" class="clip scene" data-start="190.98" data-duration="22.3" data-track-index="1"><div class="strip"><div class="kick">Events · Gisborne</div><div class="ttl alt" id="tt-events-0" style="opacity:0">Events, any style.</div><div class="ttl alt" id="tt-events-1" style="opacity:0">A calendar post, too.</div><div class="ttl alt" id="tt-events-2" style="opacity:0">Add events in a click.</div></div></div>
+<div id="sc-c5" class="clip scene" data-start="213.08" data-duration="14.57" data-track-index="1"><div class="strip"><div class="kick">C5 · Applecross</div><div class="ttl alt" id="tt-c5-0" style="opacity:0">Announce anything.</div></div></div>
+<div id="sc-dnd" class="clip scene" data-start="227.45" data-duration="23.8" data-track-index="1"><div class="strip"><div class="kick">Customise · Gisborne</div><div class="ttl alt" id="tt-dnd-0" style="opacity:0">Drag, drop, done.</div></div></div>
+
+
+<div id="s-wall" class="clip scene" data-start="251.05" data-duration="8" data-track-index="1">
+  <div class="strip"><div class="kick">Templates</div><div class="ttl">New layouts, all the time.</div></div>
+</div>
+
+<div id="s-close" class="clip scene" data-start="259.05" data-duration="9" data-track-index="1">
+  <div class="col" style="top:170px;width:820px">
+    <div id="b-kick" class="kick" style="opacity:0">BetterSocials</div>
+    <div id="b-ttl" class="ttl" style="margin-top:22px;font-size:84px;opacity:0">Hours back<br><em>for volunteers.</em></div>
+    <div id="bn1" class="ben"><i>&#10003;</i><span>One click pulls the latest</span></div>
+    <div id="bn2" class="ben"><i>&#10003;</i><span>Every colour, your way</span></div>
+    <div id="bn3" class="ben"><i>&#10003;</i><span>New templates all the time</span></div>
+  </div>
+</div>
+
+<div id="s-end" class="clip scene" data-start="268.05" data-duration="5.5" data-track-index="1">
+  <img id="end-logo" src="assets/img/bettersocials.svg" alt=""><div id="end-w">Better<span style="color:#f472b6">Socials</span></div>
+  <div id="end-t"><div class="ttl">Post it<br><em>in one click.</em></div></div>
+  <div id="end-s">Hours back for your volunteers.</div>
+  <div id="end-u">betterat.cricket</div>
+</div>
+<audio id="music" data-timeline-role="music" data-start="0" data-duration="273.55" data-media-start="3" data-track-index="2" data-volume="0.55" data-fade-out="3" src="assets/music/bed.mp3"></audio>
+<audio id="sfx0" data-start="1.2" data-duration="0.12" data-track-index="4" data-volume="0.45" src="assets/sfx/interface/bong_001.ogg"></audio>
+<audio id="sfx1" data-start="2.5" data-duration="0.18" data-track-index="4" data-volume="0.5" src="assets/sfx/impact/impactSoft_medium_001.ogg"></audio>
+<audio id="sfx2" data-start="5.0" data-duration="0.69" data-track-index="4" data-volume="0.4" src="assets/sfx/casino/card-place-1.ogg"></audio>
+<audio id="sfx3" data-start="6.8" data-duration="0.6" data-track-index="4" data-volume="0.3" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx4" data-start="9.1" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx5" data-start="9.7" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx6" data-start="10.3" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx7" data-start="10.9" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx8" data-start="11.5" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx9" data-start="13.8" data-duration="0.6" data-track-index="4" data-volume="0.3" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx10" data-start="16.8" data-duration="0.01" data-track-index="4" data-volume="0.55" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx11" data-start="17.3" data-duration="0.12" data-track-index="4" data-volume="0.4" src="assets/sfx/interface/bong_001.ogg"></audio>
+<audio id="sfx12" data-start="29.3" data-duration="0.6" data-track-index="4" data-volume="0.3" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx13" data-start="34.52" data-duration="0.01" data-track-index="4" data-volume="0.55" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx14" data-start="35.02" data-duration="0.12" data-track-index="4" data-volume="0.4" src="assets/sfx/interface/bong_001.ogg"></audio>
+<audio id="sfx15" data-start="41.18" data-duration="0.01" data-track-index="4" data-volume="0.55" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx16" data-start="48.07" data-duration="0.6" data-track-index="4" data-volume="0.3" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx17" data-start="50.64" data-duration="0.01" data-track-index="4" data-volume="0.55" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx18" data-start="51.14" data-duration="0.12" data-track-index="4" data-volume="0.4" src="assets/sfx/interface/bong_001.ogg"></audio>
+<audio id="sfx19" data-start="56.04" data-duration="0.01" data-track-index="4" data-volume="0.55" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx20" data-start="60.56" data-duration="0.01" data-track-index="4" data-volume="0.55" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx21" data-start="66.24" data-duration="0.6" data-track-index="4" data-volume="0.3" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx22" data-start="71.77" data-duration="0.01" data-track-index="4" data-volume="0.55" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx23" data-start="72.27" data-duration="0.12" data-track-index="4" data-volume="0.4" src="assets/sfx/interface/bong_001.ogg"></audio>
+<audio id="sfx24" data-start="79.31" data-duration="0.6" data-track-index="4" data-volume="0.3" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx25" data-start="82.91" data-duration="0.01" data-track-index="4" data-volume="0.55" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx26" data-start="83.41" data-duration="0.12" data-track-index="4" data-volume="0.4" src="assets/sfx/interface/bong_001.ogg"></audio>
+<audio id="sfx27" data-start="91.91" data-duration="0.6" data-track-index="4" data-volume="0.3" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx28" data-start="95.51" data-duration="0.01" data-track-index="4" data-volume="0.55" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx29" data-start="96.01" data-duration="0.12" data-track-index="4" data-volume="0.4" src="assets/sfx/interface/bong_001.ogg"></audio>
+<audio id="sfx30" data-start="104.49" data-duration="0.01" data-track-index="4" data-volume="0.55" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx31" data-start="111.24" data-duration="0.6" data-track-index="4" data-volume="0.3" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx32" data-start="114.14" data-duration="0.01" data-track-index="4" data-volume="0.55" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx33" data-start="114.64" data-duration="0.12" data-track-index="4" data-volume="0.4" src="assets/sfx/interface/bong_001.ogg"></audio>
+<audio id="sfx34" data-start="125.71" data-duration="0.6" data-track-index="4" data-volume="0.3" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx35" data-start="128.61" data-duration="0.01" data-track-index="4" data-volume="0.55" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx36" data-start="129.11" data-duration="0.12" data-track-index="4" data-volume="0.4" src="assets/sfx/interface/bong_001.ogg"></audio>
+<audio id="sfx37" data-start="139.58" data-duration="0.6" data-track-index="4" data-volume="0.3" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx38" data-start="143.98" data-duration="0.01" data-track-index="4" data-volume="0.55" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx39" data-start="147.28" data-duration="0.01" data-track-index="4" data-volume="0.55" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx40" data-start="147.78" data-duration="0.12" data-track-index="4" data-volume="0.4" src="assets/sfx/interface/bong_001.ogg"></audio>
+<audio id="sfx41" data-start="153.78" data-duration="0.6" data-track-index="4" data-volume="0.3" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx42" data-start="159.12" data-duration="0.01" data-track-index="4" data-volume="0.55" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx43" data-start="162.22" data-duration="0.01" data-track-index="4" data-volume="0.55" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx44" data-start="162.72" data-duration="0.12" data-track-index="4" data-volume="0.4" src="assets/sfx/interface/bong_001.ogg"></audio>
+<audio id="sfx45" data-start="168.78" data-duration="0.6" data-track-index="4" data-volume="0.3" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx46" data-start="171.68" data-duration="0.01" data-track-index="4" data-volume="0.55" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx47" data-start="172.18" data-duration="0.12" data-track-index="4" data-volume="0.4" src="assets/sfx/interface/bong_001.ogg"></audio>
+<audio id="sfx48" data-start="178.68" data-duration="0.6" data-track-index="4" data-volume="0.3" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx49" data-start="184.22" data-duration="0.01" data-track-index="4" data-volume="0.55" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx50" data-start="184.72" data-duration="0.12" data-track-index="4" data-volume="0.4" src="assets/sfx/interface/bong_001.ogg"></audio>
+<audio id="sfx51" data-start="191.28" data-duration="0.6" data-track-index="4" data-volume="0.3" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx52" data-start="193.26" data-duration="0.01" data-track-index="4" data-volume="0.55" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx53" data-start="195.15" data-duration="0.01" data-track-index="4" data-volume="0.55" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx54" data-start="197.05" data-duration="0.01" data-track-index="4" data-volume="0.55" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx55" data-start="198.94" data-duration="0.01" data-track-index="4" data-volume="0.55" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx56" data-start="200.84" data-duration="0.01" data-track-index="4" data-volume="0.55" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx57" data-start="202.73" data-duration="0.01" data-track-index="4" data-volume="0.55" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx58" data-start="204.68" data-duration="0.01" data-track-index="4" data-volume="0.55" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx59" data-start="207.42" data-duration="0.01" data-track-index="4" data-volume="0.55" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx60" data-start="210.31" data-duration="0.01" data-track-index="4" data-volume="0.55" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx61" data-start="213.38" data-duration="0.6" data-track-index="4" data-volume="0.3" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx62" data-start="216.78" data-duration="0.01" data-track-index="4" data-volume="0.55" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx63" data-start="227.75" data-duration="0.6" data-track-index="4" data-volume="0.3" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx64" data-start="230.78" data-duration="0.01" data-track-index="4" data-volume="0.55" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx65" data-start="238.0" data-duration="0.01" data-track-index="4" data-volume="0.55" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx66" data-start="251.55" data-duration="0.72" data-track-index="4" data-volume="0.4" src="assets/sfx/casino/card-fan-1.ogg"></audio>
+<audio id="sfx67" data-start="252.05" data-duration="0.06" data-track-index="5" data-volume="0.25" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx68" data-start="252.35" data-duration="0.06" data-track-index="4" data-volume="0.25" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx69" data-start="252.65" data-duration="0.06" data-track-index="4" data-volume="0.25" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx70" data-start="252.95" data-duration="0.06" data-track-index="4" data-volume="0.25" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx71" data-start="253.25" data-duration="0.06" data-track-index="4" data-volume="0.25" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx72" data-start="253.55" data-duration="0.06" data-track-index="4" data-volume="0.25" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx73" data-start="253.85" data-duration="0.06" data-track-index="4" data-volume="0.25" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx74" data-start="254.15" data-duration="0.06" data-track-index="4" data-volume="0.25" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx75" data-start="254.45" data-duration="0.06" data-track-index="4" data-volume="0.25" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx76" data-start="254.75" data-duration="0.06" data-track-index="4" data-volume="0.25" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx77" data-start="261.65" data-duration="0.06" data-track-index="4" data-volume="0.4" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx78" data-start="262.85" data-duration="0.06" data-track-index="4" data-volume="0.4" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx79" data-start="264.05" data-duration="0.06" data-track-index="4" data-volume="0.4" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx80" data-start="269.05" data-duration="1.48" data-track-index="4" data-volume="0.6" src="assets/sfx/impact/impactBell_heavy_000.ogg"></audio>
+
+
+</div>
+<script>const raw = gsap.timeline({ paused: true });
+const CFG = [{"name": "t11", "kicker": "T11 \u00b7 Applecross", "titles": [{"t": 0, "text": "Lineups, built for you."}], "segs": [[0, 8.6, 1.0]], "pad": 5.5, "rings": [{"box": [706, 267, 282, 404], "t": "pull+2.6", "dur": 1.6}, {"box": [1280, 378, 32, 26], "t": "pull+4.6", "dur": 1.9}, {"box": [1267, 407, 45, 27], "t": "pull+4.6", "dur": 1.9}, {"box": [1236, 347, 76, 30], "t": "pull+6.6", "dur": 2.1}, {"box": [685, 692, 315, 48], "t": "pull+6.6", "dur": 2.1}, {"box": [1048, 684, 264, 99], "t": "pull+9.0", "dur": 1.9}], "caps": [{"t": "pull+2.6", "dur": 1.7, "text": "The player photo, pulled in"}, {"t": "pull+4.6", "dur": 1.9, "text": "Captain, keeper and debut tags"}, {"t": "pull+6.6", "dur": 2.1, "text": "Milestone watch, worked out for you"}, {"t": "pull+9.0", "dur": 1.9, "text": "Your sponsor, added automatically"}]}, {"name": "t12", "kicker": "T12 \u00b7 Hilton Bicton", "titles": [{"t": 0, "text": "Match day cards, ready."}, {"t": "sponsors-0.4", "text": "Sponsors, from your Stats data."}], "segs": [[0, 8.4, 2.2], [8.4, 16.0, 1.0], [16.0, 26.0, 1.7]], "caps": [{"t": "pull+1.4", "dur": 3.4, "text": "Captain, debut and milestone tags, automatic"}, {"t": "sponsors+0.5", "dur": 2.6, "text": "The sponsors you already add to Stats"}, {"t": "sponsors+4.6", "dur": 2.4, "text": "Tick to add more to the post"}], "cam": [{"t": "sponsors-0.5", "fx": 800, "fy": 450, "s": 1.0, "d": 1.2}], "clicks": ["pull", "sponsors"]}, {"name": "fx1", "kicker": "FX1 \u00b7 Scarborough", "titles": [{"t": 0, "text": "Fixtures, with crests."}, {"t": "page2-0.4", "text": "More fixtures? Add a page."}], "segs": [[0, 17.5, 1.15]], "pad": 1.5, "caps": [{"t": "pull+1.8", "dur": 2.8, "text": "Every opposition crest pulls through"}, {"t": "page2+1.0", "dur": 2.8, "text": "The layout reflows across pages"}], "pulses": ["pull", "page2", "view2"], "clicks": ["pull", "page2", "view2"]}, {"name": "fx3", "kicker": "FX3 \u00b7 Kalamunda", "titles": [{"t": 0, "text": "A grid for every round."}], "segs": [[0, 8.2, 2.2], [8.2, 15.1, 1.0]], "pad": 1.0, "rings": [{"box": [757, 320, 160, 62], "t": "pull+1.8", "dur": 0.9}, {"box": [1071, 320, 190, 62], "t": "pull+2.2", "dur": 0.9}, {"box": [757, 494, 160, 62], "t": "pull+2.6", "dur": 0.9}, {"box": [1071, 494, 190, 62], "t": "pull+3.0", "dur": 0.9}, {"box": [757, 668, 160, 62], "t": "pull+3.4", "dur": 0.9}, {"box": [1071, 668, 190, 62], "t": "pull+3.8", "dur": 0.9}], "caps": [{"t": "pull+1.8", "dur": 3.2, "text": "Opposition crests, found automatically"}]}, {"name": "c4", "kicker": "C4 \u00b7 Applecross", "titles": [{"t": 0, "text": "Final scores, one click."}], "segs": [[0, 10.2, 1.0]], "pad": 1.0, "caps": [{"t": "pull+1.4", "dur": 3.0, "text": "Both crests, scores and top performers"}]}, {"name": "rs7", "kicker": "RS7 \u00b7 Hilton Bicton", "titles": [{"t": 0, "text": "Add your own photo."}], "segs": [[0, 6.0, 1.0], [6.0, 15.3, 2.6], [15.3, 23.6, 1.0]], "zoom": {"t": "apply+1.4"}, "pulses": ["pull", "apply"], "clicks": ["pull", "apply"], "caps": [{"t": "photo-0.2", "dur": 2.2, "text": "Add a background photo"}, {"t": "apply+2.2", "dur": 2.6, "text": "Glass card over your own photo"}]}, {"name": "rr7", "kicker": "RR7 \u00b7 Applecross", "titles": [{"t": 0, "text": "Round results, ready."}], "segs": [[0, 6.2, 1.0], [6.2, 10.0, 1.8], [10.0, 14.7, 1.0]], "zoom": {"t": "end-4.0"}, "pulses": ["pull", "end-4.4"], "caps": [{"t": "pull+1.4", "dur": 2.6, "text": "The whole round, pulled in"}, {"t": "end-3.2", "dur": 2.6, "text": "Switch layout, keep the data"}]}, {"name": "rr2", "kicker": "RR2 \u00b7 Bannockburn", "titles": [{"t": 0, "text": "Results with crests."}], "segs": [[0, 6.0, 1.0], [6.0, 9.8, 1.8], [9.8, 14.1, 1.0]], "zoom": {"t": "end-4.0"}, "pulses": ["pull", "end-4.4"], "caps": [{"t": "pull+1.4", "dur": 2.6, "text": "Latest results, one click"}, {"t": "end-3.2", "dur": 2.6, "text": "Opposition crests on every result"}]}, {"name": "ms1", "kicker": "MS1 \u00b7 Hilton Bicton", "titles": [{"t": 0, "text": "Milestones, picked for you."}], "segs": [[0, 12.8, 1.0]], "pulses": ["click1", "pull"], "clicks": ["click1", "pull"], "caps": [{"t": "pull+1.6", "dur": 3.0, "text": "Real career milestones, one click"}]}, {"name": "ms2", "kicker": "MS2 \u00b7 Scarborough", "titles": [{"t": 0, "text": "Same data, new layout."}], "segs": [[0, 8.6, 2.3], [8.6, 18.4, 1.0]], "pulses": ["click1", "pull"], "clicks": ["click1", "pull"], "caps": [{"t": "pull+1.6", "dur": 3.0, "text": "A list layout for more names"}]}, {"name": "tw1", "kicker": "TW1 \u00b7 Kalamunda", "titles": [{"t": 0, "text": "Team of the week."}], "segs": [[0, 8.5, 1.0]], "caps": [{"t": "pull+1.5", "dur": 3.2, "text": "The best performers, picked for you"}]}, {"name": "tw2", "kicker": "TW2 \u00b7 High Wycombe", "titles": [{"t": 0, "text": "A list for the week."}], "segs": [[0, 8.0, 2.2], [8.0, 15.5, 1.0]], "caps": [{"t": "pull+1.5", "dur": 3.0, "text": "Same round, a compact layout"}]}, {"name": "events", "kicker": "Events \u00b7 Gisborne", "titles": [{"t": 0, "text": "Events, any style."}, {"t": "calendar-0.4", "text": "A calendar post, too."}, {"t": "add-0.4", "text": "Add events in a click."}], "segs": [[0, 39.2, 1.9]], "zoom": false, "pulses": ["Ticket", "Gazette", "Kinetic", "Chalkboard", "preset1", "preset2", "calendar", "add", "cards"], "clicks": ["Ticket", "Gazette", "Kinetic", "Chalkboard", "preset1", "preset2", "calendar", "add", "cards"], "caps": [{"t": "Ticket+0.4", "dur": 2.6, "text": "Eleven layouts and ready-made examples"}, {"t": "calendar+0.8", "dur": 2.8, "text": "One post for the whole calendar"}, {"t": "add+1.2", "dur": 2.6, "text": "Add a new event in seconds"}]}, {"name": "c5", "kicker": "C5 \u00b7 Applecross", "titles": [{"t": 0, "text": "Announce anything."}], "segs": [[0, 6.0, 1.0], [6.0, 10.6, 1.9], [10.6, 15.1, 1.0]], "zoom": {"t": "pick+1.5"}, "pulses": ["pick", "end-4.3"], "clicks": ["pick"], "caps": [{"t": "pick+1.4", "dur": 2.6, "text": "Choose a player, the photo pulls in"}, {"t": "end-3.4", "dur": 2.6, "text": "Giant type, your club colours"}]}, {"name": "dnd", "kicker": "Customise \u00b7 Gisborne", "titles": [{"t": 0, "text": "Drag, drop, done."}], "segs": [[0, 4.0, 1.8], [4.0, 29.0, 1.7], [29.0, 35.8, 1.3]], "zoom": false, "pulses": [], "clicks": ["addstar", "addcircle"], "caps": [{"t": "addstar+0.6", "dur": 2.4, "text": "Add shapes, text and photos"}, {"t": "addstar+8.0", "dur": 2.4, "text": "Drag them into place"}, {"t": "layers+0.6", "dur": 2.6, "text": "Reorder layers by dragging"}]}], M = {"t11": {"start": 0, "pull": 2.6, "end": 8.6}, "t12": {"start": 0, "pull": 9.4, "sponsors": 16.1, "end": 26}, "fx1": {"start": 0, "pull": 2.5, "page2": 8.7, "view2": 13.9, "end": 17.5}, "fx3": {"start": 0, "pull": 9.6, "end": 15.1}, "c4": {"start": 0, "pull": 3.2, "end": 10.2}, "rs7": {"start": 0, "pull": 3.2, "photo": 15.7, "apply": 17.9, "end": 23.6}, "rr7": {"start": 0, "pull": 2.5, "end": 14.7}, "rr2": {"start": 0, "pull": 2.5, "end": 14.1}, "ms1": {"start": 0, "click1": 4, "pull": 7.3, "end": 12.8}, "ms2": {"start": 0, "click1": 9.8, "pull": 12.9, "end": 18.4}, "tw1": {"start": 0, "pull": 2.5, "end": 8.5}, "tw2": {"start": 0, "pull": 9.5, "end": 15.5}, "events": {"start": 0, "Ticket": 3, "Gazette": 6.6, "Kinetic": 10.2, "Chalkboard": 13.8, "preset1": 17.4, "preset2": 21, "calendar": 24.7, "add": 29.9, "cards": 35.4, "end": 39.2}, "c5": {"start": 0, "pick": 3, "end": 15.1}, "dnd": {"start": 0, "addstar": 4.7, "addcircle": 16.97, "layers": 29.23, "end": 35.77}}, S = {"t11": 13.5, "t12": 29.0, "fx1": 47.77, "fx3": 65.94, "c4": 79.01, "rs7": 91.61, "rr7": 110.94, "rr2": 125.41, "ms1": 139.28, "ms2": 153.48, "tw1": 168.48, "tw2": 178.38, "events": 190.98, "c5": 213.08, "dnd": 227.45, "wall": 251.05, "close": 259.05, "end": 268.05}, D = {"t11": 14.1, "t12": 17.37, "fx1": 16.77, "fx3": 11.67, "c4": 11.2, "rs7": 17.93, "rr7": 13.07, "rr2": 12.47, "ms1": 12.8, "ms2": 13.6, "tw1": 8.5, "tw2": 11.2, "events": 20.7, "c5": 12.97, "dnd": 22.2}, TOTAL = 273.55, INTRO = 6.5, NWALL = 15;
+const F = (s, a, b, t) => raw.fromTo(s, a, { ...b, immediateRender: false }, t);
+const INIT = (s, v) => raw.set(s, v, 0);
+const show = (s, t, d = 0.5) => F(s, { opacity: 0 }, { opacity: 1, duration: d, ease: 'sine.out' }, t);
+const hide = (s, t, d = 0.45) => F(s, { opacity: 1 }, { opacity: 0, duration: d, ease: 'sine.in' }, t);
+const rise = (s, t, d = 0.8, y = 36) => F(s, { opacity: 0, y }, { opacity: 1, y: 0, duration: d, ease: 'power3.out' }, t);
+const slideIn = (s, t) => F(s, { opacity: 0, x: -60 }, { opacity: 1, x: 0, duration: 0.8, ease: 'power3.out' }, t);
+const ring = (id, t, dur) => { F('#' + id, { opacity: 0, scale: 0.98 }, { opacity: 1, scale: 1, duration: 0.45, ease: 'power2.out' }, t); F('#' + id, { opacity: 1 }, { opacity: 0, duration: 0.45 }, t + dur); };
+const cap = (id, t, dur) => { F('#' + id, { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.5, ease: 'power3.out' }, t); F('#' + id, { opacity: 1 }, { opacity: 0, duration: 0.4 }, t + dur); };
+const sceneIn = (id, st) => show(id, st + 0.25, 0.7);
+const sceneOut = (id, en) => hide(id, en - 0.9, 0.7);
+let cx = 0, cy = 0, cs = 1;
+const cam = (t, fx, fy, s, d = 1.3, ease = 'power2.inOut') => {
+  const x = Math.min(0, Math.max(1600 * (1 - s), 800 - fx * s)), y = Math.min(0, Math.max(900 * (1 - s), 450 - fy * s));
+  F('#wbi', { x: cx, y: cy, scale: cs }, { x, y, scale: s, duration: d, ease }, t); cx = x; cy = y; cs = s;
+};
+const drift = (id, pts) => { let t = 0, px = 0, py = 0, ps = 1; pts.forEach(([x, y, s, d]) => { F(id, { x: px, y: py, scale: ps }, { x, y, scale: s, duration: d, ease: 'sine.inOut' }, t); t += d; px = x; py = y; ps = s; }); };
+const N = Math.ceil(TOTAL / 20) + 1;
+const rep = (base) => Array.from({ length: N }, (_, i) => base[i % base.length]);
+drift('#ab1', rep([[260, 160, 1.12, 20], [-120, 260, 0.95, 20], [200, -60, 1.1, 20], [-160, 120, 1.0, 20], [240, 200, 1.12, 20], [0, 0, 1, 20]]));
+drift('#ab2', rep([[-300, 200, 1.1, 20], [-120, -80, 0.92, 20], [-360, 120, 1.15, 20], [-80, 240, 1.0, 20], [-260, 40, 1.1, 20], [0, 0, 1, 20]]));
+drift('#ab3', rep([[240, -200, 1.1, 20], [-240, -120, 1.2, 20], [160, -260, 0.95, 20], [-120, -80, 1.1, 20], [220, -180, 1.0, 20], [0, 0, 1, 20]]));
+drift('#ab4', rep([[-260, -160, 1.1, 20], [-60, 120, 0.9, 20], [-300, -40, 1.15, 20], [-120, -200, 1.0, 20], [-240, 80, 1.1, 20], [0, 0, 1, 20]]));
+F('#prog i', { scaleX: 0 }, { scaleX: 1, duration: TOTAL, ease: 'none' }, 0);
+show('#bug', 0.8, 0.7); hide('#bug', S.end - 0.6, 0.6);
+INIT('#wb', { opacity: 0, scale: 0.93, transformOrigin: '50% 0%' }); INIT('#st', { opacity: 1 });
+const fanIn = (t) => [0, 1, 2, 3, 4].forEach((i) => F('#fp' + i, { opacity: 0, y: 70, scale: 0.92 }, { opacity: 1, y: 0, scale: 1, duration: 0.9, ease: 'power3.out' }, t + 0.2 * i));
+// ---- intro
+let t0 = 0;
+hide('#s0', INTRO - 0.7, 0.7);
+rise('#i-kick', 0.6, 0.8, -18);
+F('#i-brand', { opacity: 0, x: -50 }, { opacity: 1, x: 0, duration: 0.9, ease: 'power3.out' }, 1.2);
+F('.i-a', { opacity: 0, y: 70 }, { opacity: 1, y: 0, duration: 0.9, ease: 'power3.out' }, 2.0);
+F('.i-b', { opacity: 0, y: 70 }, { opacity: 1, y: 0, duration: 0.9, ease: 'power3.out' }, 2.5);
+rise('#i-sub', 3.6, 0.8, 24);
+fanIn(0.9); [0, 1, 2, 3, 4].forEach((i) => hide('#fp' + i, INTRO - 0.5, 0.5));
+// ---- start screen: tour the post types
+t0 = INTRO;
+sceneIn('#s-start', t0); sceneOut('#s-start', t0 + 7);
+F('#wb', { opacity: 0, y: 60 }, { opacity: 1, y: 0, duration: 1.0, ease: 'power3.out' }, t0 + 0.4);
+cam(t0 + 1.2, 800, 360, 1.25, 1.3);
+for (let i = 0; i < 11; i++) ring('r-s' + i, t0 + 2.2 + 0.38 * i, 0.55);
+// ---- one scene per template
+const firstClip = CFG[0].name;
+CFG.forEach((c) => {
+  const n = c.name, st = S[n], vs = st + 0.7, d = D[n];
+  const Tm = (x) => { if (typeof x === 'number') return x; const m = /^([a-z0-9_]+)([+-][0-9.]+)?$/i.exec(x); return (M[n][m[1]] ?? 0) + (m[2] ? parseFloat(m[2]) : 0); };
+  const mp = (t) => { let tot = 0; for (const [a, z, sp] of c.segs) { if (t > a) tot += (Math.min(t, z) - a) / sp; } const last = c.segs[c.segs.length - 1][1]; if (t > last) tot += t - last; return tot; };
+  const tm = (x) => vs + mp(Tm(x));
+  sceneIn('#sc-' + n, st); sceneOut('#sc-' + n, st + d + 1.6);
+  if (n === firstClip) F('#st', { opacity: 1 }, { opacity: 0, duration: 0.01 }, vs - 0.3);
+  F('#wbi', { opacity: 0 }, { opacity: 1, duration: 0.3 }, vs - 0.15); F('#wbi', { opacity: 1 }, { opacity: 0, duration: 0.3 }, vs + d - 0.2);
+  cam(vs - 0.2, 800, 450, 1, 0.01);
+  const tt = c.titles;
+  tt.forEach((x, j) => { const a = j === 0 ? vs + 0.1 : tm(x.t); slideIn(`#tt-${n}-${j}`, a); const b = j + 1 < tt.length ? tm(tt[j + 1].t) - 0.1 : vs + d - 0.2; hide(`#tt-${n}-${j}`, b - 0.3, 0.3); });
+  (c.caps || []).forEach((x, j) => cap(`c-${n}-${j}`, tm(x.t), x.dur));
+  (c.rings || []).forEach((x, j) => ring(`r-${n}-${j}`, tm(x.t), x.dur));
+  (c.pulses || ['pull']).forEach((k) => { if (typeof k === 'string' && !/[+-]/.test(k) && M[n][k] === undefined) return; const a = tm(k) + 0.12;
+    F('#pulse', { opacity: 1, scale: 1 }, { opacity: 0, scale: 1.07, duration: 1.1, ease: 'power2.out' }, a);
+    F('#sweep', { opacity: 1, x: 0 }, { x: 1200, duration: 1.0, ease: 'power1.inOut' }, a); F('#sweep', { opacity: 1 }, { opacity: 0, duration: 0.05 }, a + 1.0); });
+  if (c.zoom !== false) { const zt = c.zoom && c.zoom.t !== undefined ? c.zoom.t : (M[n].pull !== undefined ? 'pull+1.6' : 2); cam(tm(zt), c.zoom?.fx ?? 1011, c.zoom?.fy ?? 427, c.zoom?.s ?? 1.25, 1.5); }
+  (c.cam || []).forEach((x) => cam(tm(x.t), x.fx, x.fy, x.s, x.d ?? 1.4));
+});
+// ---- template wall
+t0 = S.wall;
+sceneIn('#s-wall', t0); sceneOut('#s-wall', t0 + 8);
+hide('#wb', t0 - 0.2, 0.4); show('#gal', t0 + 0.4, 0.7);
+for (let i = 0; i < NWALL; i++) F('#g' + i, { opacity: 0, y: 30, scale: 0.9 }, { opacity: 1, y: 0, scale: 1, duration: 0.5, ease: 'power3.out' }, t0 + 0.9 + 0.12 * i);
+[1, 5, 10].forEach((i, j) => { if (i < NWALL) F('#nw' + i, { opacity: 0, scale: 0.5 }, { opacity: 1, scale: 1, duration: 0.4, ease: 'back.out(2)' }, t0 + 3.4 + j); });
+cap('cap-lay', t0 + 4.8, 2.8);
+// ---- close
+t0 = S.close;
+sceneIn('#s-close', t0); sceneOut('#s-close', t0 + 9);
+hide('#gal', t0 + 0.1, 0.5); fanIn(t0 + 0.7);
+rise('#b-kick', t0 + 0.9, 0.7, -16); rise('#b-ttl', t0 + 1.2, 0.9, 36);
+rise('#bn1', t0 + 2.6, 0.8, 26); rise('#bn2', t0 + 3.8, 0.8, 26); rise('#bn3', t0 + 5.0, 0.8, 26);
+// ---- end
+t0 = S.end;
+sceneIn('#s-end', t0);
+F('#end-logo', { opacity: 0, scale: 0.7 }, { opacity: 1, scale: 1, duration: 0.8, ease: 'power3.out' }, t0 + 0.5);
+F('#end-w', { opacity: 0, x: -30 }, { opacity: 1, x: 0, duration: 0.8, ease: 'power3.out' }, t0 + 0.8);
+F('#end-t', { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: 0.9, ease: 'power3.out' }, t0 + 1.2);
+rise('#end-s', t0 + 2.0, 0.8, 24); rise('#end-u', t0 + 2.5, 0.7, 18);
+window.__timelines = window.__timelines || {};
+window.__timelines['main'] = raw;
+raw.seek(0);
+</script></body></html>
