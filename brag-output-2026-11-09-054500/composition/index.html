@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=1920, height=1080">
+<title>BetterCricket Selection Whiteboard</title>
+<script src="assets/gsap.min.js"></script>
+<style>@font-face{font-family:'AC';src:url('assets/fonts/applecross-display.ttf') format('truetype');font-weight:100 900;font-style:normal}
+:root{--acc:#24c484;--hot:#24c484;--soft:#6fe3b4}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:1920px;height:1080px;overflow:hidden;background:#04070b;font-family:'Inter',sans-serif;color:#fff}
+#root{position:absolute;left:0;top:0;width:1920px;height:1080px;overflow:hidden}
+#bg{position:absolute;inset:0;background:radial-gradient(circle at 74% 42%,rgba(36,196,132,.11),rgba(4,7,11,0) 60%),radial-gradient(circle at 6% 104%,rgba(36,196,132,.08),rgba(4,7,11,0) 52%),#04070b}
+#wm{position:absolute;left:-150px;top:520px;width:760px;opacity:.05;filter:grayscale(1) brightness(2)}
+#bug{position:absolute;right:64px;top:40px;display:flex;align-items:center;gap:16px;opacity:0;z-index:50}
+#bug img{width:60px;height:51px;object-fit:contain}
+#bug span{font:800 italic 30px/1 'AC',sans-serif;text-transform:uppercase;letter-spacing:.5px;padding-right:.16em}
+#prog{position:absolute;left:0;bottom:0;width:1920px;height:8px;background:rgba(255,255,255,.07);z-index:60}
+#prog i{position:absolute;left:0;top:0;width:1920px;height:8px;background:#24c484;transform-origin:0 0;transform:scaleX(0)}
+.scene{position:absolute;left:0;top:0;width:1920px;height:1080px;overflow:hidden;opacity:0}
+#s0{opacity:1}
+.kick{font:700 28px 'JetBrains Mono',monospace;letter-spacing:7px;text-transform:uppercase;color:var(--soft)}
+.ttl{font:800 italic 96px/1.0 'AC','Montserrat',sans-serif;text-transform:uppercase;letter-spacing:-1px;padding-right:.16em}
+.ttl em{font-style:italic;color:var(--hot)}
+.sub{font:500 42px/1.3 'Inter',sans-serif;color:#e5e7eb}
+.col{position:absolute;left:110px;width:960px}
+/* phone */
+#phone{position:absolute;left:0;top:0;width:438px;height:915px;opacity:0}
+#ph-body{position:absolute;inset:0;border-radius:68px;background:linear-gradient(145deg,#2b2f38,#0b0c10 40%,#1c1f26);box-shadow:0 40px 90px rgba(0,0,0,.65),0 0 0 2px rgba(36,196,132,.55) inset,0 0 0 3px rgba(36,196,132,.18)}
+#ph-screen{position:absolute;left:14px;top:14px;width:410px;height:887px;border-radius:54px;overflow:hidden;background:#0a0d14}
+.ly{position:absolute;left:0;top:0;width:410px;height:887px;overflow:hidden;opacity:0}
+.ly img.full{position:absolute;left:0;top:0;width:410px;height:887px;opacity:0}
+#dash-scroll{position:absolute;left:0;top:0;width:410px}
+#dash-scroll img{position:absolute;left:0;top:0;width:410px}
+#ph-status{position:absolute;left:0;top:0;width:410px;height:46px;background:linear-gradient(#0a0d14 40%,rgba(10,13,20,0));z-index:30;font:700 15px 'Inter',sans-serif;color:#fff}
+#ph-status .tm{position:absolute;left:34px;top:15px}
+#ph-status .ic{position:absolute;right:30px;top:17px;display:flex;gap:6px;align-items:center}
+#ph-status .ic i{display:block;background:#fff;border-radius:2px}
+#ph-cam{position:absolute;left:50%;top:12px;width:12px;height:12px;margin-left:-6px;border-radius:50%;background:#000;z-index:31;box-shadow:0 0 0 2px #15171c}
+#tap{position:absolute;left:0;top:0;width:70px;height:70px;margin:-35px 0 0 -35px;border-radius:50%;border:4px solid rgba(255,255,255,.9);background:rgba(255,255,255,.25);opacity:0;z-index:40}
+/* chat mocks */
+.ly.chat{background:#0b141a}
+.ch-h{position:absolute;left:0;top:0;width:410px;height:112px;background:#1f2c34;padding:50px 20px 0;display:flex;align-items:center;gap:12px;z-index:3}
+.ch-h .av{width:44px;height:44px;border-radius:50%;background:#2d6a5a;display:grid;place-items:center;font:700 16px 'Inter',sans-serif}
+.ch-h b{font:700 18px 'Inter',sans-serif}.ch-h span{display:block;font:500 12px 'Inter',sans-serif;color:#9bb0b8;margin-top:2px}
+.ch-body{position:absolute;left:0;top:112px;width:410px;height:775px;padding:14px 14px;overflow:hidden}
+.msg{max-width:300px;border-radius:14px;padding:8px 12px 9px;margin-bottom:10px;font:500 16px/1.3 'Inter',sans-serif;background:#1f2c34;color:#e9edef;opacity:0}
+.msg b{display:block;font:700 12px 'Inter',sans-serif;margin-bottom:2px}
+.msg.me{margin-left:auto;background:#0b5a4b}
+.msg.link{padding:6px;width:310px}
+.msg .lk{display:flex;gap:12px;align-items:center;background:rgba(0,0,0,.28);border-radius:10px;padding:10px}
+.msg .lk img{width:50px;height:50px;object-fit:contain;background:#0f1218;border-radius:10px;padding:5px}
+.msg .lk div{font:700 15px 'Inter',sans-serif}.msg .lk span{display:block;font:500 12px 'Inter',sans-serif;color:#9bb0b8;margin-top:2px}
+.unread{position:absolute;right:16px;top:60px;min-width:44px;height:30px;border-radius:15px;background:#e5484d;font:700 15px 'Inter',sans-serif;display:grid;place-items:center;z-index:4;opacity:0}
+
+/* strip above the whiteboard */
+.strip{position:absolute;left:160px;top:34px;width:1300px}
+.strip .kick{font-size:24px;letter-spacing:6px}
+.strip .ttl{font-size:56px;margin-top:8px;white-space:nowrap}
+.strip .ttl.alt{position:absolute;left:0;top:30px;margin-top:0}
+/* whiteboard window */
+#wb{position:absolute;left:160px;top:150px;width:1600px;height:900px;transform-origin:0 0;opacity:0;border-radius:14px;overflow:hidden;background:#0a0d14;box-shadow:0 30px 80px rgba(0,0,0,.6),0 0 0 2px rgba(36,196,132,.55)}
+#wbi{position:absolute;left:0;top:0;width:1600px;height:900px;transform-origin:0 0}
+#wbi img.s,#wbi video{position:absolute;left:0;top:0;width:1600px;height:900px;display:block}
+#wbi img.s{opacity:0}
+.cap{position:absolute;left:0;right:0;bottom:34px;text-align:center;opacity:0;z-index:20}
+.cap span{display:inline-block;padding:12px 30px;border-radius:999px;font:700 32px/1.15 'Inter',sans-serif;background:#24c484;color:#04130d;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+.wr{position:absolute;border:4px solid #24c484;border-radius:12px;box-shadow:0 0 0 6px rgba(36,196,132,.16);opacity:0;z-index:6}
+.wtag{position:absolute;z-index:8;padding:10px 24px;border-radius:999px;font:700 30px/1.15 'Inter',sans-serif;background:#24c484;color:#04130d;opacity:0;white-space:nowrap;box-shadow:0 10px 30px rgba(0,0,0,.45)}
+.wtag.amber{background:#f5a524}.wtag.blue{background:#4cc2ff}.wtag.dark{background:#101a17;color:#fff;border:2px solid #24c484}
+#wdim{position:absolute;left:0;top:0;width:1600px;height:900px;background:rgba(4,7,11,.78);opacity:0;z-index:4}
+.zi{position:absolute;opacity:0;z-index:5;border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,.6)}
+#toast{position:absolute;z-index:21;right:34px;top:34px;display:flex;align-items:center;gap:16px;padding:14px 26px 14px 16px;border-radius:18px;background:#101a17;border:2px solid #24c484;font:600 30px 'Inter',sans-serif;color:#fff;opacity:0;box-shadow:0 14px 40px rgba(0,0,0,.55)}
+#toast i{width:46px;height:46px;border-radius:50%;background:#24c484;display:grid;place-items:center;font:800 28px 'Inter',sans-serif;font-style:normal;color:#04130d}
+/* scenes: left column steps */
+.pt{display:flex;gap:26px;align-items:center;margin-top:30px;opacity:0}
+.pt i{flex:none;width:64px;height:64px;border-radius:50%;background:rgba(36,196,132,.16);border:2px solid #24c484;font:800 30px 'Inter',sans-serif;font-style:normal;display:grid;place-items:center;color:#fff}
+.pt span{font:600 44px/1.15 'Inter',sans-serif}
+.pt span small{display:block;font:500 28px 'Inter',sans-serif;color:#cbd5e1;margin-top:6px}
+.ben{display:flex;align-items:center;gap:26px;margin-top:34px;opacity:0}
+.ben i{flex:none;width:70px;height:70px;border-radius:50%;background:#24c484;display:grid;place-items:center;font:800 40px 'Inter',sans-serif;font-style:normal;color:#04130d}
+.ben span{font:600 52px/1.15 'Inter',sans-serif}
+#end-logo{position:absolute;left:110px;top:150px;width:200px;height:170px;object-fit:contain;opacity:0}
+#end-w{position:absolute;left:340px;top:205px;font:800 italic 66px/1 'AC',sans-serif;text-transform:uppercase;padding-right:.16em;opacity:0}
+#end-t{position:absolute;left:110px;top:380px;opacity:0}
+#end-t .ttl{font-size:118px}
+#end-s{position:absolute;left:110px;top:740px;font:500 52px 'Inter',sans-serif;color:#e5e7eb;opacity:0}
+#end-u{position:absolute;left:110px;top:850px;font:700 30px 'JetBrains Mono',monospace;letter-spacing:6px;text-transform:uppercase;color:var(--soft);opacity:0}
+.col{position:absolute;left:110px;width:960px}
+
+#ly-dash{opacity:0}
+</style></head><body>
+<div id="root" data-composition-id="main" data-start="0" data-duration="101.2" data-width="1920" data-height="1080">
+<div id="bg"></div><img id="wm" src="assets/img/bettercricket-logo.png" alt="">
+<div id="bug"><img src="assets/img/bettercricket-logo.png" alt=""><span>BetterCricket</span></div>
+<div id="prog"><i></i></div>
+
+<!-- whiteboard window, persistent. #wbi is the camera: it zooms and pans inside the fixed window -->
+<div id="wb">
+  <div id="wbi">
+    <img class="s" id="w0" src="assets/wb/W0.jpg" alt=""><img class="s" id="w1" src="assets/wb/W1.jpg" alt=""><img class="s" id="w7" src="assets/wb/W7.jpg" alt="">
+    <video id="vA" class="clip" muted playsinline data-start="29.0" data-duration="5.4" data-track-index="3" src="assets/clips/vA.mp4"></video>
+    <video id="vB" class="clip" muted playsinline data-start="63.6" data-duration="20.37" data-track-index="3" src="assets/clips/vB.mp4"></video>
+    <img class="s" id="wend" src="assets/wb/Wend.jpg" alt="">
+    <div class="wr" id="r-jack" style="left:30.4px;top:524.9px;width:292.4px;height:64.4px"></div><div class="wr" id="r-hide" style="left:30.9px;top:320.1px;width:130.8px;height:35.2px"></div><div class="wr" id="r-tab2" style="left:143.1px;top:197.8px;width:119.5px;height:41.9px"></div><div class="wr" id="r-legend" style="left:20.0px;top:148.0px;width:640.0px;height:50.0px"></div><div class="wr" id="r-f1" style="left:492.6px;top:416.5px;width:58.3px;height:29.8px"></div><div class="wr" id="r-f2" style="left:494.9px;top:559.3px;width:58.3px;height:29.8px"></div><div class="wr" id="r-f3" style="left:499.6px;top:702.1px;width:39.3px;height:29.8px"></div><div class="wr" id="r-p1" style="left:171.5px;top:410.9px;width:58.3px;height:29.8px"></div><div class="wr" id="r-p2" style="left:161.0px;top:471.8px;width:58.3px;height:29.8px"></div><div class="wr" id="r-p3" style="left:167.9px;top:593.4px;width:39.3px;height:29.8px"></div><div class="wr" id="r-col1" style="left:333.8px;top:244.1px;width:246.2px;height:649.1px"></div><div class="wr" id="r-cnt1" style="left:504.3px;top:253.3px;width:64.5px;height:32.8px"></div><div class="wr" id="r-col2" style="left:583.1px;top:244.1px;width:246.2px;height:649.1px"></div><div class="wr" id="r-cnt2" style="left:753.6px;top:253.3px;width:64.5px;height:32.8px"></div><div class="wr" id="r-col3" style="left:832.4px;top:244.1px;width:246.2px;height:649.1px"></div><div class="wr" id="r-cnt3" style="left:1010.3px;top:253.3px;width:57.1px;height:32.8px"></div><div class="wr" id="r-col4" style="left:1081.8px;top:244.1px;width:246.2px;height:649.1px"></div><div class="wr" id="r-cnt4" style="left:1259.6px;top:253.3px;width:57.1px;height:32.8px"></div><div class="wr" id="r-col5" style="left:1331.1px;top:244.1px;width:246.2px;height:649.1px"></div><div class="wr" id="r-cnt5" style="left:1509.0px;top:253.3px;width:57.1px;height:32.8px"></div>
+  </div>
+  <div id="toast"><i>&#10003;</i><span>Jack Barendse: Available</span></div>
+  <div class="cap" id="cap-colours"><span>Colours update the moment they answer</span></div>
+  <div class="cap" id="cap-hide"><span>Hide anyone who is out, in one click</span></div>
+  <div class="cap" id="cap-gaps"><span>Spot the gaps at a glance</span></div>
+  <div class="cap" id="cap-legend"><span>Free one weekend, away the other</span></div>
+  <div class="cap" id="cap-w1"><span>W1 ONLY: free week 1, away week 2</span></div>
+  <div class="cap" id="cap-w2q"><span>W2 ?: a maybe for week 2</span></div>
+  <div class="cap" id="cap-w2"><span>W2 ONLY: away now, free next weekend</span></div>
+  <div class="cap" id="cap-both"><span>Two-day games show on both weekends</span></div>
+  <div class="cap" id="cap-draft"><span>Saved as a draft as you go</span></div>
+  <div class="cap" id="cap-both2"><span>Both sides change at once</span></div>
+  <div class="cap" id="cap-cf"><span>Every team confirmed in one click</span></div>
+</div>
+
+<!-- S0 intro -->
+<div id="s0" class="clip scene" data-start="0.0" data-duration="6.0" data-track-index="1">
+  <div class="col" style="top:170px">
+    <div id="i-kick" class="kick" style="opacity:0">Introducing</div>
+    <div id="i-brand" style="display:flex;align-items:center;gap:30px;margin-top:34px;opacity:0"><img src="assets/img/bettercricket-logo.png" style="width:130px;height:110px;object-fit:contain" alt=""><span style="font:800 italic 84px/1 'AC',sans-serif;text-transform:uppercase;padding-right:.16em">BetterCricket</span></div>
+    <div id="i-title" style="margin-top:34px"><div class="ttl i-a" style="font-size:136px;opacity:0">Selection</div><div class="ttl i-b" style="font-size:136px;color:var(--hot);opacity:0">Whiteboard</div></div>
+    <div id="i-sub" class="sub" style="margin-top:56px;opacity:0">Every team. One screen. Selection meetings sorted.</div>
+  </div>
+</div>
+
+<!-- S1 availability through the link -->
+<div id="s1" class="clip scene" data-start="6.0" data-duration="15.0" data-track-index="1">
+  <div class="col" style="top:150px">
+    <div id="a-kick" class="kick" style="opacity:0">Availability</div>
+    <div id="a-ttl" class="ttl" style="margin-top:22px;opacity:0">Send one link.<br><em>Players answer.</em></div>
+    <div id="pt1" class="pt"><i>1</i><span>Share the link in your club chat</span></div>
+    <div id="pt2" class="pt"><i>2</i><span>Players pick their name and PIN</span></div>
+    <div id="pt3" class="pt"><i>3</i><span>One tap: Available, Maybe or Out<small>The same answers sit on their Player Dashboard</small></span></div>
+  </div>
+</div>
+
+<!-- S2 availability lands on the board -->
+<div id="s2" class="clip scene" data-start="21.0" data-duration="14.0" data-track-index="1">
+  <div class="strip"><div class="kick">Availability, live</div><div class="ttl">Answers land on the whiteboard.</div></div>
+</div>
+
+<!-- S3 teams side by side -->
+<div id="s3" class="clip scene" data-start="35.0" data-duration="11.0" data-track-index="1">
+  <div class="strip"><div class="kick">Selection Whiteboard</div><div class="ttl">Every team, side by side.</div></div>
+</div>
+
+<!-- S4 W1 and W2 -->
+<div id="s4" class="clip scene" data-start="46.0" data-duration="17.0" data-track-index="1">
+  <div class="strip"><div class="kick">Two-day games</div><div class="ttl">W1 and W2, at a glance.</div></div>
+</div>
+
+<!-- S5 drag and drop -->
+<div id="s5" class="clip scene" data-start="63.0" data-duration="16.9" data-track-index="1">
+  <div class="strip"><div class="kick">Drag and drop</div>
+    <div class="ttl" id="dt1">Pool to team in one move.</div>
+    <div class="ttl alt" id="dt2" style="opacity:0">Between teams, both change.</div>
+    <div class="ttl alt" id="dt3" style="opacity:0">Fill a side in seconds.</div></div>
+</div>
+
+<!-- S6 confirm -->
+<div id="s6" class="clip scene" data-start="79.9" data-duration="7.6" data-track-index="1">
+  <div class="strip"><div class="kick">Confirm</div><div class="ttl">One click locks every team.</div></div>
+</div>
+
+<!-- S7 benefits -->
+<div id="s7" class="clip scene" data-start="87.5" data-duration="8.5" data-track-index="1">
+  <div class="col" style="top:180px;width:900px">
+    <div id="b-kick" class="kick" style="opacity:0">Selection meetings, streamlined</div>
+    <div id="b-ttl" class="ttl" style="margin-top:22px;opacity:0">Less chasing.<br><em>Shorter meetings.</em></div>
+    <div id="bn1" class="ben"><i>&#10003;</i><span>Every team on one screen</span></div>
+    <div id="bn2" class="ben"><i>&#10003;</i><span>Availability, always current</span></div>
+    <div id="bn3" class="ben"><i>&#10003;</i><span>Drag, drop, confirm</span></div>
+  </div>
+</div>
+
+<!-- S8 end -->
+<div id="s8" class="clip scene" data-start="96.0" data-duration="5.2" data-track-index="1">
+  <img id="end-logo" src="assets/img/bettercricket-logo.png" alt=""><div id="end-w">BetterCricket</div>
+  <div id="end-t"><div class="ttl">Selection<br><em>Whiteboard</em></div></div>
+  <div id="end-s">Every team. One screen.</div>
+  <div id="end-u">betterat.cricket</div>
+</div>
+
+<!-- phone for the availability link -->
+<div id="phone" class="clip" data-start="0" data-duration="101.2" data-track-index="2">
+  <div id="ph-body"><div id="ph-screen">
+    <div id="ly-chat" class="ly chat" style="opacity:0"><div class="ch-h"><div class="av">5X</div><div><b>Applecross 5th XI</b><span>Tom, Sam, Liam, Max, you</span></div></div>
+      <div class="ch-body">
+        <div class="msg me link" id="c1"><div style="padding:4px 8px 8px;font:500 16px 'Inter',sans-serif">Availability for Sat 31 Oct. Tap the link, pick your name:</div><div class="lk" id="c1lk"><img src="assets/img/applecross-logo.png" alt=""><div>Applecross Availability<span>betterat.cricket</span></div></div></div>
+        <div class="msg" id="c2"><b style="color:#f59e0b">Tom</b>Done, in</div>
+        <div class="msg" id="c3"><b style="color:#38bdf8">Sam</b>Can't make it this week</div>
+        <div class="msg" id="c4"><b style="color:#a78bfa">Liam</b>Sorted, thanks</div>
+      </div></div>
+    <div id="ly-pick" class="ly">
+      <img class="full" id="pk0" src="assets/screens/pick0.webp" alt=""><img class="full" id="pkJ" src="assets/screens/pickJ.webp" alt=""><img class="full" id="pkJack" src="assets/screens/pickJack.webp" alt="">
+      <img class="full" id="pn0" src="assets/screens/pin0.webp" alt=""><img class="full" id="pn1" src="assets/screens/pin1.webp" alt=""><img class="full" id="pn2" src="assets/screens/pin2.webp" alt=""><img class="full" id="pn3" src="assets/screens/pin3.webp" alt=""><img class="full" id="pn4" src="assets/screens/pin4.webp" alt="">
+    </div>
+    <div id="ly-dash" class="ly"><div id="dash-scroll"><div class="hl" id="hl-date" style="left:31.5px;top:386.9px;width:346.9px;height:203.9px"></div><img id="long0" src="assets/screens/long0.webp" alt=""><img id="long1" src="assets/screens/long1.webp" alt="" style="opacity:0"></div></div>
+    <div id="ph-status"><span class="tm">6:42</span><div class="ic"><i style="width:4px;height:8px"></i><i style="width:4px;height:11px"></i><i style="width:4px;height:14px"></i><i style="width:26px;height:13px;border-radius:4px;margin-left:6px"></i></div></div>
+    <div id="ph-cam"></div>
+    <div id="tap"></div>
+  </div></div>
+</div>
+<audio id="music" data-timeline-role="music" data-start="0" data-duration="101.2" data-media-start="3" data-track-index="2" data-volume="0.55" data-fade-out="3" src="assets/music/bed.mp3"></audio>
+<audio id="sfx0" data-start="1.2" data-duration="0.12" data-track-index="4" data-volume="0.45" src="assets/sfx/interface/bong_001.ogg"></audio>
+<audio id="sfx1" data-start="2.5" data-duration="0.18" data-track-index="4" data-volume="0.5" src="assets/sfx/impact/impactSoft_medium_001.ogg"></audio>
+<audio id="sfx2" data-start="6.3" data-duration="0.6" data-track-index="4" data-volume="0.3" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx3" data-start="7.7" data-duration="0.06" data-track-index="4" data-volume="0.4" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx4" data-start="11.6" data-duration="0.01" data-track-index="4" data-volume="0.6" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx5" data-start="14.2" data-duration="0.01" data-track-index="4" data-volume="0.6" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx6" data-start="17.1" data-duration="0.01" data-track-index="4" data-volume="0.6" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx7" data-start="19.1" data-duration="0.01" data-track-index="4" data-volume="0.6" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx8" data-start="19.3" data-duration="0.12" data-track-index="4" data-volume="0.4" src="assets/sfx/interface/bong_001.ogg"></audio>
+<audio id="sfx9" data-start="21.3" data-duration="0.6" data-track-index="4" data-volume="0.3" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx10" data-start="24.2" data-duration="0.12" data-track-index="4" data-volume="0.5" src="assets/sfx/interface/bong_001.ogg"></audio>
+<audio id="sfx11" data-start="25.6" data-duration="0.06" data-track-index="4" data-volume="0.4" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx12" data-start="31.2" data-duration="0.01" data-track-index="4" data-volume="0.6" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx13" data-start="33.4" data-duration="0.01" data-track-index="4" data-volume="0.5" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx14" data-start="35.3" data-duration="0.6" data-track-index="4" data-volume="0.3" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx15" data-start="35.9" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx16" data-start="36.45" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx17" data-start="37.0" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx18" data-start="37.55" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx19" data-start="38.1" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx20" data-start="46.3" data-duration="0.6" data-track-index="4" data-volume="0.3" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx21" data-start="51.8" data-duration="0.06" data-track-index="4" data-volume="0.4" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx22" data-start="54.6" data-duration="0.06" data-track-index="4" data-volume="0.4" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx23" data-start="56.9" data-duration="0.06" data-track-index="4" data-volume="0.4" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx24" data-start="60.0" data-duration="0.58" data-track-index="4" data-volume="0.35" src="assets/sfx/casino/card-slide-2.ogg"></audio>
+<audio id="sfx25" data-start="63.3" data-duration="0.6" data-track-index="4" data-volume="0.3" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx26" data-start="66.2" data-duration="0.69" data-track-index="4" data-volume="0.45" src="assets/sfx/casino/card-place-1.ogg"></audio>
+<audio id="sfx27" data-start="70.9" data-duration="0.69" data-track-index="4" data-volume="0.45" src="assets/sfx/casino/card-place-1.ogg"></audio>
+<audio id="sfx28" data-start="75.3" data-duration="0.69" data-track-index="4" data-volume="0.45" src="assets/sfx/casino/card-place-1.ogg"></audio>
+<audio id="sfx29" data-start="78.2" data-duration="0.69" data-track-index="4" data-volume="0.45" src="assets/sfx/casino/card-place-1.ogg"></audio>
+<audio id="sfx30" data-start="80.2" data-duration="0.6" data-track-index="4" data-volume="0.3" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx31" data-start="81.47" data-duration="0.01" data-track-index="4" data-volume="0.7" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx32" data-start="81.6" data-duration="0.57" data-track-index="4" data-volume="0.5" src="assets/sfx/impact/impactSoft_heavy_001.ogg"></audio>
+<audio id="sfx33" data-start="81.9" data-duration="0.12" data-track-index="5" data-volume="0.4" src="assets/sfx/interface/bong_001.ogg"></audio>
+<audio id="sfx34" data-start="87.8" data-duration="0.6" data-track-index="4" data-volume="0.3" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx35" data-start="87.9" data-duration="0.72" data-track-index="5" data-volume="0.4" src="assets/sfx/casino/card-fan-1.ogg"></audio>
+<audio id="sfx36" data-start="90.1" data-duration="0.06" data-track-index="4" data-volume="0.4" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx37" data-start="91.3" data-duration="0.06" data-track-index="4" data-volume="0.4" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx38" data-start="92.5" data-duration="0.06" data-track-index="4" data-volume="0.4" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx39" data-start="96.3" data-duration="0.6" data-track-index="4" data-volume="0.3" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx40" data-start="97.0" data-duration="1.48" data-track-index="4" data-volume="0.6" src="assets/sfx/impact/impactBell_heavy_000.ogg"></audio>
+
+
+</div>
+<script>const raw = gsap.timeline({ paused: true });
+const S = {"s0": 0.0, "s1": 6.0, "s2": 21.0, "s3": 35.0, "s4": 46.0, "s5": 63.0, "s6": 79.9, "s7": 87.5, "s8": 96.0}, TOTAL = 101.2, V = {"vA": 29.0, "vB": 63.6}, FL = {};
+const k = 410 / 390;
+const F = (s, a, b, t) => raw.fromTo(s, a, { ...b, immediateRender: false }, t);
+const TO = (s, v, t) => raw.to(s, v, t);
+const INIT = (s, v) => raw.set(s, v, 0);
+const show = (s, t, d = 0.5) => F(s, { opacity: 0 }, { opacity: 1, duration: d, ease: 'sine.out' }, t);
+const hide = (s, t, d = 0.45) => F(s, { opacity: 1 }, { opacity: 0, duration: d, ease: 'sine.in' }, t);
+const rise = (s, t, d = 0.8, y = 36) => F(s, { opacity: 0, y }, { opacity: 1, y: 0, duration: d, ease: 'power3.out' }, t);
+const slideIn = (s, t) => F(s, { opacity: 0, x: -60 }, { opacity: 1, x: 0, duration: 0.8, ease: 'power3.out' }, t);
+const pop = (id, t) => F(id, { opacity: 0, y: 22, scale: 0.94 }, { opacity: 1, y: 0, scale: 1, duration: 0.5, ease: 'power3.out' }, t);
+const tap = (t, x, y) => { raw.set('#tap', { x, y, immediateRender: false }, t); F('#tap', { opacity: 0.9, scale: 0.3 }, { opacity: 0, scale: 1.5, duration: 0.7, ease: 'power2.out' }, t); };
+const ring = (id, t, dur) => { F('#' + id, { opacity: 0, scale: 0.98 }, { opacity: 1, scale: 1, duration: 0.45, ease: 'power2.out' }, t); F('#' + id, { opacity: 1 }, { opacity: 0, duration: 0.45 }, t + dur); };
+const cap = (id, t, dur) => { F('#' + id, { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.5, ease: 'power3.out' }, t); F('#' + id, { opacity: 1 }, { opacity: 0, duration: 0.4 }, t + dur); };
+const sceneIn = (id, st) => show(id, st + 0.25, 0.7);
+const sceneOut = (id, en) => hide(id, en - 0.9, 0.7);
+// camera: zoom and pan inside the whiteboard window. (fx, fy) is the point of the 1600x900 screen to centre on.
+let cx = 0, cy = 0, cs = 1;
+const cam = (t, fx, fy, s, d = 1.3, ease = 'power2.inOut') => {
+  const x = Math.min(0, Math.max(1600 * (1 - s), 800 - fx * s)), y = Math.min(0, Math.max(900 * (1 - s), 450 - fy * s));
+  F('#wbi', { x: cx, y: cy, scale: cs }, { x, y, scale: s, duration: d, ease }, t); cx = x; cy = y; cs = s;
+};
+
+// brand furniture
+F('#prog i', { scaleX: 0 }, { scaleX: 1, duration: TOTAL, ease: 'none' }, 0);
+show('#bug', S.s1 + 0.6, 0.7); hide('#bug', S.s8 - 0.6, 0.6);
+INIT('#phone', { transformPerspective: 1700, x: 1250, y: 1250, rotationY: -24, rotationX: 8, opacity: 1 });
+INIT('#w0', { opacity: 1 }); INIT('#dash-scroll', { y: -250 * k });
+
+// ---- S0 intro
+let t0 = S.s0;
+sceneOut('#s0', S.s1);
+rise('#i-kick', t0 + 0.6, 0.8, -18);
+F('#i-brand', { opacity: 0, x: -50 }, { opacity: 1, x: 0, duration: 0.9, ease: 'power3.out' }, t0 + 1.2);
+F('.i-a', { opacity: 0, y: 70 }, { opacity: 1, y: 0, duration: 0.9, ease: 'power3.out' }, t0 + 2.0);
+F('.i-b', { opacity: 0, y: 70 }, { opacity: 1, y: 0, duration: 0.9, ease: 'power3.out' }, t0 + 2.5);
+rise('#i-sub', t0 + 3.6, 0.8, 24);
+// the board sits on the right behind the title
+INIT('#wb', { x: 910, y: 140, scale: 0.5, opacity: 0 });
+F('#wb', { opacity: 0, y: 220 }, { opacity: 1, y: 140, duration: 1.4, ease: 'power3.out' }, t0 + 0.6);
+hide('#wb', S.s1 - 0.4, 0.4);
+
+// ---- S1 availability through the link
+t0 = S.s1;
+sceneIn('#s1', t0); sceneOut('#s1', S.s2);
+F('#phone', { y: 1250, rotationY: -24, rotationX: 8 }, { y: 82, rotationY: 0, rotationX: 0, duration: 1.8, ease: 'power3.out' }, t0 + 0.3);
+show('#ly-chat', t0 + 0.4, 0.6);
+rise('#a-kick', t0 + 0.9, 0.7, -16); rise('#a-ttl', t0 + 1.2, 0.9, 36);
+pop('#c1', t0 + 1.6); pop('#c2', t0 + 3.0); pop('#c3', t0 + 3.7); pop('#c4', t0 + 4.4);
+rise('#pt1', t0 + 2.4, 0.8, 26);
+tap(t0 + 5.6, 250, 214);
+hide('#ly-chat', t0 + 5.9, 0.4); show('#ly-pick', t0 + 5.9, 0.4); F('#pk0', { opacity: 0 }, { opacity: 1, duration: 0.01 }, t0 + 5.9);
+rise('#pt2', t0 + 6.4, 0.8, 26);
+show('#pkJ', t0 + 6.9, 0.3); show('#pkJack', t0 + 7.6, 0.3);
+tap(t0 + 8.2, 205, 363); show('#pn0', t0 + 8.6, 0.4);
+[9.4, 9.8, 10.2, 10.6].forEach((r, i) => show('#pn' + (i + 1), t0 + r, 0.15));
+tap(t0 + 11.1, 205, 570);
+show('#ly-dash', t0 + 11.6, 0.6); hide('#ly-pick', t0 + 12.2, 0.2);
+rise('#pt3', t0 + 12.0, 0.8, 26);
+tap(t0 + 13.1, 94 * k, (472 - 250) * k); F('#long1', { opacity: 0 }, { opacity: 1, duration: 0.3 }, t0 + 13.2);
+ring('hl-date', t0 + 13.4, 1.0);
+
+// ---- S2 answers land on the whiteboard
+t0 = S.s2;
+sceneIn('#s2', t0); sceneOut('#s2', S.s3);
+F('#phone', { y: 82, rotationY: 0 }, { y: 1250, rotationY: -16, duration: 0.9, ease: 'power2.in' }, t0 + 0.1);
+F('#wb', { opacity: 0, x: 0, scale: 1, y: 60 }, { opacity: 1, x: 0, scale: 1, y: 0, duration: 1.0, ease: 'power3.out' }, t0 + 0.7);
+F('#toast', { opacity: 0, x: 60 }, { opacity: 1, x: 0, duration: 0.5, ease: 'power3.out' }, t0 + 3.2); hide('#toast', t0 + 6.0, 0.4);
+show('#w1', t0 + 4.0, 0.5);
+cam(t0 + 4.6, 180, 470, 1.7, 1.4);
+ring('r-jack', t0 + 5.9, 2.4); cap('cap-colours', t0 + 6.1, 2.4);
+cam(t0 + 8.4, 190, 440, 1.7, 1.0);
+ring('r-hide', t0 + 9.5, 2.7); cap('cap-hide', t0 + 9.7, 2.5);
+cam(t0 + 12.3, 800, 450, 1, 1.3);
+
+// ---- S3 teams side by side
+t0 = S.s3;
+sceneIn('#s3', t0); sceneOut('#s3', S.s4);
+[1, 2, 3, 4, 5].forEach((i) => ring('r-col' + i, t0 + 0.9 + 0.55 * (i - 1), 0.8));
+cam(t0 + 3.6, 457, 350, 1.9, 1.3);
+cam(t0 + 5.2, 1130, 350, 1.9, 3.2, 'sine.inOut');
+[1, 2, 3, 4, 5].forEach((i) => ring('r-cnt' + i, t0 + 6.0, 2.4)); cap('cap-gaps', t0 + 6.2, 2.2);
+cam(t0 + 8.6, 800, 450, 1, 1.3);
+
+// ---- S4 W1 and W2
+t0 = S.s4;
+sceneIn('#s4', t0); sceneOut('#s4', S.s5);
+cam(t0 + 0.9, 480, 150, 1.9, 1.3);
+ring('r-legend', t0 + 2.2, 2.3); cap('cap-legend', t0 + 2.4, 2.1);
+cam(t0 + 4.6, 520, 575, 1.8, 1.4);
+ring('r-f1', t0 + 5.8, 2.6); cap('cap-w1', t0 + 6.0, 2.4);
+ring('r-f3', t0 + 8.6, 2.0); cap('cap-w2q', t0 + 8.8, 1.8);
+ring('r-p1', t0 + 10.9, 2.6); ring('r-p2', t0 + 10.9, 2.6); cap('cap-w2', t0 + 11.1, 2.4);
+cam(t0 + 13.6, 800, 450, 1, 1.3);
+F('#w7', { opacity: 0 }, { opacity: 1, duration: 0.5 }, t0 + 14.0); ring('r-tab2', t0 + 14.3, 1.8); cap('cap-both', t0 + 14.5, 1.7);
+hide('#w7', t0 + 16.3, 0.4);
+
+// ---- S5 drag and drop (the clip is the real board)
+t0 = S.s5; const vb = V.vB;
+sceneIn('#s5', t0); sceneOut('#s5', S.s6);
+F('#dt1', { opacity: 0, x: -60 }, { opacity: 1, x: 0, duration: 0.8, ease: 'power3.out' }, t0 + 0.9);
+hide('#dt1', vb + 4.0, 0.5); slideIn('#dt2', vb + 4.9); hide('#dt2', vb + 9.0, 0.5); slideIn('#dt3', vb + 9.8);
+cam(vb + 0.1, 570, 480, 1.4, 1.2);
+cap('cap-draft', vb + 3.0, 2.2);
+cam(vb + 4.3, 580, 500, 1.9, 1.2);
+cap('cap-both2', vb + 7.4, 2.0);
+cam(vb + 9.1, 570, 480, 1.4, 1.2);
+cam(vb + 12.2, 700, 480, 1.2, 1.0);
+cam(vb + 15.6, 1330, 220, 1.9, 1.4);
+
+// ---- S6 confirm
+t0 = S.s6;
+sceneIn('#s6', t0); sceneOut('#s6', S.s7);
+show('#wend', vb + 20.3, 0.05);
+cap('cap-cf', vb + 18.2, 3.0);
+
+// ---- S7 benefits, board shrinks to the right
+t0 = S.s7;
+sceneIn('#s7', t0); sceneOut('#s7', S.s8);
+cam(t0 + 0.1, 800, 450, 1, 0.9);
+F('#wb', { x: 0, y: 0, scale: 1 }, { x: 910, y: 140, scale: 0.5, duration: 1.4, ease: 'power3.inOut' }, t0 + 0.3);
+rise('#b-kick', t0 + 0.9, 0.7, -16); rise('#b-ttl', t0 + 1.2, 0.9, 36);
+rise('#bn1', t0 + 2.6, 0.8, 26); rise('#bn2', t0 + 3.8, 0.8, 26); rise('#bn3', t0 + 5.0, 0.8, 26);
+
+// ---- S8 end
+t0 = S.s8;
+sceneIn('#s8', t0);
+F('#end-logo', { opacity: 0, scale: 0.7 }, { opacity: 1, scale: 1, duration: 0.8, ease: 'power3.out' }, t0 + 0.5);
+F('#end-w', { opacity: 0, x: -30 }, { opacity: 1, x: 0, duration: 0.8, ease: 'power3.out' }, t0 + 0.8);
+F('#end-t', { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: 0.9, ease: 'power3.out' }, t0 + 1.2);
+rise('#end-s', t0 + 2.0, 0.8, 24); rise('#end-u', t0 + 2.5, 0.7, 18);
+window.__timelines = window.__timelines || {};
+window.__timelines['main'] = raw;
+raw.seek(0);
+</script></body></html>
