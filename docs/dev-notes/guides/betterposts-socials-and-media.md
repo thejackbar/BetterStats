@@ -154,7 +154,7 @@
 83. `winner: 'TIE'` is the one no-winner bucket; `result.noWinner` (see `social/resultOutcome.js`) says which, and a layout prints `result.noWinnerLine` (C4) or `r.resultLabel` and `r.resultWord` (RS). Never print "MATCH TIED" for a no-winner game without reading them.
 84. `BrandLockup` prints `team.fullName` first. A club-name option must set `fullName` as well as `name`. Roundup rows carry `oppClub` (the owning club's name); use it before stripping a grade off the team name.
 85. A scorecard's panel height is measured (`useBoxHeight` on the heading, `offsetHeight`), never a fixed 800 or 880: the heading grows when the result line wraps. The sponsor bar and its margin are `SC_CLEAR` (84).
-86. `organisations.logo_data` is written only by a club upload (and the demo clone). A wrong opponent crest is stored data: run `python -m app.scripts.audit_org_logos`. The editor takes our crest only for an id match that has `logo_url`, and keeps the Cricket Australia URL as `logoAlt`.
+86. `organisations.logo_data` is written only by a club upload (and the demo clone). A wrong opponent crest is stored data: run `python -m app.scripts.audit_org_logos`, or compare `md5(logo_data)` across clubs in psql. The editor takes our crest only for an id match that has `logo_url` and is not archived, and keeps the Cricket Australia URL as `logoAlt`. An ARCHIVED club's stored crest is never used on a post (`_org_logo_by_ca_id`, the scorecard `_org_for_team` result, `resolveClubLogo`); archiving does not clear it.
 87. `_org_for_team` matches on distinctive words only (`_GENERIC_CLUB_WORDS` and the grade words are dropped); one shared word such as "Cricket" is never a match.
 
 ## Traps and failure signatures

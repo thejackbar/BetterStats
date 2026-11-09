@@ -3149,7 +3149,8 @@ export default function AdminSocialPost() {
         const same = bsOrgs.filter(o => (o.name || '').trim().toLowerCase() === org.name.trim().toLowerCase())
         if (same.length === 1) matched = same[0]
       }
-      if (matched?.logo_url) logoUrl = matched.logo_url
+      // An archived club's stored crest is an old upload, so Cricket Australia's own is used.
+      if (matched?.logo_url && !matched.archived_at) logoUrl = matched.logo_url
     } catch { /* fall back to CA logo */ }
     return logoUrl
   }, [])

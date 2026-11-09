@@ -2620,6 +2620,10 @@ async def _get_social_scorecard_inner(match_id: str, db: AsyncSession, club=None
         else:
             away_org = None
     for side, org in ((home, home_org), (away, away_org)):
+        # An archived club's stored crest and colour are an old upload: take Cricket
+        # Australia's own instead (our own club is never treated this way).
+        if org is not None and org is not club and getattr(org, "archived_at", None) is not None:
+            org = None
         if org is not None:
             side["color"] = _org_colour(org) or side["color"]
             # A crest the club uploaded to us beats whatever Grassroots has:

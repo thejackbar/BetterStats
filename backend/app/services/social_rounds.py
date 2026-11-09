@@ -293,7 +293,7 @@ async def _org_logo_by_ca_id(db: AsyncSession, ca_ids: list[str]) -> dict[str, s
         return {}
     rows = await db.execute(text("""
         SELECT id, logo_url, (logo_data IS NOT NULL) AS has_data
-        FROM organisations WHERE LOWER(id::text) = ANY(:ids)
+        FROM organisations WHERE LOWER(id::text) = ANY(:ids) AND archived_at IS NULL
     """), {"ids": ids})
     out: dict[str, str] = {}
     for r in rows.mappings().all():

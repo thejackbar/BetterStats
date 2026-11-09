@@ -14,6 +14,6 @@ export default {
     'Scorecards: both pages now open with the two clubs and their crests. How out reads "c C Cecchi b A Ricci" as it does on PlayCricket. The team panel is measured against the sponsor bar, so long cards no longer run under it.',
     'Scorecards: the match heading box and the team panels have their own colours. Opposition colours can be read from their crest (or picked), and their square can take those colours.',
     'Results Win/Loss Split: a long opponent name no longer pushes the LOST column off the edge of the post.',
-    'Club crests: the dropdown now uses a club\'s own crest only when it has one on file, and offers "use official crest" to swap in the Cricket Australia one. An imported result no longer keeps the last opponent\'s crest, and opponents are no longer matched to your club on a shared word like "Cricket".',
+    'Club crests: the dropdown now uses a club\'s own crest only when it has one on file, and offers "use official crest" to swap in the Cricket Australia one. An imported result no longer keeps the last opponent\'s crest, opponents are no longer matched to your club on a shared word like "Cricket", and an archived club's old crest is no longer used on posts.',
   ],
 }
