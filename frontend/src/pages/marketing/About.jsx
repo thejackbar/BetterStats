@@ -111,7 +111,7 @@ function Promise_() {
             <div className="surface p-8 lg:p-10 h-full border-accent/30 bg-gradient-to-b from-accent/[0.05] to-transparent">
               <div className="flex items-center gap-3 mb-5">
                 <div className="icon-tile">★</div>
-                <p className="text-sm font-mono uppercase tracking-wide3 text-accent">Player-first</p>
+                <p className="text-sm uppercase tracking-wide3 text-accent">Player-first</p>
               </div>
               <h2 className="text-3xl lg:text-4xl font-bold leading-tight mb-4 tracking-tight">
                 We welcome <span className="gradient-text">feedback and feature requests.</span>
@@ -130,7 +130,7 @@ function Promise_() {
             <div className="surface p-8 h-full">
               <div className="flex items-center gap-3 mb-5">
                 <div className="icon-tile">🇦🇺</div>
-                <p className="text-sm font-mono uppercase tracking-wide3 text-pb-faint">Australia, for now</p>
+                <p className="text-sm uppercase tracking-wide3 text-pb-faint">Australia, for now</p>
               </div>
               <h3 className="text-xl font-bold mb-3 tracking-tight">
                 Built for Australian clubs.

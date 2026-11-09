@@ -193,7 +193,7 @@ export const COMPARISONS = {
         ],
       },
     ],
-    cta: { line: "It is included in every plan. Get your club's history online in under an hour.", label: 'Get Your Club on BetterCricket today!', to: '/contact' },
+    cta: { line: "It is included in every plan. Get your club's history online in under an hour.", label: 'Get your club on BetterCricket', to: '/contact' },
   },
 
   // BetterSocials — vs design + website tools.

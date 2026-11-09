@@ -41,7 +41,7 @@ export default function VideoThumb({ poster, title, className = '' }) {
       </span>
 
       {!showImage && (
-        <span className="absolute inset-x-0 bottom-0 px-3 py-2 font-mono text-[9px] uppercase tracking-wide3 text-pb-faint">
+        <span className="absolute inset-x-0 bottom-0 px-3 py-2 text-[10px] uppercase tracking-wide3 text-pb-faint">
           {title}
         </span>
       )}

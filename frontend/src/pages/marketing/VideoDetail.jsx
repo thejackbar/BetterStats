@@ -36,7 +36,7 @@ function Player({ video }) {
         style={{ aspectRatio: '16 / 9' }}
       >
         <div>
-          <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-2">Not playing</p>
+          <p className="text-xs tracking-wide3 text-pb-faint uppercase mb-2">Not playing</p>
           <p className="text-pb-dim text-sm max-w-sm leading-relaxed">
             This walkthrough is not available on the server right now. Please check back shortly.
           </p>
@@ -141,7 +141,7 @@ export default function VideoDetail() {
 
       <div id="main-content" tabIndex="-1" className="max-w-3xl mx-auto px-4 py-16 pt-28">
         {/* Breadcrumb */}
-        <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-8">
+        <p className="text-xs tracking-wide3 text-pb-faint mb-8">
           <Link to="/videos" className="hover:text-pb-text transition-colors">VIDEOS</Link>
           <span className="mx-2">›</span>
           <span className="text-pb-faint">{(video.module_label || 'WALKTHROUGH').toUpperCase()}</span>
@@ -150,9 +150,9 @@ export default function VideoDetail() {
         {/* Header */}
         <div className="mb-6">
           <div className="flex items-center gap-4 mb-4">
-            <p className="font-mono text-[10px] tracking-wide3 text-pb-faint">{formatDate(video.date)}</p>
+            <p className="text-xs tracking-wide3 text-pb-faint">{formatDate(video.date)}</p>
             {video.module_label && (
-              <p className="font-mono text-[10px] tracking-wide3 text-pb-faint">{video.module_label}</p>
+              <p className="text-xs tracking-wide3 text-pb-faint">{video.module_label}</p>
             )}
           </div>
           <div className="flex items-baseline gap-4">
@@ -160,7 +160,7 @@ export default function VideoDetail() {
               {video.title}
             </h1>
             {video.duration && (
-              <span className="ml-auto shrink-0 font-mono text-sm text-pb-faint tabular-nums">
+              <span className="ml-auto shrink-0 text-sm text-pb-faint tabular-nums">
                 {video.duration}
               </span>
             )}
@@ -180,7 +180,7 @@ export default function VideoDetail() {
           <a
             href={`${video.src}?download=1`}
             download
-            className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded font-mono text-[11px] tracking-wide3 font-semibold text-pb-bg"
+            className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded text-xs tracking-wide3 font-semibold text-pb-bg"
             style={{ background: 'var(--pb-accent)' }}
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -198,7 +198,7 @@ export default function VideoDetail() {
             <button
               type="button"
               onClick={() => setEditing(true)}
-              className="sm:ml-auto font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors"
+              className="sm:ml-auto text-xs tracking-wide2 text-pb-faint hover:text-pb-text transition-colors"
             >
               EDIT THIS VIDEO
             </button>
@@ -220,7 +220,7 @@ export default function VideoDetail() {
             walkthrough that ends by pitching BetterStats sends an interested
             visitor to the wrong page. */}
         <div className="mt-16 pb-hairline-t pt-10">
-          <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-3 uppercase">Want this for your club?</p>
+          <p className="text-xs tracking-wide3 text-pb-faint mb-3 uppercase">Want this for your club?</p>
           <h2 className="font-display font-bold text-2xl text-pb-text mb-4 tracking-tight">
             {cta.heading}
           </h2>
@@ -229,14 +229,14 @@ export default function VideoDetail() {
               type="button"
               onClick={triggerTrial}
               aria-label="Request access"
-              className="inline-block px-6 py-3 rounded font-mono text-[11px] tracking-wide3 font-semibold transition text-pb-bg"
+              className="inline-block px-6 py-3 rounded text-xs tracking-wide3 font-semibold transition text-pb-bg"
               style={{ background: 'var(--pb-accent)' }}
             >
               REQUEST ACCESS
             </button>
             <Link
               to={cta.to}
-              className="inline-block px-6 py-3 border pb-hairline rounded font-mono text-[11px] tracking-wide3 font-semibold text-pb-dim hover:text-pb-text transition-colors"
+              className="inline-block px-6 py-3 border pb-hairline rounded text-xs tracking-wide3 font-semibold text-pb-dim hover:text-pb-text transition-colors"
             >
               {cta.cta} →
             </Link>
@@ -246,7 +246,7 @@ export default function VideoDetail() {
         {/* More videos */}
         {others.length > 0 && (
           <div className="mt-12 pb-hairline-t pt-8">
-            <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-5 uppercase">More walkthroughs</p>
+            <p className="text-xs tracking-wide3 text-pb-faint mb-5 uppercase">More walkthroughs</p>
             <div className="grid gap-x-6 gap-y-8 sm:grid-cols-3">
               {others.map((v) => (
                 <Link key={v.slug} to={`/videos/${v.slug}`} className="group block">

@@ -59,7 +59,7 @@ function Hero({ onCta }) {
 
           <div className="flex flex-col sm:flex-row items-center sm:items-stretch gap-3 mb-4">
             <button type="button" onClick={onCta} className="cta-primary">
-              Get Your Club on BetterCricket today!
+              Get your club on BetterCricket
             </button>
             <a href="#showcase" className="cta-secondary">See it in action</a>
           </div>
@@ -349,7 +349,6 @@ function FinalCTA({ onCta }) {
         <div className="surface-strong p-10 lg:p-14 text-center relative overflow-hidden">
           <div className="absolute inset-0 dot-grid opacity-30 pointer-events-none" />
           <div className="relative">
-            <p className="pill mb-6 mx-auto"><span className="dot" />Limited onboarding spots</p>
             <h2 className="font-display font-bold text-4xl md:text-6xl mb-5 tracking-tight leading-[1.05]">
               Your club's history is <br className="hidden md:block" /><span className="gradient-text">waiting to be told.</span>
             </h2>

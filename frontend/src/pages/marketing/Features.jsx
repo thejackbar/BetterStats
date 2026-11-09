@@ -244,7 +244,7 @@ function FeatureBlock({ f, idx, onCta }) {
             <div className="col-span-1 lg:col-span-5 lg:[direction:ltr]">
               <div className="flex items-center gap-3 mb-5">
                 <div className="w-10 h-10 rounded-xl bg-accent/15 border border-accent/40 flex items-center justify-center text-accent font-bold">{f.n}</div>
-                <p className="text-sm font-mono uppercase tracking-wide3 text-accent">{f.eyebrow}</p>
+                <p className="text-sm uppercase tracking-wide3 text-accent">{f.eyebrow}</p>
               </div>
               <h2 className="text-3xl lg:text-5xl font-bold leading-tight mb-6 tracking-tight">{f.title}</h2>
               <p className="text-pb-dim text-lg mb-6 leading-relaxed">{f.desc}</p>
@@ -256,7 +256,7 @@ function FeatureBlock({ f, idx, onCta }) {
                   </li>
                 ))}
               </ul>
-              <button type="button" onClick={onCta} className="cta-primary !text-sm !py-2.5 !px-5">Get Your Club on BetterCricket today!</button>
+              <button type="button" onClick={onCta} className="cta-primary !text-sm !py-2.5 !px-5">Get your club on BetterCricket</button>
             </div>
             <div className="col-span-1 lg:col-span-7 lg:[direction:ltr]">
               <div className="relative product-shadow rounded-2xl">

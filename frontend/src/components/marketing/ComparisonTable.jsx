@@ -110,13 +110,13 @@ export default function ComparisonTable({
                 c.us ? (
                   <div key={c.key} className="text-center bg-accent/10 -m-2 p-2 rounded-lg border border-accent/30 relative">
                     <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-2 py-0.5 bg-accent text-navy-950 rounded-full text-[9px] font-bold uppercase tracking-wide3 whitespace-nowrap">★ Recommended</div>
-                    <p className="text-[10px] font-mono uppercase tracking-wide3 text-accent mb-1 mt-1">Us</p>
+                    <p className="text-xs uppercase tracking-wide3 text-accent mb-1 mt-1">Us</p>
                     <p className="text-base font-bold leading-tight">{c.name}</p>
                     {c.tag && <p className="hidden md:block text-[11px] text-pb-dim mt-0.5">{c.tag}</p>}
                   </div>
                 ) : (
                   <div key={c.key} className="text-center">
-                    {c.label && <p className="text-[10px] font-mono uppercase tracking-wide3 text-pb-faint mb-1">{c.label}</p>}
+                    {c.label && <p className="text-xs uppercase tracking-wide3 text-pb-faint mb-1">{c.label}</p>}
                     <p className="text-base font-bold leading-tight">{c.name}</p>
                     {c.tag && <p className="hidden md:block text-[11px] text-pb-dim mt-0.5">{c.tag}</p>}
                   </div>
@@ -128,7 +128,7 @@ export default function ComparisonTable({
             {(comparison.sections || []).map((section, sIdx) => (
               <div key={section.section}>
                 <div className="px-4 lg:px-7 py-3 bg-pb-surface2/30 border-b pb-hairline">
-                  <p className="text-[10px] font-mono uppercase tracking-wide3 font-semibold text-accent">
+                  <p className="text-xs uppercase tracking-wide3 font-semibold text-accent">
                     {String(sIdx + 1).padStart(2, '0')} · {section.section}
                   </p>
                 </div>

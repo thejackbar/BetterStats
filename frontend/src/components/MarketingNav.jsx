@@ -117,7 +117,7 @@ export default function MarketingNav() {
       {/* Skip to main content — visible on focus for keyboard users */}
       <a
         href="#main-content"
-        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-[200] focus:px-4 focus:py-2 focus:rounded focus:bg-pb-surface focus:text-pb-text focus:font-mono focus:text-xs focus:border focus:pb-hairline focus:outline-none"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-[200] focus:px-4 focus:py-2 focus:rounded focus:bg-pb-surface focus:text-pb-text focus:text-xs focus:border focus:pb-hairline focus:outline-none"
       >
         Skip to main content
       </a>
@@ -219,7 +219,7 @@ export default function MarketingNav() {
                         <span className="flex items-center gap-2 text-sm font-semibold text-pb-text">
                           {w.title}
                           {w.badge && (
-                            <span className="font-mono text-[9px] tracking-wide2 uppercase text-accent border border-accent/40 rounded px-1.5 py-px">{w.badge}</span>
+                            <span className="text-[10px] tracking-wide2 uppercase text-accent border border-accent/40 rounded px-1.5 py-px">{w.badge}</span>
                           )}
                         </span>
                         <span className="block text-xs text-pb-dim leading-snug">{w.blurb}</span>
@@ -265,7 +265,7 @@ export default function MarketingNav() {
 
       {open && (
         <div id="mobile-nav" className="md:hidden border-t pb-hairline bg-pb-surface px-4 py-3 flex flex-col gap-1">
-          <p className="px-1 pt-1 pb-1 text-[10px] font-mono uppercase tracking-wide3 text-pb-faint">Modules</p>
+          <p className="px-1 pt-1 pb-1 text-xs uppercase tracking-wide3 text-pb-faint">Modules</p>
           {MODULE_LINKS.map((m) => (
             <Link
               key={m.slug}
@@ -277,7 +277,7 @@ export default function MarketingNav() {
             </Link>
           ))}
           <div className="border-t pb-hairline my-2" />
-          <p className="px-1 pt-1 pb-1 text-[10px] font-mono uppercase tracking-wide3 text-pb-faint">Watch</p>
+          <p className="px-1 pt-1 pb-1 text-xs uppercase tracking-wide3 text-pb-faint">Watch</p>
           {WATCH_LINKS.map((w) => (
             <Link
               key={w.to}
@@ -286,7 +286,7 @@ export default function MarketingNav() {
               onClick={() => { if (w.placement) trackDemoClick('nav_mobile'); setOpen(false) }}
             >
               {w.title}
-              {w.badge && <span className="font-mono text-[9px] tracking-wide2 uppercase text-accent">· {DEMO.length}</span>}
+              {w.badge && <span className="text-[10px] tracking-wide2 uppercase text-accent">· {DEMO.length}</span>}
             </Link>
           ))}
           <div className="border-t pb-hairline my-2" />

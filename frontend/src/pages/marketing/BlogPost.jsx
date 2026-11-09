@@ -41,7 +41,7 @@ function ContentBlock({ block }) {
         <ul className="space-y-2 mb-4 ml-1">
           {block.items.map((item, i) => (
             <li key={i} className="flex items-start gap-2.5 text-sm text-pb-dim">
-              <span className="mt-0.5 font-mono shrink-0" style={{ color: 'var(--pb-accent)' }}>✓</span>
+              <span className="mt-0.5 shrink-0" style={{ color: 'var(--pb-accent)' }}>✓</span>
               {item}
             </li>
           ))}
@@ -53,7 +53,7 @@ function ContentBlock({ block }) {
           <p className="text-pb-dim text-sm leading-relaxed">{block.text}</p>
           <Link
             to="/contact"
-            className="inline-block mt-3 font-mono text-[10px] tracking-wide2 font-semibold"
+            className="inline-block mt-3 text-xs tracking-wide2 font-semibold"
             style={{ color: 'var(--pb-accent)' }}
           >
             LEARN MORE →
@@ -87,7 +87,7 @@ function ContentBlock({ block }) {
       return (
         <div className="my-6">
           {block.heading && (
-            <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-2 uppercase">{block.heading}</p>
+            <p className="text-xs tracking-wide3 text-pb-faint mb-2 uppercase">{block.heading}</p>
           )}
           <ul className="space-y-1.5">
             {block.items.map((it, i) => (
@@ -190,7 +190,7 @@ export default function BlogPost() {
 
       <div id="main-content" tabIndex="-1" className="max-w-2xl mx-auto px-4 py-16 pt-28">
         {/* Breadcrumb */}
-        <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-8">
+        <p className="text-xs tracking-wide3 text-pb-faint mb-8">
           <Link to="/blog" className="hover:text-pb-text transition-colors">BLOG</Link>
           <span className="mx-2">›</span>
           <span className="text-pb-faint">{post.title.toUpperCase().slice(0, 40)}{post.title.length > 40 ? '…' : ''}</span>
@@ -199,8 +199,8 @@ export default function BlogPost() {
         {/* Header */}
         <div className="mb-8">
           <div className="flex items-center gap-4 mb-4">
-            <p className="font-mono text-[10px] tracking-wide3 text-pb-faint">{formatDate(post.date)}</p>
-            <p className="font-mono text-[10px] tracking-wide3 text-pb-faint">{post.readTime}</p>
+            <p className="text-xs tracking-wide3 text-pb-faint">{formatDate(post.date)}</p>
+            <p className="text-xs tracking-wide3 text-pb-faint">{post.readTime}</p>
           </div>
           <h1 className="font-display font-bold text-[32px] md:text-[40px] tracking-tight text-pb-text leading-tight">
             {post.title}
@@ -234,7 +234,7 @@ export default function BlogPost() {
 
         {/* CTA */}
         <div className="mt-16 pb-hairline-t pt-10">
-          <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-3 uppercase">Want this for your club?</p>
+          <p className="text-xs tracking-wide3 text-pb-faint mb-3 uppercase">Want this for your club?</p>
           <h2 className="font-display font-bold text-2xl text-pb-text mb-4 tracking-tight">Get automated stats for your cricket club.</h2>
           <div className="flex flex-col sm:flex-row gap-3">
             <button
@@ -260,7 +260,7 @@ export default function BlogPost() {
             <div>
               {next && (
                 <Link to={`/blog/${next.slug}`} className="group block">
-                  <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1">← NEWER</p>
+                  <p className="text-xs tracking-wide3 text-pb-faint mb-1">← NEWER</p>
                   <p className="text-sm text-pb-dim group-hover:text-pb-text transition-colors leading-snug">{next.title}</p>
                 </Link>
               )}
@@ -268,7 +268,7 @@ export default function BlogPost() {
             <div className="text-right">
               {prev && (
                 <Link to={`/blog/${prev.slug}`} className="group block">
-                  <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1">OLDER →</p>
+                  <p className="text-xs tracking-wide3 text-pb-faint mb-1">OLDER →</p>
                   <p className="text-sm text-pb-dim group-hover:text-pb-text transition-colors leading-snug">{prev.title}</p>
                 </Link>
               )}
