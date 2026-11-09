@@ -32,23 +32,30 @@ The rules:
 """
 from __future__ import annotations
 
+import asyncio
 import colorsys
+import hashlib
 import io
 import ipaddress
+import json
 import logging
+import os
 import socket
+from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
-
-import json
 
 import httpx
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config.settings import settings
+from app.services.club_teaser_link import TOKEN_RE
+
 logger = logging.getLogger(__name__)
 
 THEME_VERSION = 2
+CREST_EDGE = 256                 # the longest side of the copy we keep and serve, in pixels
 MAX_LOGO_BYTES = 3_000_000
 FETCH_TIMEOUT = 8.0
 SAMPLE = 64                      # logos are shrunk to this many pixels a side
@@ -186,6 +193,70 @@ def theme_from_image(data: bytes) -> Optional[dict]:
     return out
 
 
+# -- The crest, kept on our own volume ---------------------------------------
+#
+# The logo is read once for its colours (above); the same bytes are kept as a
+# small, clean PNG so the page and the picture drawer load the crest from this
+# server and not from the host it came from. Re-encoding through Pillow means
+# only a raster image we have decoded ourselves is ever served from our domain
+# (an SVG, which can carry script, cannot be opened and is simply not kept).
+# Files live in ``<teaser_image_dir>/crests/<token>.png``: inside the folder that
+# is already mounted and writable, and not a possible token ("crests" is too
+# short), so no club's picture folder can collide with it. Every file can be
+# fetched again from the club's logo address, which is why they are not backed up.
+
+def crest_path(token: str) -> Path:
+    """Where one club's crest lives. Raises ValueError for anything that is not a
+    real token, so a path is never built from unchecked input."""
+    if not TOKEN_RE.match(token or ""):
+        raise ValueError("not a teaser token")
+    return Path(settings.teaser_image_dir) / "crests" / f"{token}.png"
+
+
+def crest_png(data: bytes) -> Optional[bytes]:
+    """The logo as a clean PNG no bigger than ``CREST_EDGE`` on a side, or None
+    when the bytes are not an image Pillow can decode."""
+    try:
+        from PIL import Image
+        im = Image.open(io.BytesIO(data))
+        im.load()
+        im = im.convert("RGBA")
+        im.thumbnail((CREST_EDGE, CREST_EDGE))
+        buf = io.BytesIO()
+        im.save(buf, "PNG", optimize=True)
+        return buf.getvalue()
+    except Exception:  # noqa: BLE001 - not an image we can keep
+        return None
+
+
+def save_crest(token: str, data: bytes) -> Optional[str]:
+    """Keep the crest. Returns a short fingerprint of what was written (it goes in
+    the public address so a changed crest is fetched afresh), or None when there
+    was nothing to keep. Written to a temporary file and moved into place, so a
+    reader never sees half a file."""
+    png = crest_png(data)
+    if png is None:
+        return None
+    path = crest_path(token)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp.write_bytes(png)
+    os.replace(tmp, path)
+    return hashlib.sha1(png).hexdigest()[:10]
+
+
+def crest_url(token: str, theme: Optional[dict]) -> Optional[str]:
+    """The public address of a club's kept crest, or None when it has none (or the
+    file is no longer on the volume, in which case the page uses the original
+    address rather than a broken image)."""
+    try:
+        if not isinstance(theme, dict) or not theme.get("crest") or not crest_path(token).is_file():
+            return None
+    except ValueError:
+        return None
+    return f"/api/public/teaser/{token}/crest.png?v={theme['crest']}"
+
+
 def _public_host(host: str) -> bool:
     """Refuse a logo address that points inside our network."""
     try:
@@ -239,17 +310,18 @@ async def theme_for_url(url: Optional[str], *, fetch=fetch_logo) -> Optional[dic
 
 async def store_theme(session: AsyncSession, club_id, logo_url: Optional[str], *,
                       fetch=fetch_logo, force: bool = False) -> Optional[dict]:
-    """Read the club's logo and store its theme, when the club has none yet or its
+    """Read the club's logo once and store its theme (colours, light or dark) and a
+    kept copy of the crest, when the club has no theme yet, no kept crest, or its
     logo address changed (``force`` always reads). A logo that cannot be fetched
-    leaves a theme already stored as it is; a club with no logo address at all
-    loses it. Commits. Never raises: a swallowed database error is rolled back."""
+    leaves what is stored as it is; a club with no logo address at all loses its
+    theme. Commits. Never raises: a swallowed database error is rolled back."""
     try:
         row = (await session.execute(text(
-            "SELECT theme FROM club_teaser_snapshots WHERE marketing_club_id = CAST(:c AS uuid)"),
+            "SELECT theme, token FROM club_teaser_snapshots WHERE marketing_club_id = CAST(:c AS uuid)"),
             {"c": str(club_id)})).first()
         if row is None:
             return None
-        current = row[0]
+        current, token = row[0], row[1]
         if not logo_url:
             if current is not None:
                 await session.execute(text(
@@ -257,11 +329,17 @@ async def store_theme(session: AsyncSession, club_id, logo_url: Optional[str], *
                     {"c": str(club_id)})
                 await session.commit()
             return None
-        if current and current.get("src") == logo_url and current.get("v") == THEME_VERSION and not force:
+        if (current and current.get("src") == logo_url and current.get("v") == THEME_VERSION
+                and current.get("crest") and crest_path(token).is_file() and not force):
             return current
-        theme = await theme_for_url(logo_url, fetch=fetch)
+        data = await fetch(logo_url)
+        if not data:
+            return current
+        theme = await asyncio.to_thread(theme_from_image, data)
         if theme is None:
             return current
+        crest = await asyncio.to_thread(save_crest, token, data)
+        theme = {**theme, "src": logo_url, **({"crest": crest} if crest else {})}
         await session.execute(text(
             "UPDATE club_teaser_snapshots SET theme = CAST(:t AS jsonb) WHERE marketing_club_id = CAST(:c AS uuid)"),
             {"t": json.dumps(theme), "c": str(club_id)})

@@ -31,7 +31,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import get_db
-from app.services import club_teaser, club_teaser_images, club_teaser_link, rate_limit
+from app.services import club_teaser, club_teaser_images, club_teaser_link, club_teaser_theme, rate_limit
 from app.services.login_audit import client_ip
 from app.services.usage_tracker import record_event_bg
 
@@ -109,6 +109,11 @@ async def get_teaser(token: str, request: Request, db: AsyncSession = Depends(ge
     # may. Read it here so the page shows the crest without re-pulling the club.
     if not (view.get("club") or {}).get("logo_url") and row["directory_logo"]:
         view["club"] = {**(view.get("club") or {}), "logo_url": row["directory_logo"]}
+    # The crest we keep on our own volume is preferred to the host it came from:
+    # it loads from here, and the picture drawer reads the same address.
+    kept = club_teaser_theme.crest_url(token, row["theme"])
+    if kept:
+        view["club"] = {**(view.get("club") or {}), "logo_url": kept}
     return {
         **view,
         "version": row["version"],
@@ -126,6 +131,24 @@ async def get_teaser(token: str, request: Request, db: AsyncSession = Depends(ge
         # rather than to a trial it cannot start.
         "registered": {"slug": row["registered_slug"]} if row["registered_slug"] else None,
     }
+
+
+@router.get("/{token}/crest.png")
+async def get_teaser_crest(token: str, db: AsyncSession = Depends(get_db)):
+    """The club's crest, kept on our volume. Same rules as the pictures: no rate
+    limit (the page, the drawer and every mail client that opens a link hit it),
+    served only for a snapshot that is still good, and cacheable hard because the
+    address carries a fingerprint of the file."""
+    if not TOKEN_RE.match(token or ""):
+        raise HTTPException(status_code=404, detail="Not found")
+    ok = await db.scalar(text(
+        "SELECT 1 FROM club_teaser_snapshots WHERE token = :t AND status = 'ok' AND snapshot IS NOT NULL"),
+        {"t": token})
+    path = club_teaser_theme.crest_path(token)
+    if not ok or not path.is_file():
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(path, media_type="image/png",
+                        headers={"Cache-Control": "public, max-age=86400", "X-Robots-Tag": "noindex"})
 
 
 @router.get("/{token}/image/{fmt}.png")

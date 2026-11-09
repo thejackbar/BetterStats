@@ -62,6 +62,14 @@ def g():
     return str(uuid.uuid4())
 
 
+def _raises(fn) -> bool:
+    try:
+        fn()
+    except ValueError:
+        return True
+    return False
+
+
 def png(draw_fn, size=(120, 120), bg=(0, 0, 0, 0)) -> bytes:
     im = Image.new("RGBA", size, bg)
     draw_fn(ImageDraw.Draw(im))
@@ -389,6 +397,87 @@ async def main():
         c_logo = (await s.execute(text("SELECT logo_url FROM marketing_clubs WHERE id = CAST(:i AS uuid)"), {"i": K["c"]["id"]})).scalar()
     check("a pull records the crest it found on the directory row", c_logo == "https://cdn.example/mine.png", str(c_logo))
 
+
+    print("the crest kept on our volume")
+    big = png(lambda d: d.ellipse((20, 20, 780, 480), fill=(200, 30, 30, 255)), size=(800, 500))
+    kept = tt.crest_png(big)
+    from PIL import Image as _I
+    kim = _I.open(io.BytesIO(kept)) if kept else None
+    check("a large logo is kept as a PNG no bigger than 256 pixels on its longest side",
+          kim is not None and kim.format == "PNG" and max(kim.size) <= tt.CREST_EDGE and kim.size[0] > kim.size[1], str(kim and (kim.format, kim.size)))
+    check("an SVG (which can carry script) and bytes that are not an image are not kept",
+          tt.crest_png(b'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>') is None and tt.crest_png(b"junk") is None)
+    check("a path is never built from a token that is not one",
+          all(_raises(lambda t=t: tt.crest_path(t)) for t in ("../etc/passwd", "a/b", "", "short", "x" * 100)))
+    await add_club("e", "Crest Keeper CC", "https://good.example/big.png")
+
+    async def crest_fetch(url):
+        return {"https://good.example/big.png": big, "https://good.example/svg.png": b"<svg/>"}.get(url)
+
+    async with Session() as s:
+        th = await tt.store_theme(s, K["e"]["id"], "https://good.example/big.png", fetch=crest_fetch)
+    st = await snap_state("e")
+    path_e = tt.crest_path(K["e"]["token"])
+    check("reading a logo stores the theme and keeps the crest, with a fingerprint in the theme",
+          th and st["theme"].get("crest") and path_e.is_file() and path_e.stat().st_size < 200_000, str(st["theme"]))
+    check("the kept crest is a decodable PNG within the size limit", _I.open(path_e).format == "PNG" and max(_I.open(path_e).size) <= tt.CREST_EDGE)
+    url_e = tt.crest_url(K["e"]["token"], st["theme"])
+    check("the public address carries the token and the fingerprint", url_e == f"/api/public/teaser/{K['e']['token']}/crest.png?v={st['theme']['crest']}", str(url_e))
+    check("the snapshot, hash, version and drawn pictures did not move when the crest was kept",
+          st["version"] == 3 and st["image_version"] == 3 and st["data_hash"] == "h1")
+    check("a club with no theme, or a theme with no crest, has no kept crest address",
+          tt.crest_url(K["e"]["token"], None) is None and tt.crest_url(K["e"]["token"], {"v": 2, "mode": "dark"}) is None)
+    fetched_e: list[str] = []
+
+    async def counting_fetch(url):
+        fetched_e.append(url)
+        return await crest_fetch(url)
+    async with Session() as s:
+        await tt.store_theme(s, K["e"]["id"], "https://good.example/big.png", fetch=counting_fetch)
+    check("a club that already has its theme and its kept crest is not read again", fetched_e == [])
+    async with Session() as s:
+        page_kept = await pt.get_teaser(K["e"]["token"], req("10.8.8.1"), s)
+        crest_resp = await pt.get_teaser_crest(K["e"]["token"], s)
+    check("the page uses the crest on our own server, not the host it came from",
+          page_kept["club"]["logo_url"] == url_e and not page_kept["club"]["logo_url"].startswith("http"), str(page_kept["club"]))
+    check("the crest route serves the file as an image that can be cached", str(getattr(crest_resp, "path", "")) == str(path_e)
+          and crest_resp.media_type == "image/png" and "max-age" in crest_resp.headers.get("cache-control", ""), str(getattr(crest_resp, "path", None)))
+    from fastapi import HTTPException as _HE
+    async with Session() as s:
+        try:
+            await pt.get_teaser_crest("NoSuchTokenAtAll123", s)
+            unknown_ok = False
+        except _HE as e:
+            unknown_ok = e.status_code == 404
+        try:
+            await pt.get_teaser_crest("../../etc/passwd", s)
+            bad_ok = False
+        except _HE as e:
+            bad_ok = e.status_code == 404
+    check("an unknown or malformed token gets a 404 from the crest route", unknown_ok and bad_ok)
+    path_e.unlink()
+    async with Session() as s:
+        page_gone = await pt.get_teaser(K["e"]["token"], req("10.8.8.2"), s)
+    check("if the file has gone from the volume the page falls back to the original address (never a broken image)",
+          page_gone["club"]["logo_url"] != url_e and tt.crest_url(K["e"]["token"], st["theme"]) is None, str(page_gone["club"]))
+    fetched_e.clear()
+    async with Session() as s:
+        await tt.store_theme(s, K["e"]["id"], "https://good.example/big.png", fetch=counting_fetch)
+    check("and the next read keeps the crest again", fetched_e == ["https://good.example/big.png"] and path_e.is_file())
+    await add_club("f", "Svg Crest CC", "https://good.example/svg.png")
+    async with Session() as s:
+        thf = await tt.store_theme(s, K["f"]["id"], "https://good.example/svg.png", fetch=crest_fetch)
+    check("a logo that cannot be decoded keeps no crest and leaves no file behind", thf is None and not tt.crest_path(K["f"]["token"]).exists())
+    async with Session() as s:
+        await s.execute(text("UPDATE club_teaser_snapshots SET theme = theme - 'crest' WHERE marketing_club_id = CAST(:i AS uuid)"), {"i": K["e"]["id"]})
+        await s.commit()
+    tt.crest_path(K["e"]["token"]).unlink()
+    searched.clear()
+    out = await bf.run(Session, apply=False, club="Crest Keeper", fetch=crest_fetch, finder=finder, out=lines.append)
+    check("the backfill treats a club with a theme but no kept crest as due", out["due"] == 1, str(out))
+    await bf.run(Session, apply=True, club="Crest Keeper", fetch=crest_fetch, finder=finder, pacer=Pacer(), out=lines.append)
+    check("and keeps the crest for it", tt.crest_path(K["e"]["token"]).is_file() and (await snap_state("e"))["theme"].get("crest"))
+
     print("the public page")
     async with Session() as s:
         page = await pt.get_teaser(K["d"]["token"], req(), s)
@@ -418,6 +507,7 @@ async def main():
         await s.execute(text("UPDATE club_teaser_snapshots SET snapshot = jsonb_set(snapshot, '{club,logo_url}', 'null'::jsonb) WHERE marketing_club_id = CAST(:i AS uuid)"), {"i": K["d"]["id"]})
         await s.execute(text("UPDATE marketing_clubs SET logo_url = 'https://cdn.example/dir.png' WHERE id = CAST(:i AS uuid)"), {"i": K["d"]["id"]})
         await s.commit()
+        tt.crest_path(K["d"]["token"]).unlink(missing_ok=True)   # no kept copy: the fallback is what is being tested
         overlay = await pt.get_teaser(K["d"]["token"], req("10.9.9.6"), s)
     check("a snapshot pulled before the crest was captured shows the directory row's crest, with no re-pull",
           (overlay.get("club") or {}).get("logo_url") == "https://cdn.example/dir.png", str(overlay["club"]))

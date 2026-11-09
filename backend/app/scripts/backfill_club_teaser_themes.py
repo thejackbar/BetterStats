@@ -14,8 +14,10 @@ fetching nothing. ``--apply`` makes, per club, one Cricket Australia name search
 when the club has no crest address yet (the same search the crawl and /trial
 use, to find it) and one GET for the logo image, each paced at ``--rate`` a
 second (default 2, at most 10). It writes the crest address on the directory
-row (only where that is empty) and the ``theme`` column: the snapshot is
-untouched, so no picture is marked out of date. It honours the operator's Stop switch between
+row (only where that is empty), the ``theme`` column, and a small kept copy of the
+crest on the media volume (``crests/<token>.png``; the page and the picture drawer
+then load it from our server): the snapshot is untouched, so no picture is marked
+out of date. It honours the operator's Stop switch between
 clubs; ``--ignore-stop`` runs anyway and leaves the switch alone, as
 ``pull_returning_club_teasers`` does. Each club is written as it is read, so a
 run is safe to stop and to repeat.
@@ -49,7 +51,8 @@ async def due(session, *, limit: int = 0, club: str = "", redo: bool = False) ->
     else:
         where += (" AND (NULLIF(btrim(mc.logo_url), '') IS NULL OR t.theme IS NULL"
                   " OR t.theme->>'src' IS DISTINCT FROM mc.logo_url"
-                  " OR (t.theme->>'v')::int IS DISTINCT FROM :v)")
+                  " OR (t.theme->>'v')::int IS DISTINCT FROM :v"
+                  " OR t.theme->>'crest' IS NULL)")
     params: dict = {"v": tt.THEME_VERSION}
     if club:
         where += " AND mc.name ILIKE :n"
