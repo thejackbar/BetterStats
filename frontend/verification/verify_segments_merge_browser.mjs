@@ -481,7 +481,8 @@ const run = async () => {
     check('the club builder does NOT leak directory fields', !!opts
       && !opts.includes('Engagement score') && !opts.includes('Sales pipeline stage')
       && !opts.includes('BetterCricket subscriber (Stripe)')
-      && !opts.includes('Started a trial'),
+      && !opts.includes('Started a trial')
+      && !opts.includes('Club has a full set of teaser pictures'),
       JSON.stringify(opts))
 
     // ── AND / OR connector between conditions (C4 / C5) ───────────────────────
@@ -543,7 +544,7 @@ const run = async () => {
   // ── The internal builder shows directory fields ─────────────────────────
   INTERNAL = true
   {
-    const { page, errors } = await openSegments(browser)
+    const { page, errors, calls } = await openSegments(browser)
     await page.goto(BASE + '/admin/comms/segments', { waitUntil: 'domcontentloaded' })
     await page.waitForSelector('h1', { timeout: 15000 }).catch(() => {})
     await page.waitForTimeout(1500)
@@ -555,6 +556,35 @@ const run = async () => {
     check('the internal builder offers the started-a-trial field', !!opts
       && opts.includes('Started a trial'), JSON.stringify(opts))
     check('no page errors on the internal Segments screen', errors.length === 0, errors.join('; '))
+
+    // ── Club has a full set of teaser pictures ───────────────────────────────
+    // The rule that reads the picture files themselves. Choose it, choose yes,
+    // and the exact rule must reach the server on the resolve wire.
+    check('the internal builder offers "Club has a full set of teaser pictures"', !!opts
+      && opts.includes('Club has a full set of teaser pictures'), JSON.stringify(opts))
+    const fieldSel = page.locator('select', { has: page.locator('option', { hasText: 'Has tag' }) }).first()
+    await fieldSel.selectOption({ label: 'Club has a full set of teaser pictures' })
+    await page.waitForTimeout(300)
+    const valSel = page.locator('select', { has: page.locator('option', { hasText: 'choose…' }) }).first()
+    const valueOpts = (await valSel.locator('option').allTextContents()).map(s => s.trim())
+    check('its choices are yes and no, in plain words',
+      valueOpts.join('|') === 'choose…|yes, every picture is on file (email ready)|no, missing or never drawn',
+      JSON.stringify(valueOpts))
+    const before = calls.length
+    await valSel.selectOption({ label: 'yes, every picture is on file (email ready)' })
+    await page.waitForTimeout(1500)   // debounced resolve
+    const rules = calls.slice(before)
+      .filter(c => /\/comms\/segments\/(resolve|preview)/.test(c.url) && c.body)
+      .map(c => { try { return JSON.parse(c.body).definition?.rules || JSON.parse(c.body).rules || [] } catch { return [] } })
+    check('choosing yes sends {field:"teaser_pictures", op:"eq", value:"yes"} on the wire',
+      rules.some(rs => rs.some(r => r.field === 'teaser_pictures' && r.op === 'eq' && r.value === 'yes')),
+      JSON.stringify(rules.slice(-2)))
+    await page.screenshot({ path: process.env.SHOT_DIR ? `${process.env.SHOT_DIR}/teaser-pictures-rule.png` : '/tmp/teaser-pictures-rule.png' })
+    await page.setViewportSize({ width: 390, height: 800 })
+    await page.waitForTimeout(400)
+    const ov390 = await noOverflow(page)
+    check('no horizontal overflow at 390px with the rule chosen', ov390 <= 1, `overflow ${ov390}px`)
+    check('no page errors after choosing it', errors.length === 0, errors.join('; '))
   }
 
   // ── No overflow at 390px ────────────────────────────────────────────────

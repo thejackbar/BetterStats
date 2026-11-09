@@ -90,7 +90,13 @@ DIR_DEAL_FIELDS = {"deal_won"}
 # is in (services/club_teaser.py). A contact-level rule like club_is: it reads the
 # contact's own marketing_club_id, so it needs no MarketingClub join and a contact
 # with no directory club simply has no snapshot.
-DIR_TEASER_FIELDS = {"teaser_snapshot"}
+DIR_TEASER_FIELDS = {"teaser_snapshot", "teaser_pictures"}
+# ``teaser_pictures`` (yes / no) is the stricter question: does the contact's club
+# have EVERY teaser picture on the media volume right now (the email dashboard,
+# the share card and both ad sizes), so {{teaser_image_url}} renders in the
+# email. ``image_ready`` above is only the database's claim that the club was
+# drawn, which a restore, an unmounted volume or a format added later makes
+# false; this rule reads the files (club_teaser_images.complete_tokens).
 # ``image_ready`` is not a status: it is a good snapshot whose picture has been
 # drawn, i.e. a club that can be sent {{teaser_image_url}} without a broken box.
 TEASER_STATES = ("ok", "empty", "junior_only", "error", "none", "image_ready")
@@ -297,6 +303,37 @@ def _teaser_clause(val):
     if "none" in states:
         parts.append(~exists().where(t.c.marketing_club_id == CommsContact.marketing_club_id))
     return or_(*parts) if len(parts) > 1 else parts[0]
+
+
+def _teaser_pictures_clause(val, tokens):
+    """yes: the contact's club has a good snapshot AND every picture file is on
+    disk (``tokens`` is that set, read from the volume). no: everyone else,
+    including a contact with no directory club and a club that was never drawn.
+
+    A value that is not yes or no fails CLOSED to nobody: this decides who an
+    email with a picture in it goes to, and widening on a typo would send it to
+    clubs whose picture is a broken box. An unfilled rule returns None like the
+    other selects (the editor strips those before saving).
+    """
+    v = _vocab(val)
+    if not v:
+        return None
+    if v not in ("yes", "no"):
+        return false()
+    from sqlalchemy import table as _table, column as _column, any_, literal
+    from sqlalchemy import Text
+    from sqlalchemy.dialects.postgresql import ARRAY
+    t = _table("club_teaser_snapshots", _column("marketing_club_id"), _column("status"),
+               _column("image_version"), _column("snapshot"), _column("token"))
+    # One bound text[] (not a thousand IN literals): the same shape as the
+    # `= ANY(CAST(:ids AS uuid[]))` rule for reads over a big set of ids.
+    on_disk = t.c.token == any_(literal(sorted(tokens or ()), type_=ARRAY(Text)))
+    drawn_and_served = exists().where(
+        t.c.marketing_club_id == CommsContact.marketing_club_id,
+        # The same three facts the picture route checks before it serves a file
+        # (public_teaser.get_teaser_image), plus the files themselves.
+        t.c.status == "ok", t.c.snapshot.isnot(None), t.c.image_version.isnot(None), on_disk)
+    return drawn_and_served if v == "yes" else ~drawn_and_served
 
 
 def _vocab(val) -> str:
@@ -527,13 +564,15 @@ def _trial_condition(rule: dict, trials):
     return None
 
 
-def _directory_condition(rule: dict, cust, visits=None, trials=None):
+def _directory_condition(rule: dict, cust, visits=None, trials=None, teaser_tokens=None):
     """A WHERE clause for one directory (outreach) field. ``cust`` is the aliased
     customer Organisation (joined via the marketing club's existing_org_id), only
     set when a customer_status rule is present. ``visits`` is the joined
     per-club page-view/visitor subquery, only set when a page_views /
     distinct_visitors rule is present. ``trials`` is the joined per-org trial
-    window, only set when a trial_* rule is present."""
+    window, only set when a trial_* rule is present. ``teaser_tokens`` is the set
+    of clubs with every picture on disk, only read when a teaser_pictures rule is
+    present."""
     field = (rule or {}).get("field")
     val = (rule or {}).get("value")
     op = (rule or {}).get("op")
@@ -592,6 +631,8 @@ def _directory_condition(rule: dict, cust, visits=None, trials=None):
         return _primary_admin_clause(val)
     if field == "teaser_snapshot":
         return _teaser_clause(val)
+    if field == "teaser_pictures":
+        return _teaser_pictures_clause(val, teaser_tokens)
     if field == "had_demo":
         states = [s for s in _as_list(val) if s in _DEMO_STATUSES]
         return MarketingClub.demo_status.in_(states) if states else None
@@ -901,6 +942,12 @@ async def build_query(session: AsyncSession, club, definition: dict):
         trials = club_trial_window.trial_window_subquery()
         q = q.outerjoin(trials, trials.c.org_id == MarketingClub.existing_org_id)
 
+    # Which clubs have every teaser picture on disk, read once from the volume.
+    teaser_tokens = None
+    if any(r["field"] == "teaser_pictures" for r in rules):
+        from app.services import club_teaser_images
+        teaser_tokens = await club_teaser_images.complete_tokens()
+
     # Who owes, resolved once against the club's newest season.
     owing_ids = None
     if any(r["field"] == "owes_money" for r in rules):
@@ -938,7 +985,7 @@ async def build_query(session: AsyncSession, club, definition: dict):
     pairs = []
     for rule in rules:
         if rule["field"] in DIRECTORY_FIELDS:
-            cond = _directory_condition(rule, cust, visits, trials)
+            cond = _directory_condition(rule, cust, visits, trials, teaser_tokens)
             # A _DIR_MC_FIELDS condition is a fact about a PROSPECT CLUB. The
             # MarketingClub join is LEFT OUTER (so an OR branch on a contact-level
             # field — emailed, contact_is — still sees a contact with no linked

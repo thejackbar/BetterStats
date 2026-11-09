@@ -16,8 +16,11 @@
 
      >>> SEND VIA BETTERCOMMS (the outreach org), not make_sends.py. Only the
          comms send resolves the per-club merge variables below, and only the
-         audience rule "Club has a teaser snapshot: Snapshot and picture ready"
-         guarantees {{teaser_image_url}} isn't blank (a broken image box).
+         audience rule "Club has a full set of teaser pictures: yes" guarantees
+         {{teaser_image_url}} isn't blank (a broken image box). It checks the
+         picture files on disk. The older "Club has a teaser snapshot: Snapshot
+         and picture ready" only records that a club was drawn, so do not use it
+         for this send. Add "Customer status" to keep converted clubs out.
          Comms sends this full-HTML template as-is and injects the mandatory
          sender-id + unsubscribe footer; no need to add one here.
 
@@ -106,8 +109,8 @@ See what BetterCricket does with {{club}}&rsquo;s data in one click, plus everyt
         </tr>
 
         <!-- HERO: the club's own season picture (same thing /trial generates),
-             tappable through to its claim page. Sent only to the "picture ready"
-             audience, so {{teaser_image_url}} is never blank. -->
+             tappable through to its claim page. Sent only to the "full set of
+             teaser pictures" audience, so {{teaser_image_url}} is never blank. -->
         <tr>
           <td style="padding:4px 18px 0 18px;">
             <a href="{{teaser_url}}" target="_blank" style="text-decoration:none; display:block;">

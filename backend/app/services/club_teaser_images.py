@@ -196,6 +196,57 @@ async def vars_for_marketing_club(session: AsyncSession, club) -> dict:
     return (await vars_by_marketing_club(session, [club])).get(club.id, dict(BLANK_TEASER_VARS))
 
 
+# ── Which clubs have every picture on disk ─────────────────────────────────
+
+# ``club_teaser_snapshots.image_version`` says a club was drawn; it cannot say the
+# files are still there, or that a format added since was ever drawn (a club drawn
+# before the dashboard format existed has a version and no dashboard file). The
+# only truth is the volume, so the "Club has a full set of teaser pictures"
+# audience rule reads it: a club counts only when EVERY format in FORMATS is a
+# non-empty file in its folder. One listing of the root plus one per club folder,
+# not a stat per format per club, and cached for a short time because a segment
+# is counted on every screen load and resolved again at send.
+COMPLETE_CACHE_SECONDS = 60
+_complete_cache: dict = {"at": 0.0, "tokens": frozenset(), "root": None}
+
+
+def scan_complete_tokens(root: Optional[Path] = None) -> frozenset:
+    """Tokens whose folder holds a non-empty file for every format. Blocking
+    disk reads: callers on the event loop use :func:`complete_tokens`. A missing
+    root (an unmounted volume) is no clubs, never an error, and says so in the
+    log, so an empty audience has a reason somebody can find."""
+    root = Path(root) if root is not None else image_root()
+    wanted = [f"{fmt}.png" for fmt in FORMATS]
+    found = set()
+    try:
+        with os.scandir(root) as it:
+            folders = [e for e in it if e.is_dir(follow_symlinks=False) and TOKEN_RE.match(e.name)]
+    except OSError as exc:
+        logger.warning("Teaser pictures: cannot read %s (%s); no club has a full set", root, exc)
+        return frozenset()
+    for folder in folders:
+        try:
+            have = {e.name: e.stat().st_size for e in os.scandir(folder.path) if e.is_file(follow_symlinks=False)}
+        except OSError:
+            continue
+        if all(have.get(name, 0) > 0 for name in wanted):
+            found.add(folder.name)
+    return frozenset(found)
+
+
+async def complete_tokens(*, fresh: bool = False) -> frozenset:
+    """:func:`scan_complete_tokens` off the event loop, reused for
+    ``COMPLETE_CACHE_SECONDS``. ``fresh`` skips the cache (a report, a suite)."""
+    root = str(image_root())
+    now = time.monotonic()
+    if (not fresh and _complete_cache["root"] == root
+            and now - _complete_cache["at"] < COMPLETE_CACHE_SECONDS):
+        return _complete_cache["tokens"]
+    tokens = await asyncio.to_thread(scan_complete_tokens)
+    _complete_cache.update(at=now, tokens=tokens, root=root)
+    return tokens
+
+
 # ── What is due ────────────────────────────────────────────────────────────
 
 _DUE_SQL = """

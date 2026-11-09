@@ -148,6 +148,16 @@ export const DIRECTORY_FIELD_DEFS = {
       ['none', 'No snapshot yet'],
     ],
   },
+  // The stricter question: is every one of the club's teaser pictures on the media
+  // volume right now, so the email's picture renders. "Snapshot and picture ready"
+  // above is the database's record of a draw; this reads the files themselves.
+  teaser_pictures: {
+    label: 'Club has a full set of teaser pictures', input: 'select', ops: IS_OP,
+    options: [
+      ['yes', 'yes, every picture is on file (email ready)'],
+      ['no', 'no, missing or never drawn'],
+    ],
+  },
   // Naming a club or a person outright, rather than describing them. Both are
   // ORDINARY rules and are ANDed with the others, so "is any of" NARROWS the
   // audience to what is picked — it does not add those people on top of what the
