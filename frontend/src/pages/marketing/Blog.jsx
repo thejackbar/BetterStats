@@ -73,7 +73,7 @@ export default function Blog() {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-4 mb-2">
                   <p className="font-mono text-[10px] tracking-wide3 text-pb-faint">{formatDate(post.date)}</p>
-                  <p className="font-mono text-[10px] tracking-wide3 text-pb-faintest">{post.readTime}</p>
+                  <p className="font-mono text-[10px] tracking-wide3 text-pb-faint">{post.readTime}</p>
                 </div>
                 <h2 className="font-display font-bold text-[18px] md:text-[20px] text-pb-text leading-snug mb-1.5 group-hover:text-accent transition-colors">
                   {post.title}

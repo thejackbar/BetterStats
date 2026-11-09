@@ -279,7 +279,7 @@ export function MockYearbook() {
       <div className="p-6">
         <div className="text-center mb-5">
           <p className="text-[10px] font-mono uppercase tracking-wide3 text-pb-faint mb-2">Volume XIV · The Annual</p>
-          <h3 className="font-bold text-4xl leading-tight mb-1">Season 2024<span className="font-normal italic">-25</span></h3>
+          <h3 className="font-bold text-4xl leading-tight mb-1">Season 2024<span className="font-normal">-25</span></h3>
           <div className="my-4 mx-auto max-w-[120px] border-t pb-hairline" />
           <p className="font-mono text-[11px] text-pb-faint">Applecross CC · 3,857 runs · 213 wickets · 5 grades</p>
         </div>

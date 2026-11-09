@@ -144,7 +144,7 @@ export default function VideoDetail() {
         <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-8">
           <Link to="/videos" className="hover:text-pb-text transition-colors">VIDEOS</Link>
           <span className="mx-2">›</span>
-          <span className="text-pb-faintest">{(video.module_label || 'WALKTHROUGH').toUpperCase()}</span>
+          <span className="text-pb-faint">{(video.module_label || 'WALKTHROUGH').toUpperCase()}</span>
         </p>
 
         {/* Header */}
@@ -152,7 +152,7 @@ export default function VideoDetail() {
           <div className="flex items-center gap-4 mb-4">
             <p className="font-mono text-[10px] tracking-wide3 text-pb-faint">{formatDate(video.date)}</p>
             {video.module_label && (
-              <p className="font-mono text-[10px] tracking-wide3 text-pb-faintest">{video.module_label}</p>
+              <p className="font-mono text-[10px] tracking-wide3 text-pb-faint">{video.module_label}</p>
             )}
           </div>
           <div className="flex items-baseline gap-4">

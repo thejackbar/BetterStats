@@ -183,8 +183,8 @@ function ClubActionModal({ club, onSetUp, onClose }) {
         </div>
 
         {mode === 'done' ? (
-          <p className="font-mono text-[12px] text-emerald-300">
-            Thanks — we&rsquo;ve got your request and we&rsquo;ll be in touch shortly.
+          <p className="text-sm text-emerald-300">
+            Thanks. We have your request and will be in touch shortly.
           </p>
         ) : mode === 'request' ? (
           <>
@@ -218,7 +218,7 @@ function ClubActionModal({ club, onSetUp, onClose }) {
               >
                 Set up my club
               </button>
-              <p className="text-center font-mono text-[11px] text-pb-dim">Free · about 3 minutes · no card</p>
+              <p className="text-center text-xs text-pb-dim">Free · about 3 minutes · no card</p>
               <button
                 onClick={() => setMode('request')}
                 className="w-full px-4 py-2.5 rounded-lg font-display font-semibold text-sm border pb-hairline text-pb-text hover:bg-pb-surface2 transition"
@@ -311,7 +311,7 @@ function ExtensionRequestModal({ club, days = 7, onClose }) {
                 to help you get set up.
               </p>
             ) : (
-              <p className="font-mono text-[12px] text-emerald-300" data-testid="trial-extension-done">
+              <p className="text-sm text-emerald-300" data-testid="trial-extension-done">
                 Thanks. We have your request and will be in touch shortly.
               </p>
             )}
@@ -725,7 +725,7 @@ export default function Trial() {
                   >
                     Set up your club yourself <span aria-hidden="true">→</span>
                   </button>
-                  <p className="font-mono text-[11px] text-pb-dim mt-2">Free · No credit card</p>
+                  <p className="text-xs text-pb-dim mt-2">Free · No credit card</p>
                 </div>
               </div>
             ) : null}
@@ -778,7 +778,7 @@ export default function Trial() {
                 </Reveal>
               ))}
             </div>
-            <p className="font-mono text-[11px] text-pb-faintest mt-6 text-center">
+            <p className="font-mono text-[11px] text-pb-faint mt-6 text-center">
               Keep only the modules your club wants, from $399/yr for BetterStats.{' '}
               <Link to="/pricing" className="underline hover:text-pb-text">See pricing</Link>.
             </p>
@@ -803,7 +803,7 @@ export default function Trial() {
               >
                 Find your club <span aria-hidden="true">→</span>
               </button>
-              <p className="font-mono text-[11px] text-pb-dim mt-4">Free · No credit card · Live in under an hour</p>
+              <p className="text-xs text-pb-dim mt-4">Free · No credit card · Live in under an hour</p>
             </div>
           </div>
         </section>
@@ -823,7 +823,7 @@ export default function Trial() {
                 </details>
               ))}
             </div>
-            <p className="text-center font-mono text-[11px] text-pb-faintest mt-8">
+            <p className="text-center font-mono text-[11px] text-pb-faint mt-8">
               Something else on your mind? <a href={`mailto:${SUPPORT_EMAIL}`} className="underline hover:text-pb-text">{SUPPORT_EMAIL}</a>
             </p>
           </div>

@@ -193,14 +193,14 @@ export default function BlogPost() {
         <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-8">
           <Link to="/blog" className="hover:text-pb-text transition-colors">BLOG</Link>
           <span className="mx-2">›</span>
-          <span className="text-pb-faintest">{post.title.toUpperCase().slice(0, 40)}{post.title.length > 40 ? '…' : ''}</span>
+          <span className="text-pb-faint">{post.title.toUpperCase().slice(0, 40)}{post.title.length > 40 ? '…' : ''}</span>
         </p>
 
         {/* Header */}
         <div className="mb-8">
           <div className="flex items-center gap-4 mb-4">
             <p className="font-mono text-[10px] tracking-wide3 text-pb-faint">{formatDate(post.date)}</p>
-            <p className="font-mono text-[10px] tracking-wide3 text-pb-faintest">{post.readTime}</p>
+            <p className="font-mono text-[10px] tracking-wide3 text-pb-faint">{post.readTime}</p>
           </div>
           <h1 className="font-display font-bold text-[32px] md:text-[40px] tracking-tight text-pb-text leading-tight">
             {post.title}
@@ -241,16 +241,15 @@ export default function BlogPost() {
               type="button"
               onClick={triggerTrial}
               aria-label="Request access"
-              className="inline-block px-6 py-3 rounded font-mono text-[11px] tracking-wide3 font-semibold transition text-pb-bg"
-              style={{ background: 'var(--pb-accent)' }}
+              className="cta-primary"
             >
-              REQUEST ACCESS
+              Request access
             </button>
             <Link
               to="/features"
-              className="inline-block px-6 py-3 border pb-hairline rounded font-mono text-[11px] tracking-wide3 font-semibold text-pb-dim hover:text-pb-text transition-colors"
+              className="cta-secondary"
             >
-              SEE FEATURES →
+              See features →
             </Link>
           </div>
         </div>

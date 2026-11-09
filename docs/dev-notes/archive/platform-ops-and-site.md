@@ -367,3 +367,17 @@ Who is listed (all must hold): `is_active`, not archived, has a slug, no `access
 Honest limit: an `active` Core row cannot tell a paid subscription from one a Super Admin set Active by hand (a bank transfer, or a free grant). If a free or internal club must not appear, add its slug to `TRUSTED_CLUBS_EXCLUDE`. A club that has not agreed to be named is the failure to avoid, so check the list at `/api/public/trusted-clubs` after the first deploy.
 
 Proved against a real Postgres (16, schema from the ORM) with `backend/verification/verify_trusted_clubs.py`: 29 checks through the shipped route body, pairing every "not listed" check with a club that is listed; the control run on the previous commit reports the route missing and exits 1. `audit_route_access` still passes and the route is registered on the real app. The strip itself was driven in Chromium with the endpoint stubbed (20 distinct clubs with no repeat of a curated one, fallback to the 8 curated on a 500 and on an empty list, scroll duration scaling, initials for a broken crest). Not run: the endpoint behind the real nginx, or against production data.
+
+## v9.140.0.4: marketing site UI tidy-up (2026-11-09)
+
+Prompted by a short UI-tips video the owner shared (delete filler badges, mono only where necessary, tabular numerals, text contrast, no random italics). Audited `pages/marketing` and `components/marketing` and made only the changes that needed no design call:
+
+- Landing: removed the "The Better platform", "From the clubs" and "How it works" eyebrow pills (each repeated the heading under it). Step times use `tabular-nums` instead of mono.
+- BlogPost: the two CTA buttons use `cta-primary` and `cta-secondary` in sentence case, not hand-rolled mono capitals.
+- Trial: microcopy and confirmation messages out of mono; the one visible em dash removed.
+- `text-pb-faintest` used as text on marketing (13 places: Blog, BlogPost, VideoDetail, Demo, ComparisonTable) raised to `text-pb-faint`. `faintest` on the dark bg is about 1.9:1.
+- Mockups: removed the italic on "-25" in the mock season header.
+
+Left alone on purpose: the "Get Your Club on BetterCricket today!" CTA copy (set deliberately in v8.11.0), "Limited onboarding spots" (needs the owner to confirm it is true), and the many `font-mono` labels inside Mockups and TeaserPreview, which imitate the product UI.
+
+Not done, needs a decision: `--pb-faint` (#5b6072 on #0a0d14) is about 3.1:1 and fails AA for small text; about 148 marketing uses. A marketing-scoped token override is the clean fix.

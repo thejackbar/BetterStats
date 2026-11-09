@@ -238,7 +238,7 @@ function RecordingState() {
           scorecards you already have. It finishes with the questions clubs
           asked on the night.
         </p>
-        <p className="font-mono text-[11px] tracking-wide text-pb-faintest">
+        <p className="font-mono text-[11px] tracking-wide text-pb-faint">
           {WEBINAR.recordedLabel} · about {WEBINAR.durationMinutes} minutes
         </p>
       </div>
@@ -495,7 +495,7 @@ function RegistrationForm({ state, onSuccess }) {
             of this traffic that is on a phone. */}
         <div>
           <label htmlFor="demo-phone" className="block font-mono text-[11px] tracking-wide text-pb-faint mb-1.5">
-            PHONE <span className="text-pb-faintest">(OPTIONAL)</span>
+            PHONE <span className="text-pb-faint">(OPTIONAL)</span>
           </label>
           <input
             id="demo-phone"
@@ -517,7 +517,7 @@ function RegistrationForm({ state, onSuccess }) {
         {showRole ? (
           <div>
             <label htmlFor="demo-role" className="block font-mono text-[11px] tracking-wide text-pb-faint mb-1.5">
-              YOUR ROLE AT THE CLUB <span className="text-pb-faintest">(OPTIONAL)</span>
+              YOUR ROLE AT THE CLUB <span className="text-pb-faint">(OPTIONAL)</span>
             </label>
             <select
               id="demo-role"
@@ -744,7 +744,7 @@ export default function Demo() {
                 decoding="async"
                 className="w-full rounded-xl border pb-hairline"
               />
-              <figcaption className="font-mono text-[11px] text-pb-faintest mt-2 text-center">
+              <figcaption className="font-mono text-[11px] text-pb-faint mt-2 text-center">
                 Every figure on a BetterCricket page comes from your club&rsquo;s own scorecards.
               </figcaption>
             </figure>
@@ -775,7 +775,7 @@ export default function Demo() {
               ))}
             </div>
 
-            <p className="text-center font-mono text-[11px] text-pb-faintest mt-8">
+            <p className="text-center font-mono text-[11px] text-pb-faint mt-8">
               Questions before the demo? <a href={`mailto:${SUPPORT_EMAIL}`} className="underline hover:text-pb-text">{SUPPORT_EMAIL}</a>
             </p>
           </div>
