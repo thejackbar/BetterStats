@@ -1,0 +1,1182 @@
+{
+  "ok": true,
+  "strict": false,
+  "browserSkipped": false,
+  "lint": {
+    "ok": true,
+    "errorCount": 0,
+    "warningCount": 16,
+    "infoCount": 0,
+    "findings": [
+      {
+        "code": "duplicate_media_discovery_risk",
+        "severity": "warning",
+        "message": "Detected 2 matching img entries with the same source/start/duration.",
+        "selector": "[data-composition-id]",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-11-09-124940/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Avoid duplicated media nodes that can be discovered twice during compilation."
+      },
+      {
+        "code": "timeline_track_too_dense",
+        "severity": "warning",
+        "message": "Track 1 has 14 timed elements in this HTML file. Smaller sub-compositions keep timelines easier to read, iterate on, and diff.",
+        "selector": "[data-composition-id]",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-11-09-124940/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move coherent scene groups into separate .html files under compositions/ and mount them from the parent with data-composition-src so the timeline stays easier to inspect, revise, and validate."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"s0\"> is a timeline element that contains nested <div>. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#s0",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-11-09-124940/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"s0\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"s-start\"> is a timeline element that contains nested <div>. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#s-start",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-11-09-124940/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"s-start\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"sc-lineup\"> is a timeline element that contains nested <div>. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#sc-lineup",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-11-09-124940/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"sc-lineup\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"sc-fixtures\"> is a timeline element that contains nested <div>. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#sc-fixtures",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-11-09-124940/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"sc-fixtures\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"sc-results\"> is a timeline element that contains nested <div>. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#sc-results",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-11-09-124940/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"sc-results\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"sc-final\"> is a timeline element that contains nested <div>. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#sc-final",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-11-09-124940/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"sc-final\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"sc-milestones\"> is a timeline element that contains nested <div>. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#sc-milestones",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-11-09-124940/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"sc-milestones\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"sc-totw\"> is a timeline element that contains nested <div>. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#sc-totw",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-11-09-124940/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"sc-totw\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"sc-events\"> is a timeline element that contains nested <div>. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#sc-events",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-11-09-124940/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"sc-events\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"sc-c5\"> is a timeline element that contains nested <div>. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#sc-c5",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-11-09-124940/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"sc-c5\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"sc-dnd\"> is a timeline element that contains nested <div>. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#sc-dnd",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-11-09-124940/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"sc-dnd\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"s-wall\"> is a timeline element that contains nested <div>. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#s-wall",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-11-09-124940/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"s-wall\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"s-close\"> is a timeline element that contains nested <div>. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#s-close",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-11-09-124940/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"s-close\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"s-end\"> is a timeline element that contains nested <img id=\"end-logo\">. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#s-end",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-11-09-124940/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"s-end\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      }
+    ],
+    "filesScanned": 1
+  },
+  "runtime": {
+    "ok": true,
+    "errorCount": 0,
+    "warningCount": 1,
+    "infoCount": 0,
+    "findings": [
+      {
+        "code": "clip_media_fit",
+        "severity": "warning",
+        "message": "Audio \"music\" is 160.96s but its slot (data-duration) is 233.32s — the slot is shortened to the media length when rendered. Set data-duration to ~160.96s if that isn't intended.",
+        "selector": "[data-composition-id]",
+        "dataAttributes": {
+          "data-composition-id": "main",
+          "data-start": "0",
+          "data-duration": "233.32",
+          "data-width": "1920",
+          "data-height": "1080"
+        },
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 1920,
+          "height": 1080
+        },
+        "time": 0
+      }
+    ]
+  },
+  "layout": {
+    "ok": true,
+    "errorCount": 0,
+    "warningCount": 0,
+    "infoCount": 13,
+    "findings": [
+      {
+        "code": "container_overflow",
+        "severity": "info",
+        "time": 12.962,
+        "selector": "#ab1",
+        "message": "Element extends outside a clipping layout container.",
+        "rect": {
+          "left": -244.22,
+          "top": -416.45,
+          "right": 1059.82,
+          "bottom": 887.59,
+          "width": 1304.04,
+          "height": 1304.04
+        },
+        "containerSelector": "#aur",
+        "fixHint": "Resize/reposition the child or container, or mark intentional overflow with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 0,
+          "top": 0,
+          "right": 1920,
+          "bottom": 1080,
+          "width": 1920,
+          "height": 1080
+        },
+        "overflow": {
+          "left": 244.22,
+          "top": 416.45
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": -244.22,
+          "y": -416.45,
+          "width": 1304.04,
+          "height": 1304.04
+        },
+        "firstSeen": 12.962,
+        "lastSeen": 220.358,
+        "occurrences": 9,
+        "heldMs": 0,
+        "times": [
+          12.962,
+          38.887,
+          64.811,
+          90.736,
+          116.66,
+          142.584,
+          168.509,
+          194.433,
+          220.358
+        ]
+      },
+      {
+        "code": "container_overflow",
+        "severity": "info",
+        "time": 12.962,
+        "selector": "#ab2",
+        "message": "Element extends outside a clipping layout container.",
+        "rect": {
+          "left": 847.2,
+          "top": -91.64,
+          "right": 1919.4,
+          "bottom": 980.56,
+          "width": 1072.2,
+          "height": 1072.2
+        },
+        "containerSelector": "#aur",
+        "fixHint": "Resize/reposition the child or container, or mark intentional overflow with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 0,
+          "top": 0,
+          "right": 1920,
+          "bottom": 1080,
+          "width": 1920,
+          "height": 1080
+        },
+        "overflow": {
+          "top": 91.64
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 847.2,
+          "y": -91.64,
+          "width": 1072.2,
+          "height": 1072.2
+        },
+        "firstSeen": 12.962,
+        "lastSeen": 220.358,
+        "occurrences": 9,
+        "heldMs": 0,
+        "times": [
+          12.962,
+          38.887,
+          64.811,
+          90.736,
+          116.66,
+          142.584,
+          168.509,
+          194.433,
+          220.358
+        ]
+      },
+      {
+        "code": "container_overflow",
+        "severity": "info",
+        "time": 12.962,
+        "selector": "#ab3",
+        "message": "Element extends outside a clipping layout container.",
+        "rect": {
+          "left": 513.65,
+          "top": 335.83,
+          "right": 1693.07,
+          "bottom": 1515.25,
+          "width": 1179.42,
+          "height": 1179.42
+        },
+        "containerSelector": "#aur",
+        "fixHint": "Resize/reposition the child or container, or mark intentional overflow with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 0,
+          "top": 0,
+          "right": 1920,
+          "bottom": 1080,
+          "width": 1920,
+          "height": 1080
+        },
+        "overflow": {
+          "bottom": 435.25
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 513.65,
+          "y": 335.83,
+          "width": 1179.42,
+          "height": 1179.42
+        },
+        "firstSeen": 12.962,
+        "lastSeen": 220.358,
+        "occurrences": 9,
+        "heldMs": 0,
+        "times": [
+          12.962,
+          38.887,
+          64.811,
+          90.736,
+          116.66,
+          142.584,
+          168.509,
+          194.433,
+          220.358
+        ]
+      },
+      {
+        "code": "container_overflow",
+        "severity": "info",
+        "time": 12.962,
+        "selector": "#ab4",
+        "message": "Element extends outside a clipping layout container.",
+        "rect": {
+          "left": 1029.71,
+          "top": 331.94,
+          "right": 1994.69,
+          "bottom": 1296.92,
+          "width": 964.98,
+          "height": 964.98
+        },
+        "containerSelector": "#aur",
+        "fixHint": "Resize/reposition the child or container, or mark intentional overflow with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 0,
+          "top": 0,
+          "right": 1920,
+          "bottom": 1080,
+          "width": 1920,
+          "height": 1080
+        },
+        "overflow": {
+          "right": 74.69,
+          "bottom": 216.92
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 1029.71,
+          "y": 331.94,
+          "width": 964.98,
+          "height": 964.98
+        },
+        "firstSeen": 12.962,
+        "lastSeen": 220.358,
+        "occurrences": 9,
+        "heldMs": 0,
+        "times": [
+          12.962,
+          38.887,
+          64.811,
+          90.736,
+          116.66,
+          142.584,
+          168.509,
+          194.433,
+          220.358
+        ]
+      },
+      {
+        "code": "container_overflow",
+        "severity": "info",
+        "time": 12.962,
+        "selector": "#wbi",
+        "message": "Element extends outside a clipping layout container.",
+        "rect": {
+          "left": 30,
+          "top": 140,
+          "right": 1890,
+          "bottom": 1186.25,
+          "width": 1860,
+          "height": 1046.25
+        },
+        "containerSelector": "#wb",
+        "fixHint": "Resize/reposition the child or container, or mark intentional overflow with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 216,
+          "top": 140,
+          "right": 1704,
+          "bottom": 977,
+          "width": 1488,
+          "height": 837
+        },
+        "overflow": {
+          "left": 186,
+          "right": 186,
+          "bottom": 209.25
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 30,
+          "y": 140,
+          "width": 1860,
+          "height": 1046.25
+        },
+        "firstSeen": 12.962,
+        "lastSeen": 12.962,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          12.962
+        ]
+      },
+      {
+        "code": "escaped_container",
+        "severity": "info",
+        "time": 38.887,
+        "selector": "#tt-lineup-2",
+        "message": "Positioned element renders far outside its offset parent — its coordinates were likely computed in a different frame (canvas/viewport pixels).",
+        "rect": {
+          "left": 160,
+          "top": 64,
+          "right": 1250.13,
+          "bottom": 120,
+          "width": 1090.13,
+          "height": 56
+        },
+        "containerSelector": "#sc-lineup > div:nth-of-type(1)",
+        "text": "SPONSORS, FROM YOUR STATS DATA.",
+        "fixHint": "Compute left/top in the offset parent's frame (subtract its rect), or mark intentional placement with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 160,
+          "top": 34,
+          "right": 1460,
+          "bottom": 65,
+          "width": 1300,
+          "height": 31
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 160,
+          "y": 64,
+          "width": 1090.13,
+          "height": 56
+        },
+        "firstSeen": 38.887,
+        "lastSeen": 38.887,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          38.887
+        ]
+      },
+      {
+        "code": "escaped_container",
+        "severity": "info",
+        "time": 64.811,
+        "selector": "#tt-fixtures-2",
+        "message": "Positioned element renders far outside its offset parent — its coordinates were likely computed in a different frame (canvas/viewport pixels).",
+        "rect": {
+          "left": 160,
+          "top": 64,
+          "right": 464.67,
+          "bottom": 120,
+          "width": 304.67,
+          "height": 56
+        },
+        "containerSelector": "#sc-fixtures > div:nth-of-type(1)",
+        "text": "FX3 · GRID",
+        "fixHint": "Compute left/top in the offset parent's frame (subtract its rect), or mark intentional placement with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 160,
+          "top": 34,
+          "right": 1460,
+          "bottom": 65,
+          "width": 1300,
+          "height": 31
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 160,
+          "y": 64,
+          "width": 304.67,
+          "height": 56
+        },
+        "firstSeen": 64.811,
+        "lastSeen": 64.811,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          64.811
+        ]
+      },
+      {
+        "code": "escaped_container",
+        "severity": "info",
+        "time": 90.736,
+        "selector": "#tt-results-3",
+        "message": "Positioned element renders far outside its offset parent — its coordinates were likely computed in a different frame (canvas/viewport pixels).",
+        "rect": {
+          "left": 160,
+          "top": 64,
+          "right": 829.95,
+          "bottom": 120,
+          "width": 669.95,
+          "height": 56
+        },
+        "containerSelector": "#sc-results > div:nth-of-type(1)",
+        "text": "RR3 · WEEKEND WRAP",
+        "fixHint": "Compute left/top in the offset parent's frame (subtract its rect), or mark intentional placement with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 160,
+          "top": 34,
+          "right": 1460,
+          "bottom": 65,
+          "width": 1300,
+          "height": 31
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 160,
+          "y": 64,
+          "width": 669.95,
+          "height": 56
+        },
+        "firstSeen": 90.736,
+        "lastSeen": 90.736,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          90.736
+        ]
+      },
+      {
+        "code": "escaped_container",
+        "severity": "info",
+        "time": 116.66,
+        "selector": "#tt-final-3",
+        "message": "Positioned element renders far outside its offset parent — its coordinates were likely computed in a different frame (canvas/viewport pixels).",
+        "rect": {
+          "left": 160,
+          "top": 64,
+          "right": 690.11,
+          "bottom": 120,
+          "width": 530.11,
+          "height": 56
+        },
+        "containerSelector": "#sc-final > div:nth-of-type(1)",
+        "text": "RS7 · GLASS CARD",
+        "fixHint": "Compute left/top in the offset parent's frame (subtract its rect), or mark intentional placement with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 160,
+          "top": 34,
+          "right": 1460,
+          "bottom": 65,
+          "width": 1300,
+          "height": 31
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 160,
+          "y": 64,
+          "width": 530.11,
+          "height": 56
+        },
+        "firstSeen": 116.66,
+        "lastSeen": 116.66,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          116.66
+        ]
+      },
+      {
+        "code": "escaped_container",
+        "severity": "info",
+        "time": 142.584,
+        "selector": "#tt-milestones-1",
+        "message": "Positioned element renders far outside its offset parent — its coordinates were likely computed in a different frame (canvas/viewport pixels).",
+        "rect": {
+          "left": 159.49,
+          "top": 64,
+          "right": 451.27,
+          "bottom": 120,
+          "width": 291.78,
+          "height": 56
+        },
+        "containerSelector": "#sc-milestones > div:nth-of-type(1)",
+        "text": "MS2 · LIST",
+        "fixHint": "Compute left/top in the offset parent's frame (subtract its rect), or mark intentional placement with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 160,
+          "top": 34,
+          "right": 1460,
+          "bottom": 65,
+          "width": 1300,
+          "height": 31
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 159.49,
+          "y": 64,
+          "width": 291.78,
+          "height": 56
+        },
+        "firstSeen": 142.584,
+        "lastSeen": 142.584,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          142.584
+        ]
+      },
+      {
+        "code": "container_overflow",
+        "severity": "info",
+        "time": 168.509,
+        "selector": "#sweep",
+        "message": "Element extends outside a clipping layout container.",
+        "rect": {
+          "left": 1099.9,
+          "top": 214.86,
+          "right": 1519.84,
+          "bottom": 979.33,
+          "width": 419.94,
+          "height": 764.46
+        },
+        "containerSelector": "div.sweepbox",
+        "fixHint": "Resize/reposition the child or container, or mark intentional overflow with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 838.17,
+          "top": 278.57,
+          "right": 1475.22,
+          "bottom": 915.62,
+          "width": 637.05,
+          "height": 637.05
+        },
+        "overflow": {
+          "right": 44.62,
+          "top": 63.71,
+          "bottom": 63.71
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 1099.9,
+          "y": 214.86,
+          "width": 419.94,
+          "height": 764.46
+        },
+        "firstSeen": 168.509,
+        "lastSeen": 168.509,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          168.509
+        ]
+      },
+      {
+        "code": "escaped_container",
+        "severity": "info",
+        "time": 168.509,
+        "selector": "#tt-events-0",
+        "message": "Positioned element renders far outside its offset parent — its coordinates were likely computed in a different frame (canvas/viewport pixels).",
+        "rect": {
+          "left": 160,
+          "top": 64,
+          "right": 747.58,
+          "bottom": 120,
+          "width": 587.58,
+          "height": 56
+        },
+        "containerSelector": "#sc-events > div:nth-of-type(1)",
+        "text": "EVENTS, ANY STYLE.",
+        "fixHint": "Compute left/top in the offset parent's frame (subtract its rect), or mark intentional placement with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 160,
+          "top": 34,
+          "right": 1460,
+          "bottom": 65,
+          "width": 1300,
+          "height": 31
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 160,
+          "y": 64,
+          "width": 587.58,
+          "height": 56
+        },
+        "firstSeen": 168.509,
+        "lastSeen": 168.509,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          168.509
+        ]
+      },
+      {
+        "code": "escaped_container",
+        "severity": "info",
+        "time": 194.433,
+        "selector": "#tt-dnd-0",
+        "message": "Positioned element renders far outside its offset parent — its coordinates were likely computed in a different frame (canvas/viewport pixels).",
+        "rect": {
+          "left": 160,
+          "top": 64,
+          "right": 752.22,
+          "bottom": 120,
+          "width": 592.22,
+          "height": 56
+        },
+        "containerSelector": "#sc-dnd > div:nth-of-type(1)",
+        "text": "DRAG, DROP, DONE.",
+        "fixHint": "Compute left/top in the offset parent's frame (subtract its rect), or mark intentional placement with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 160,
+          "top": 34,
+          "right": 1460,
+          "bottom": 65,
+          "width": 1300,
+          "height": 31
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 160,
+          "y": 64,
+          "width": 592.22,
+          "height": 56
+        },
+        "firstSeen": 194.433,
+        "lastSeen": 194.433,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          194.433
+        ]
+      }
+    ],
+    "duration": 233.32,
+    "samples": [
+      12.962,
+      38.887,
+      64.811,
+      90.736,
+      116.66,
+      142.584,
+      168.509,
+      194.433,
+      220.358
+    ],
+    "transitionSamples": [],
+    "transitionSamplesDropped": 0,
+    "tolerance": 2,
+    "totalIssueCount": 13,
+    "truncated": false
+  },
+  "motion": {
+    "ok": true,
+    "errorCount": 0,
+    "warningCount": 0,
+    "infoCount": 0,
+    "findings": [],
+    "enabled": false,
+    "samples": 0
+  },
+  "contrast": {
+    "ok": true,
+    "errorCount": 0,
+    "warningCount": 0,
+    "infoCount": 0,
+    "findings": [],
+    "enabled": true,
+    "samples": [
+      12.962,
+      64.811,
+      116.66,
+      168.509,
+      220.358
+    ],
+    "checked": 16,
+    "passed": 16
+  },
+  "craft": {
+    "ok": true,
+    "errorCount": 0,
+    "warningCount": 3,
+    "infoCount": 0,
+    "findings": [
+      {
+        "code": "first_frame_empty",
+        "severity": "warning",
+        "message": "Frame 0 shows only the background, and the first frame is the thumbnail on social players: have the title or key image already on screen at 0 s instead of entering from nothing; see references/review.md.",
+        "selector": "[data-composition-id]",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0
+      },
+      {
+        "code": "line_unread",
+        "severity": "warning",
+        "message": "\"One post for the whole calendar\" (6 words) is on screen 1.53 s (±0.01 s), under its 1.72 s floor: hold it about 0.5 s + 0.3 s a word (2.30 s here) before it leaves or changes; see references/motion.md.",
+        "text": "One post for the whole calendar",
+        "selector": "#c-events-1",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 726.52,
+          "y": 1022.52,
+          "width": 466.96000000000004,
+          "height": 36
+        },
+        "time": 171.07,
+        "words": 6,
+        "seconds": 1.535,
+        "floorSeconds": 1.725,
+        "measured": [
+          {
+            "time": 170.218,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 170.608,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 170.997,
+            "opacity": 0.05,
+            "heightPx": 36
+          },
+          {
+            "time": 171.387,
+            "opacity": 1,
+            "heightPx": 36
+          },
+          {
+            "time": 171.776,
+            "opacity": 1,
+            "heightPx": 36
+          },
+          {
+            "time": 172.166,
+            "opacity": 1,
+            "heightPx": 36
+          },
+          {
+            "time": 172.556,
+            "opacity": 0.67,
+            "heightPx": 36
+          },
+          {
+            "time": 172.945,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 173.335,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 173.724,
+            "opacity": null,
+            "heightPx": null
+          }
+        ]
+      },
+      {
+        "code": "text_below_floor",
+        "severity": "warning",
+        "message": "Type floor is 28 px (2.6% of the 1080 px short side, what a phone can read) and 14 text elements stay under it for 0.5 s or more, the smallest \"NEW\" at 22 px: set reading text to at least 28 px, or put data-layout-ignore on text that is texture rather than reading; see references/look.md.",
+        "text": "NEW",
+        "selector": "#nw1",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 617.37,
+          "y": 245.97,
+          "width": 56.7,
+          "height": 26.06
+        },
+        "time": 214.623,
+        "times": [
+          7.011,
+          13.244,
+          49.858,
+          75.177,
+          95.431,
+          131.656,
+          147.627,
+          160.87,
+          178.009,
+          192.031,
+          211.507,
+          214.623,
+          215.402,
+          216.571
+        ],
+        "fontPx": 22,
+        "floorPx": 28,
+        "seconds": 4.675,
+        "elements": [
+          {
+            "selector": "#nw1",
+            "text": "NEW",
+            "fontPx": 22,
+            "time": 214.623,
+            "seconds": 4.675
+          },
+          {
+            "selector": "#nw5",
+            "text": "NEW",
+            "fontPx": 22,
+            "time": 215.402,
+            "seconds": 3.896
+          },
+          {
+            "selector": "#nw10",
+            "text": "NEW",
+            "fontPx": 22,
+            "time": 216.571,
+            "seconds": 2.727
+          },
+          {
+            "selector": "#s-start > div:nth-of-type(1) > div:nth-of-type(1)",
+            "text": "BetterPosts",
+            "fontPx": 24,
+            "time": 7.011,
+            "seconds": 5.844
+          },
+          {
+            "selector": "#sc-lineup > div:nth-of-type(1) > div:nth-of-type(1)",
+            "text": "Lineup · Applecross",
+            "fontPx": 24,
+            "time": 13.244,
+            "seconds": 36.225
+          },
+          {
+            "selector": "#sc-fixtures > div:nth-of-type(1) > div:nth-of-type(1)",
+            "text": "Fixtures · Scarborough",
+            "fontPx": 24,
+            "time": 49.858,
+            "seconds": 24.93
+          },
+          {
+            "selector": "#sc-results > div:nth-of-type(1) > div:nth-of-type(1)",
+            "text": "Results · Bannockburn",
+            "fontPx": 24,
+            "time": 75.177,
+            "seconds": 19.865
+          },
+          {
+            "selector": "#sc-final > div:nth-of-type(1) > div:nth-of-type(1)",
+            "text": "Final Score · Hilton Bicton",
+            "fontPx": 24,
+            "time": 95.431,
+            "seconds": 35.836
+          },
+          {
+            "selector": "#sc-milestones > div:nth-of-type(1) > div:nth-of-type(1)",
+            "text": "Milestones · Kalamunda",
+            "fontPx": 24,
+            "time": 131.656,
+            "seconds": 15.581
+          },
+          {
+            "selector": "#sc-totw > div:nth-of-type(1) > div:nth-of-type(1)",
+            "text": "Team of the Week · High Wycombe",
+            "fontPx": 24,
+            "time": 147.627,
+            "seconds": 12.854
+          },
+          {
+            "selector": "#sc-events > div:nth-of-type(1) > div:nth-of-type(1)",
+            "text": "Events · Gisborne",
+            "fontPx": 24,
+            "time": 160.87,
+            "seconds": 16.36
+          },
+          {
+            "selector": "#sc-c5 > div:nth-of-type(1) > div:nth-of-type(1)",
+            "text": "Announcement · Applecross",
+            "fontPx": 24,
+            "time": 178.009,
+            "seconds": 13.633
+          },
+          {
+            "selector": "#sc-dnd > div:nth-of-type(1) > div:nth-of-type(1)",
+            "text": "Customise · Gisborne",
+            "fontPx": 24,
+            "time": 192.031,
+            "seconds": 19.087
+          },
+          {
+            "selector": "#s-wall > div:nth-of-type(1) > div:nth-of-type(1)",
+            "text": "Templates",
+            "fontPx": 24,
+            "time": 211.507,
+            "seconds": 7.012
+          }
+        ]
+      }
+    ],
+    "enabled": true,
+    "step": 0.38999999999998636,
+    "samples": 599
+  },
+  "audio": {
+    "ok": true,
+    "errorCount": 0,
+    "warningCount": 0,
+    "infoCount": 0,
+    "findings": []
+  },
+  "hdr": {
+    "autoPromotion": null,
+    "inspection": "available"
+  },
+  "snapshots": {
+    "enabled": false,
+    "files": [],
+    "times": [],
+    "findingFiles": []
+  }
+}
