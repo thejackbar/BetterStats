@@ -14,6 +14,7 @@ import brandWhite from '../assets/bettercricket-white.svg'
 import { IS_AFL, PLATFORM_NAME } from '../lib/sport'
 import { pc, pt, inkOn, registerParts, colorPart, textPart, picked as partPicked } from './layoutParts'
 import { usePostLook } from './postLook'
+import { clubOfTeamName } from './clubNames'
 import { pickHero } from '../lib/playerShots'
 
 // The BetterCricket credit mark used in every template's footer — the real
@@ -2683,6 +2684,11 @@ registerParts({
 // COMPANION 4 — Final score with top performers
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Player names and scores can take their own face (the editor's "Names and figures"
+// font), with the headings staying on the club font. Unset follows the headings.
+const NAMES_FONT = "var(--social-names-font, var(--social-display-font, 'Anton', sans-serif))"
+const NAMES_WEIGHT = 'var(--social-names-font-weight, inherit)'
+
 // One performers panel. Its two groups are pushed APART rather than stacked at
 // the top — the panel is a flex child that grows with the canvas, so on a
 // portrait post the square's top-anchored rows left the bottom half of the box
@@ -2703,7 +2709,7 @@ function PerfPanel({ title, titleColor, titleOpacity = 1, edge, batters = [], bo
   )
 }
 
-export function C4_FinalScore({ width = 1080, height = 1080, result, team, opponent, match, palette, parts }) {
+export function C4_FinalScore({ width = 1080, height = 1080, result, team, opponent, match, palette, parts, swap = false }) {
   const winnerSide = result?.winner === 'OPPONENT' ? 'opponent' : (result?.winner === 'TIE' ? 'tie' : 'team')
   const tb = result?.topBatters || {}
   const tw = result?.topBowlers || {}
@@ -2714,14 +2720,17 @@ export function C4_FinalScore({ width = 1080, height = 1080, result, team, oppon
   // C4 feedback: shrink the result/score blocks, blow the performers up. These
   // rows are the focus now, so name + figures are markedly larger.
   const Perf = ({ p, accent }) => (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', borderBottom: `1px solid ${pc(parts, 'dividerColor', `${palette.ink}1a`)}`, padding: '9px 0', fontFamily: "var(--social-display-font, 'Anton', sans-serif)", color: pc(parts, 'nameColor', palette.ink), lineHeight: 1.05, whiteSpace: 'nowrap', overflow: 'hidden' }}>
-      <span style={{ fontSize: 30, letterSpacing: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', paddingRight: 8 }}>{p.last}</span>
-      <span style={{ fontSize: 24, color: pc(parts, 'c4PerfFigure', accent || palette.accent), letterSpacing: 1 }}>{p.line}</span>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', borderBottom: `1px solid ${pc(parts, 'dividerColor', `${palette.ink}1a`)}`, padding: '9px 0', fontFamily: NAMES_FONT, fontWeight: NAMES_WEIGHT, color: pc(parts, 'nameColor', palette.ink), lineHeight: 1.05, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+      <span style={{ fontSize: 30, letterSpacing: 0.5, minWidth: 0, flex: '1 1 auto', overflow: 'hidden', textOverflow: 'clip', paddingRight: 8 }}>{p.last}</span>
+      <span style={{ fontSize: 24, color: pc(parts, 'c4PerfFigure', accent || palette.accent), letterSpacing: 1, flexShrink: 0 }}>{p.line}</span>
     </div>
   )
   // The season rides on the date ("SAT 1 JAN · 2025-26") and the venue is its
   // own line under it, so the footer no longer carries either.
-  const metaLine = [result?.grade || match.competition, match.round, match.date, match.season]
+  // The grade rides on its own chip beside RESULT (it is what tells one post from the
+  // next on a weekend), so the small line keeps the rest.
+  const gradeText = (result?.grade || '').trim()
+  const metaLine = [gradeText ? '' : match.competition, match.round, match.date, match.season]
     .filter((v, i, a) => v && a.indexOf(v) === i).join(' · ')
   const A = aspectOf(width, height)
   // The result band is the left-aligned margin text with the sponsor slot at its
@@ -2729,6 +2738,7 @@ export function C4_FinalScore({ width = 1080, height = 1080, result, team, oppon
   const { foot, bandH, inset, slot } = _c4Geom(width, height)
   const motm = !!result?.motmLast
   const tied = result?.winner === 'TIE'
+  const tieLine = result?.noWinnerLine || 'MATCH TIED'
   const winnerName = winnerSide === 'team' ? team.name : opponent.name
   const winLine = `${pt(parts, 'c4WinWord', 'WIN')} ${result?.margin || ''}`.trim()
   // "M. EDWARDS" when the first name is known, else just the surname; the
@@ -2750,13 +2760,16 @@ export function C4_FinalScore({ width = 1080, height = 1080, result, team, oppon
       <Halftone color={palette.ink} opacity={0.06} size={10} />
       <Stripes color={palette.accent} opacity={0.03} gap={28} angle={0} />
       <div style={{ position: 'absolute', inset: 0, paddingBottom: foot, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ padding: '32px 48px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: `3px solid ${pc(parts, 'headerRule', palette.accent)}` }}>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ display: 'inline-block', padding: '7px 15px', background: tagBg, color: tagInk, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 20, letterSpacing: 3 }}>{pt(parts, 'c4ChipText', 'RESULT')}</div>
+        <div style={{ padding: '32px 48px 18px', display: 'flex', flexDirection: swap ? 'row-reverse' : 'row', justifyContent: 'space-between', alignItems: 'center', gap: 24, borderBottom: `3px solid ${pc(parts, 'headerRule', palette.accent)}` }}>
+          <div style={{ minWidth: 0, textAlign: swap ? 'right' : 'left' }}>
+            <div style={{ display: 'flex', alignItems: 'stretch', gap: 10, flexWrap: 'wrap', justifyContent: swap ? 'flex-end' : 'flex-start' }}>
+              <div style={{ display: 'inline-block', padding: '7px 15px', background: tagBg, color: tagInk, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 20, letterSpacing: 3 }}>{pt(parts, 'c4ChipText', 'RESULT')}</div>
+              {gradeText ? <div style={{ display: 'inline-block', padding: '7px 15px', background: pc(parts, 'c4GradeBg', palette.ink), color: pc(parts, 'c4GradeColor', partPicked(parts, 'c4GradeBg') ? inkOn(pc(parts, 'c4GradeBg', palette.ink)) : palette.primary), fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 20, letterSpacing: 2, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{gradeText.toUpperCase()}</div> : null}
+            </div>
             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 1.5, color: pc(parts, 'roundColor', palette.ink), opacity: 0.7, marginTop: 9 }}>{metaLine}</div>
             {match.venue && <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 1.5, color: pc(parts, 'c4VenueColor', palette.ink), opacity: 0.7, marginTop: 4 }}>{match.venue.toUpperCase()}</div>}
           </div>
-          <BrandLockup team={team} palette={palette} size={92} align="right" nameSize={26} nameColor={pc(parts, 'clubColor', undefined)} style={{ maxWidth: 460 }} />
+          <BrandLockup team={team} palette={palette} size={92} align={swap ? 'left' : 'right'} nameSize={26} nameColor={pc(parts, 'clubColor', undefined)} style={{ maxWidth: 460 }} />
         </div>
         <div style={{ padding: '18px 48px 12px', display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: 20, alignItems: 'center' }}>
           <div style={{ textAlign: 'center', padding: '13px 16px', background: winnerSide === 'team' ? `${winC}22` : 'transparent', border: `2px solid ${winnerSide === 'team' ? winC : otherEdge}`, position: 'relative' }}>
@@ -2765,7 +2778,7 @@ export function C4_FinalScore({ width = 1080, height = 1080, result, team, oppon
               <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={84} shape="shield" />
               <div style={{ textAlign: 'left' }}>
                 <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 22, letterSpacing: 1, color: pc(parts, 'c4TeamName', palette.ink), lineHeight: 1 }}>{team.name}</div>
-                <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 46, letterSpacing: -0.5, lineHeight: 1, color: pc(parts, 'statColor', palette.ink), marginTop: 4 }}>{result?.teamScore || '—'}</div>
+                <div style={{ fontFamily: NAMES_FONT, fontWeight: NAMES_WEIGHT, fontSize: 46, letterSpacing: -0.5, lineHeight: 1, color: pc(parts, 'statColor', palette.ink), marginTop: 4 }}>{result?.teamScore || '—'}</div>
               </div>
             </div>
           </div>
@@ -2776,15 +2789,15 @@ export function C4_FinalScore({ width = 1080, height = 1080, result, team, oppon
               <ClubLogo src={opponent.logo} monogram={opponent.monogram} color={palette.ink} size={64} shape="shield" />
               <div style={{ textAlign: 'left' }}>
                 <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 22, letterSpacing: 1, color: pc(parts, 'c4TeamName', palette.ink), lineHeight: 1 }}>{opponent.name}</div>
-                <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 46, letterSpacing: -0.5, lineHeight: 1, color: pc(parts, 'statColor', palette.ink), marginTop: 4 }}>{result?.oppScore || '—'}</div>
+                <div style={{ fontFamily: NAMES_FONT, fontWeight: NAMES_WEIGHT, fontSize: 46, letterSpacing: -0.5, lineHeight: 1, color: pc(parts, 'statColor', palette.ink), marginTop: 4 }}>{result?.oppScore || '—'}</div>
               </div>
             </div>
           </div>
         </div>
         <div style={{ margin: '6px 48px 18px', flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, minHeight: 0 }}>
-          <PerfPanel title={`${team.short} · ${pt(parts, 'c4PerfTitle', 'TOP PERFORMERS')}`} titleColor={pc(parts, 'c4TeamTitle', palette.accent)} edge={pc(parts, 'cardBorder', palette.accent)}
+          <PerfPanel title={`${pt(parts, 'c4TeamLabel', '').trim() || team.short} · ${pt(parts, 'c4PerfTitle', 'TOP PERFORMERS')}`} titleColor={pc(parts, 'c4TeamTitle', palette.accent)} edge={pc(parts, 'cardBorder', palette.accent)}
             batters={teamBatters} bowlers={teamBowlers} palette={palette} Perf={Perf} tall={A !== 'square'} parts={parts} />
-          <PerfPanel title={`${opponent.short} · ${pt(parts, 'c4PerfTitle', 'TOP PERFORMERS')}`} titleColor={pc(parts, 'c4OppTitle', palette.ink)} titleOpacity={0.85} edge={pc(parts, 'c4OppEdge', `${palette.ink}55`)}
+          <PerfPanel title={`${pt(parts, 'c4OppLabel', '').trim() || opponent.short} · ${pt(parts, 'c4PerfTitle', 'TOP PERFORMERS')}`} titleColor={pc(parts, 'c4OppTitle', palette.ink)} titleOpacity={0.85} edge={pc(parts, 'c4OppEdge', `${palette.ink}55`)}
             batters={oppBatters} bowlers={oppBowlers} palette={palette} Perf={Perf} tall={A !== 'square'} parts={parts} />
         </div>
         <div style={{ margin: '0 48px 18px', height: bandH, flexShrink: 0, boxSizing: 'border-box', padding: `${inset}px ${inset}px ${inset}px 24px`, background: bandBg, borderLeft: `4px solid ${pc(parts, 'c4BandRule', palette.accent)}`, display: 'flex', alignItems: 'stretch', gap: 20 }}>
@@ -2793,8 +2806,8 @@ export function C4_FinalScore({ width = 1080, height = 1080, result, team, oppon
               wrapped line) is what lets the margin and the chip both be large. */}
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 6, textAlign: 'left' }}>
             {tied ? (
-              <AutoFitText text="MATCH TIED" max={56} min={26} measureDeps={[width, height]}
-                style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: -0.5, lineHeight: 1.05, color: pc(parts, 'c4MarginColor', onBand) }}>MATCH TIED</AutoFitText>
+              <AutoFitText text={tieLine} max={56} min={26} measureDeps={[width, height]}
+                style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: -0.5, lineHeight: 1.05, color: pc(parts, 'c4MarginColor', onBand) }}>{tieLine}</AutoFitText>
             ) : (
               <>
                 <AutoFitText text={winnerName} max={26} min={14} measureDeps={[width, height]}
@@ -2804,9 +2817,9 @@ export function C4_FinalScore({ width = 1080, height = 1080, result, team, oppon
               </>
             )}
             {motm && (
-              <div style={{ alignSelf: 'flex-start', maxWidth: '100%', boxSizing: 'border-box', display: 'flex', alignItems: 'baseline', gap: 12, padding: '6px 16px', marginTop: 4, background: pc(parts, 'c4MotmBg', `${palette.ink}10`), border: `1px solid ${pc(parts, 'c4MotmBorder', palette.accent)}`, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+              <div style={{ alignSelf: 'stretch', boxSizing: 'border-box', display: 'flex', alignItems: 'baseline', gap: 12, padding: '6px 16px', marginTop: 4, background: pc(parts, 'c4MotmBg', `${palette.ink}10`), border: `1px solid ${pc(parts, 'c4MotmBorder', palette.accent)}`, whiteSpace: 'nowrap', overflow: 'hidden' }}>
                 <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 2, color: pc(parts, 'c4MotmLabelColor', palette.accent), flexShrink: 0 }}>{pt(parts, 'c4MotmLabel', '★ MOTM')}</span>
-                <span style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, letterSpacing: 0.5, lineHeight: 1.05, color: pc(parts, 'c4MotmName', onBand), overflow: 'hidden', textOverflow: 'ellipsis' }}>{motmName}</span>
+                <span style={{ fontFamily: NAMES_FONT, fontWeight: NAMES_WEIGHT, fontSize: 30, letterSpacing: 0.5, lineHeight: 1.05, color: pc(parts, 'c4MotmName', onBand), minWidth: 0, flex: '1 1 auto', overflow: 'hidden', textOverflow: 'clip' }}>{motmName}</span>
                 {motmFigures && <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 16, letterSpacing: 1, color: pc(parts, 'c4MotmFigures', onBand), opacity: 0.75, flexShrink: 0 }}>{motmFigures}</span>}
               </div>
             )}
@@ -2826,6 +2839,8 @@ registerParts({
     textPart('c4ChipText', 'Tag words', 'Header', () => 'RESULT'),
     colorPart('badgeBg', 'Tags (Result and Winner)', 'Header', (p) => p.accent),
     colorPart('badgeColor', 'Tag text', 'Header', (p) => p.primary),
+    colorPart('c4GradeBg', 'Grade tag', 'Header', (p) => p.ink),
+    colorPart('c4GradeColor', 'Grade tag text', 'Header', (p) => p.primary),
     colorPart('roundColor', 'Competition, round and date', 'Header', (p) => p.ink),
     colorPart('c4VenueColor', 'Venue', 'Header', (p) => p.ink),
     colorPart('clubColor', 'Club name', 'Header', (p) => p.ink),
@@ -2836,6 +2851,8 @@ registerParts({
     colorPart('statColor', 'Scores', 'Scores', (p) => p.ink),
     colorPart('c4VsColor', 'The "VS"', 'Scores', (p) => p.accent),
     textPart('c4PerfTitle', 'Panel title words', 'Top performers', () => 'TOP PERFORMERS'),
+    textPart('c4TeamLabel', 'Your panel label (default: your short code)', 'Top performers', () => ''),
+    textPart('c4OppLabel', 'Opposition panel label (default: their short code)', 'Top performers', () => ''),
     colorPart('cardBg', 'Panels', 'Top performers', null, { autoLabel: 'Soft tint' }),
     colorPart('cardBorder', 'Your panel edge', 'Top performers', (p) => p.accent),
     colorPart('c4OppEdge', 'Opposition panel edge', 'Top performers', (p) => `${p.ink}55`),
@@ -2931,6 +2948,49 @@ function _scRowFont(panelH, chrome, totalRows, rp, cap) {
   return Math.max(12, Math.min(cap, Math.floor((budget / totalRows - 2 * rp) / 1.2)))
 }
 
+// A scorecard post is 1080 tall and its sponsor bar takes the bottom. The team panel
+// gets whatever the heading leaves, measured, because the heading is taller when the
+// result line wraps or the matchup strip is on. A fixed panel height ran the last
+// rows of a long card (9 bowlers) under the sponsor bar.
+const SC_H = 1080
+const SC_CLEAR = 84
+function useBoxHeight(fallback) {
+  const ref = useRef(null)
+  const [h, setH] = useState(fallback)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return undefined
+    // offsetHeight is layout pixels, so the editor's scale() transform does not skew it.
+    const read = () => { const v = el.offsetHeight; if (v > 0) setH(v) }
+    read()
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(read) : null
+    if (ro) ro.observe(el)
+    return () => { if (ro) ro.disconnect() }
+  }, [])
+  return [ref, h]
+}
+
+// "Leeming Spartan (crest) v Riverton Rostrata (crest)" across the top of a page, so
+// either page says who is playing who. Club names, not grade teams.
+function ScMatchup({ m, ink, dim, size = 28, style = {} }) {
+  const side = (t) => ({ name: clubOfTeamName(t?.name || '').toUpperCase(), logo: t?.logo || null, mono: t?.short || t?.monogram || '' })
+  const h = side(m?.home)
+  const a = side(m?.away)
+  const name = (n, align) => (
+    <span style={{ fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: size, letterSpacing: 1, lineHeight: 1.2, color: ink, minWidth: 0, flex: '0 1 auto', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'clip', textAlign: align }}>{n}</span>
+  )
+  return (
+    <div data-testid="sc-matchup" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: Math.round(size * 0.55), marginBottom: 10, minWidth: 0, ...style }}>
+      <ClubLogo monogram={h.mono} color={ink} src={h.logo} size={Math.round(size * 1.35)} shape="shield" />
+      {name(h.name, 'right')}
+      <span style={{ fontFamily: SC_MONO, fontSize: Math.round(size * 0.5), letterSpacing: 2, color: dim, flexShrink: 0 }}>V</span>
+      {name(a.name, 'left')}
+      <ClubLogo monogram={a.mono} color={ink} src={a.logo} size={Math.round(size * 1.35)} shape="shield" />
+    </div>
+  )
+}
+ScMatchup.displayName = 'ScMatchup'
+
 function ScSponsorFooter({ bg, ink, dim, dimmer, rule, style = {}, sponsors = [] }) {
   const slots = [0, 1]
   return (
@@ -2959,6 +3019,8 @@ function ScSponsorFooter({ bg, ink, dim, dimmer, rule, style = {}, sponsors = []
 // ─── SC1: Broadcast ───────────────────────────────────────────────────────────
 export function SC1_Broadcast({ match, palette = {}, square = false, only = 'home', parts }) {
   const m = match
+  const [headRef, headH] = useBoxHeight(170)
+  const panelBox = SC_H - headH - SC_CLEAR
   const dark   = _scIsDark(palette.primary)
   const bg     = palette.primary   || (dark ? '#0a1224' : '#f4f3ee')
   const panel  = palette.secondary || (dark ? '#101c38' : '#ffffff')
@@ -3037,7 +3099,7 @@ export function SC1_Broadcast({ match, palette = {}, square = false, only = 'hom
                 <span>{p.last}</span>
                 {p.role && <span style={{ fontFamily: SC_MONO, fontSize: 10, color: roleInk, letterSpacing: 1, marginLeft: 4 }}>({p.role})</span>}
               </div>
-              <div style={{ fontFamily: SC_BODY, fontSize: bsf, color: outInk, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{dnb ? 'did not bat' : (p.notOut ? 'not out' : p.out)}</div>
+              <div style={{ fontFamily: SC_BODY, fontSize: bsf, color: outInk, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{dnb ? 'did not bat' : (p.notOut ? 'not out' : (p.howOut || p.out))}</div>
               <div style={{ textAlign: 'right', fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: brf, lineHeight: 1, color: dnb ? dim : runsInk }}>{dnb ? '—' : (p.notOut ? `${p.r}*` : p.r)}</div>
               <div style={{ textAlign: 'right', fontFamily: SC_MONO, fontSize: bsf, color: minorInk }}>{dnb ? '—' : p.b}</div>
               <div style={{ textAlign: 'right', fontFamily: SC_MONO, fontSize: bsf, color: minorInk }}>{dnb ? '—' : p.fours}</div>
@@ -3081,8 +3143,9 @@ export function SC1_Broadcast({ match, palette = {}, square = false, only = 'hom
     return (
       <div style={{ width: 1080, height: 1080, position: 'relative', overflow: 'hidden', background: bg, color: ink, fontFamily: SC_BODY }}>
         <Halftone color={ink} opacity={dark ? 0.04 : 0.05} size={12} />
-        <div style={{ padding: '18px 20px 10px' }}>
-          <div style={{ padding: '14px 20px', background: cardFill, border: `1px solid ${cardEdge}`, display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', gap: 20 }}>
+        <div ref={headRef} style={{ padding: '18px 20px 10px' }}>
+          <ScMatchup m={m} ink={ink} dim={dim} size={26} />
+          <div style={{ padding: '14px 20px', background: pc(parts, 'sc1HeadBg', cardFill), border: `1px solid ${cardEdge}`, display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', gap: 20 }}>
             <div>
               <div style={{ display: 'inline-block', padding: '4px 10px', background: chipBg, color: chipInk, fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 12, letterSpacing: 3 }}>{m.meta?.competition} · {m.meta?.round} · {m.meta?.format}</div>
               <div style={{ fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 32, letterSpacing: 1, lineHeight: 1.05, color: pc(parts, 'title1Color', ink), marginTop: 8 }}>{m.meta?.result}</div>
@@ -3100,8 +3163,8 @@ export function SC1_Broadcast({ match, palette = {}, square = false, only = 'hom
             )}
           </div>
         </div>
-        <div style={{ padding: '0 20px', height: 880 }}>
-          <TeamPanel team={team} accentC={team.color || (side === 'home' ? '#1a4eb8' : '#cc1f2c')} side={side} panelH={880} />
+        <div style={{ padding: '0 20px', height: panelBox }}>
+          <TeamPanel team={team} accentC={team.color || (side === 'home' ? '#1a4eb8' : '#cc1f2c')} side={side} panelH={panelBox} />
         </div>
         <ScSponsorFooter bg={footBg} ink={footInk} dim={dim} dimmer={footDimmer} rule={footRule} sponsors={m.meta?.sponsors} />
         <GrainSVG opacity={dark ? 0.22 : 0.16} id={`sc1g-${side}`} />
@@ -3112,8 +3175,9 @@ export function SC1_Broadcast({ match, palette = {}, square = false, only = 'hom
   return (
     <LayerRoot style={{ width: 1920, height: 1080, position: 'relative', overflow: 'hidden', background: bg, color: ink, fontFamily: SC_BODY }}>
       <Halftone color={ink} opacity={dark ? 0.04 : 0.05} size={12} />
-      <div style={{ padding: '18px 24px 12px' }}>
-        <div style={{ padding: '16px 24px', background: cardFill, border: `1px solid ${cardEdge}`, display: 'grid', gridTemplateColumns: '1.4fr 1fr auto', alignItems: 'center', gap: 28 }}>
+      <div ref={headRef} style={{ padding: '18px 24px 12px' }}>
+        <ScMatchup m={m} ink={ink} dim={dim} size={30} />
+        <div style={{ padding: '16px 24px', background: pc(parts, 'sc1HeadBg', cardFill), border: `1px solid ${cardEdge}`, display: 'grid', gridTemplateColumns: '1.4fr 1fr auto', alignItems: 'center', gap: 28 }}>
           <div>
             <div style={{ display: 'inline-block', padding: '4px 10px', background: chipBg, color: chipInk, fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 13, letterSpacing: 3 }}>{m.meta?.competition} · {m.meta?.round} · {m.meta?.format}</div>
             <div style={{ fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 42, letterSpacing: 1, lineHeight: 1.02, color: pc(parts, 'title1Color', ink), marginTop: 8 }}>{m.meta?.result}</div>
@@ -3134,9 +3198,9 @@ export function SC1_Broadcast({ match, palette = {}, square = false, only = 'hom
           </div>
         </div>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, padding: '0 24px', height: 800 }}>
-        <TeamPanel team={m.home || {}} accentC={m.home?.color || '#1a4eb8'} side='home' />
-        <TeamPanel team={m.away || {}} accentC={m.away?.color || '#cc1f2c'} side='away' />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, padding: '0 24px', height: panelBox }}>
+        <TeamPanel team={m.home || {}} accentC={m.home?.color || '#1a4eb8'} side='home' panelH={panelBox} />
+        <TeamPanel team={m.away || {}} accentC={m.away?.color || '#cc1f2c'} side='away' panelH={panelBox} />
       </div>
       <ScSponsorFooter bg={footBg} ink={footInk} dim={dim} dimmer={footDimmer} rule={footRule} sponsors={m.meta?.sponsors} />
       <GrainSVG opacity={dark ? 0.22 : 0.16} id='sc1g' />
@@ -3151,7 +3215,8 @@ registerParts({
     colorPart('title1Color', 'Result line', 'Match heading', (p) => p.ink),
     colorPart('subColor', 'Date and venue line', 'Match heading', (p) => p.ink),
     colorPart('infoLabelColor', 'Toss, ground and competition labels', 'Match heading', (p) => p.accent),
-    colorPart('cardBg', 'Heading and team panels', 'Match heading', (p) => p.secondary),
+    colorPart('sc1HeadBg', 'Match heading box (result, toss, player of the match)', 'Match heading', null, { autoLabel: 'Same as the team panels' }),
+    colorPart('cardBg', 'Team panels', 'Match heading', (p) => p.secondary),
     colorPart('cardBorder', 'Panel outlines', 'Match heading', (p) => p.ink),
     textPart('motmLabel', 'Player of the match wording', 'Player of the match', () => 'PLAYER OF THE MATCH'),
     colorPart('motmColor', 'Player of the match label and star', 'Player of the match', (p) => p.accent),
@@ -3183,6 +3248,8 @@ registerParts({
 // ─── SC2: Brutalist ───────────────────────────────────────────────────────────
 export function SC2_Brutalist({ match, palette = {}, square = false, only = 'home', parts }) {
   const m = match
+  const [headRef, headH] = useBoxHeight(150)
+  const panelBox = SC_H - headH - SC_CLEAR
   const texture = usePostLook().texture !== false
   const dark     = _scIsDark(palette.primary)
   const bg       = palette.primary   || (dark ? '#0a0a0c' : '#f0ece2')
@@ -3256,7 +3323,7 @@ export function SC2_Brutalist({ match, palette = {}, square = false, only = 'hom
                 {p.first && <span style={{ color: firstInk, fontSize: bff, fontWeight: 300 }}>{p.first} </span>}<span>{p.last}</span>
                 {p.role && <span style={{ fontFamily: SC_MONO, fontSize: 9, color: roleInk, letterSpacing: 1 }}> ({p.role})</span>}
               </div>
-              <div style={{ fontFamily: SC_BODY, fontSize: bsf, color: outInk, fontStyle: 'italic', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{dnb ? 'did not bat' : (p.notOut ? 'not out' : p.out)}</div>
+              <div style={{ fontFamily: SC_BODY, fontSize: bsf, color: outInk, fontStyle: 'italic', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{dnb ? 'did not bat' : (p.notOut ? 'not out' : (p.howOut || p.out))}</div>
               <div style={{ textAlign: 'right', fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: brf, lineHeight: 1, color: dnb ? dim : runsInk, letterSpacing: -0.5 }}>{dnb ? '—' : (p.notOut ? `${p.r}*` : p.r)}</div>
               <div style={{ textAlign: 'right', fontFamily: SC_MONO, fontSize: bsf, color: minorInk }}>{dnb ? '—' : p.b}</div>
               <div style={{ textAlign: 'right', fontFamily: SC_MONO, fontSize: bsf, color: minorInk }}>{dnb ? '—' : p.fours}</div>
@@ -3301,7 +3368,8 @@ export function SC2_Brutalist({ match, palette = {}, square = false, only = 'hom
         <Stripes color={ink} opacity={0.04} gap={6} angle={0} />
         <Halftone color={ink} opacity={dark ? 0.05 : 0.06} size={12} />
         <div style={{ position: 'absolute', right: -30, top: 200, fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 200, lineHeight: 0.8, color: ink, opacity: 0.04, letterSpacing: -10, userSelect: 'none', ...(texture ? null : { display: 'none' }) }}>FINAL</div>
-        <div style={{ background: headFill, color: headInk, padding: '16px 24px', display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', gap: 24, borderBottom: `2px solid ${headRule}` }}>
+        <div ref={headRef} style={{ background: headFill, color: headInk, padding: '16px 24px', display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', gap: 24, borderBottom: `2px solid ${headRule}` }}>
+          <div style={{ gridColumn: '1 / -1' }}><ScMatchup m={m} ink={headInk} dim={headInk} size={26} style={{ marginBottom: 0 }} /></div>
           <div>
             <div style={{ fontFamily: SC_MONO, fontSize: 11, letterSpacing: 3, opacity: 0.85, color: pc(parts, 'roundColor', undefined) }}>// {m.meta?.competition} · {m.meta?.round} · {m.meta?.format}</div>
             <div style={{ fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 38, letterSpacing: 1, lineHeight: 1.02, marginTop: 4, color: pc(parts, 'title1Color', undefined) }}>{m.meta?.result}</div>
@@ -3315,8 +3383,8 @@ export function SC2_Brutalist({ match, palette = {}, square = false, only = 'hom
             </div>
           )}
         </div>
-        <div style={{ height: 850 }}>
-          <TeamCol team={m[side] || {}} side={side} panelH={850} />
+        <div style={{ height: panelBox }}>
+          <TeamCol team={m[side] || {}} side={side} panelH={panelBox} />
         </div>
         <ScSponsorFooter bg={footBg} ink={footInk} dim={_toRgba(footInk, 0.55)} dimmer={_toRgba(footInk, 0.35)} rule={ruleStrong} sponsors={m.meta?.sponsors} style={{ borderRadius: 0, borderTop: `3px solid ${footRule}` }} />
         <GrainSVG opacity={dark ? 0.28 : 0.18} id={`sc2g-${side}`} />
@@ -3329,7 +3397,8 @@ export function SC2_Brutalist({ match, palette = {}, square = false, only = 'hom
       <Stripes color={ink} opacity={0.04} gap={6} angle={0} />
       <Halftone color={ink} opacity={dark ? 0.05 : 0.06} size={12} />
       <div style={{ position: 'absolute', right: -30, top: 200, fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 360, lineHeight: 0.8, color: ink, opacity: 0.04, letterSpacing: -10, userSelect: 'none', ...(texture ? null : { display: 'none' }) }}>FINAL</div>
-      <div style={{ background: headFill, color: headInk, padding: '18px 32px', display: 'grid', gridTemplateColumns: '1.4fr 1fr auto', alignItems: 'center', gap: 32, borderBottom: `2px solid ${headRule}` }}>
+      <div ref={headRef} style={{ background: headFill, color: headInk, padding: '18px 32px', display: 'grid', gridTemplateColumns: '1.4fr 1fr auto', alignItems: 'center', gap: 32, borderBottom: `2px solid ${headRule}` }}>
+        <div style={{ gridColumn: '1 / -1' }}><ScMatchup m={m} ink={headInk} dim={headInk} size={30} style={{ marginBottom: 0 }} /></div>
         <div>
           <div style={{ fontFamily: SC_MONO, fontSize: 12, letterSpacing: 3, opacity: 0.85, color: pc(parts, 'roundColor', undefined) }}>// {m.meta?.competition} · {m.meta?.round} · {m.meta?.format}</div>
           <div style={{ fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 52, letterSpacing: 1, lineHeight: 1, marginTop: 4, color: pc(parts, 'title1Color', undefined) }}>{m.meta?.result}</div>
@@ -3346,9 +3415,9 @@ export function SC2_Brutalist({ match, palette = {}, square = false, only = 'hom
           <div style={{ fontFamily: SC_MONO, fontSize: 11, color: ink, opacity: 0.7, marginTop: 4 }}>{m.meta?.motm?.line}</div>
         </div>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', height: 760 }}>
-        <TeamCol team={m.home || {}} side='home' />
-        <TeamCol team={m.away || {}} side='away' />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', height: panelBox }}>
+        <TeamCol team={m.home || {}} side='home' panelH={panelBox} />
+        <TeamCol team={m.away || {}} side='away' panelH={panelBox} />
       </div>
       <ScSponsorFooter bg={footBg} ink={footInk} dim={_toRgba(footInk, 0.55)} dimmer={_toRgba(footInk, 0.35)} rule={ruleStrong} sponsors={m.meta?.sponsors} style={{ borderRadius: 0, borderTop: `3px solid ${footRule}` }} />
       <GrainSVG opacity={dark ? 0.28 : 0.18} id='sc2g' />
@@ -3396,6 +3465,8 @@ registerParts({
 // ─── SC3: Dashboard ───────────────────────────────────────────────────────────
 export function SC3_Dashboard({ match, palette = {}, square = false, only = 'home', parts }) {
   const m = match
+  const [headRef, headH] = useBoxHeight(170)
+  const panelBox = SC_H - headH - SC_CLEAR
   const dark   = _scIsDark(palette.primary)
   const bg     = palette.primary   || (dark ? '#0e1116' : '#f3f4f6')
   const card   = palette.secondary || (dark ? '#171b22' : '#ffffff')
@@ -3430,7 +3501,7 @@ export function SC3_Dashboard({ match, palette = {}, square = false, only = 'hom
     <div style={{ background: cardFill, borderRadius: 16, border: `1px solid ${cardEdge}`, boxShadow: dark ? '0 1px 0 rgba(255,255,255,0.04)' : '0 1px 2px rgba(17,24,39,0.06)', padding: 18, ...style }}>{children}</div>
   )
 
-  const TeamCard = ({ team, accentC, side }) => {
+  const TeamCard = ({ team, accentC, side, panelH = 760 }) => {
     const batCount = (team.batting || []).length
     const bowlCount = (team.bowling || []).length
     const totalRows = Math.max(1, batCount + bowlCount)
@@ -3438,7 +3509,7 @@ export function SC3_Dashboard({ match, palette = {}, square = false, only = 'hom
     // 260 of that, so every row (batters and bowlers) shares the other 498. A side
     // with 12 batters and 9 bowlers used to run off the bottom of the card and lose
     // its last bowlers; the padding now shrinks with the row so the rows always fit.
-    const rowH = Math.max(18, Math.min(28, Math.floor(498 / totalRows)))
+    const rowH = Math.max(14, Math.min(28, Math.floor((panelH - 282) / totalRows)))
     const sc = rowH / 28
     const bnf = Math.max(11, Math.round(14 * sc))
     const rp = rowH >= 28 ? 5 : Math.max(1, Math.floor((rowH - 1 - bnf * 1.25) / 2))
@@ -3476,7 +3547,7 @@ export function SC3_Dashboard({ match, palette = {}, square = false, only = 'hom
                 {p.first && <span style={{ color: firstInk, fontSize: bff, fontWeight: 400 }}>{p.first} </span>}<span>{p.last}</span>
                 {p.role && <span style={{ fontSize: 9, fontWeight: 600, letterSpacing: 1, padding: '1px 5px', borderRadius: 4, background: roleFill, color: roleInk }}> {p.role}</span>}
               </div>
-              <div style={{ fontFamily: SC_BODY, fontSize: bsf, color: outInk, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{dnb ? 'did not bat' : (p.notOut ? 'not out' : p.out)}</div>
+              <div style={{ fontFamily: SC_BODY, fontSize: bsf, color: outInk, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{dnb ? 'did not bat' : (p.notOut ? 'not out' : (p.howOut || p.out))}</div>
               <div style={{ textAlign: 'right', fontFamily: SC_BODY, fontSize: brf, fontWeight: 700, color: dnb ? dim : runsInk, lineHeight: 1 }}>{dnb ? '—' : (p.notOut ? `${p.r}*` : p.r)}</div>
               <div style={{ textAlign: 'right', fontFamily: SC_MONO, fontSize: bsf, color: minorInk }}>{dnb ? '—' : p.b}</div>
               <div style={{ textAlign: 'right', fontFamily: SC_MONO, fontSize: bsf, color: minorInk }}>{dnb ? '—' : p.fours}</div>
@@ -3520,8 +3591,9 @@ export function SC3_Dashboard({ match, palette = {}, square = false, only = 'hom
     const team = m[side] || {}
     return (
       <div style={{ width: 1080, height: 1080, position: 'relative', overflow: 'hidden', background: bg, color: ink, fontFamily: SC_BODY }}>
-        <div style={{ padding: '20px 24px 10px' }}>
-          <Card style={{ padding: '14px 20px', display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', gap: 20 }}>
+        <div ref={headRef} style={{ padding: '20px 24px 10px' }}>
+          <ScMatchup m={m} ink={ink} dim={dim} size={26} />
+          <Card style={{ background: pc(parts, 'sc3HeadBg', cardFill), padding: '14px 20px', display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', gap: 20 }}>
             <div>
               <div style={{ fontFamily: SC_BODY, fontSize: 11, letterSpacing: 2, color: pc(parts, 'roundColor', dim), fontWeight: 600 }}>{m.meta?.competition} · {m.meta?.round} · {m.meta?.format}</div>
               <div style={{ fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 32, letterSpacing: 0.5, lineHeight: 1.05, color: pc(parts, 'title1Color', ink), marginTop: 4 }}>{m.meta?.result}</div>
@@ -3539,8 +3611,8 @@ export function SC3_Dashboard({ match, palette = {}, square = false, only = 'hom
             )}
           </Card>
         </div>
-        <div style={{ padding: '0 24px', height: 880 }}>
-          <TeamCard team={team} accentC={team.color || (side === 'home' ? '#2563eb' : '#10b981')} side={side} />
+        <div style={{ padding: '0 24px', height: panelBox }}>
+          <TeamCard team={team} accentC={team.color || (side === 'home' ? '#2563eb' : '#10b981')} side={side} panelH={panelBox} />
         </div>
         <ScSponsorFooter bg={footBg} ink={footInk} dim={dim} dimmer={footDimmer} rule={footRule} sponsors={m.meta?.sponsors} />
       </div>
@@ -3549,8 +3621,9 @@ export function SC3_Dashboard({ match, palette = {}, square = false, only = 'hom
 
   return (
     <LayerRoot style={{ width: 1920, height: 1080, position: 'relative', overflow: 'hidden', background: bg, color: ink, fontFamily: SC_BODY }}>
-      <div style={{ padding: '20px 32px 12px' }}>
-        <Card style={{ padding: '16px 24px', display: 'grid', gridTemplateColumns: '1.4fr 1fr auto', alignItems: 'center', gap: 28 }}>
+      <div ref={headRef} style={{ padding: '20px 32px 12px' }}>
+        <ScMatchup m={m} ink={ink} dim={dim} size={30} />
+        <Card style={{ background: pc(parts, 'sc3HeadBg', cardFill), padding: '16px 24px', display: 'grid', gridTemplateColumns: '1.4fr 1fr auto', alignItems: 'center', gap: 28 }}>
           <div>
             <div style={{ fontFamily: SC_BODY, fontSize: 11, letterSpacing: 2, color: pc(parts, 'roundColor', dim), fontWeight: 600 }}>{m.meta?.competition} · {m.meta?.round} · {m.meta?.format}</div>
             <div style={{ fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 42, letterSpacing: 0.5, lineHeight: 1.02, color: pc(parts, 'title1Color', ink), marginTop: 4 }}>{m.meta?.result}</div>
@@ -3571,9 +3644,9 @@ export function SC3_Dashboard({ match, palette = {}, square = false, only = 'hom
           </div>
         </Card>
       </div>
-      <div style={{ padding: '0 32px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, height: 820 }}>
-        <TeamCard team={m.home || {}} accentC={m.home?.color || '#2563eb'} side='home' />
-        <TeamCard team={m.away || {}} accentC={m.away?.color || '#10b981'} side='away' />
+      <div style={{ padding: '0 32px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, height: panelBox }}>
+        <TeamCard team={m.home || {}} accentC={m.home?.color || '#2563eb'} side='home' panelH={panelBox} />
+        <TeamCard team={m.away || {}} accentC={m.away?.color || '#10b981'} side='away' panelH={panelBox} />
       </div>
       <ScSponsorFooter bg={footBg} ink={footInk} dim={dim} dimmer={footDimmer} rule={footRule} sponsors={m.meta?.sponsors} />
     </LayerRoot>
@@ -3586,7 +3659,8 @@ registerParts({
     colorPart('title1Color', 'Result line', 'Match heading', (p) => p.ink),
     colorPart('subColor', 'Date and venue line', 'Match heading', (p) => p.ink),
     colorPart('infoLabelColor', 'Toss, ground and competition labels', 'Match heading', (p) => p.ink),
-    colorPart('cardBg', 'Heading and team cards', 'Match heading', (p) => p.secondary),
+    colorPart('sc3HeadBg', 'Match heading box (result, toss, player of the match)', 'Match heading', null, { autoLabel: 'Same as the team cards' }),
+    colorPart('cardBg', 'Team cards', 'Match heading', (p) => p.secondary),
     colorPart('cardBorder', 'Card outlines', 'Match heading', (p) => p.ink),
     textPart('motmLabel', 'Player of the match wording', 'Player of the match', () => 'PLAYER OF THE MATCH'),
     colorPart('motmColor', 'Player of the match label and star', 'Player of the match', (p) => p.accent),

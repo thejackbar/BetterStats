@@ -507,6 +507,9 @@ async def get_grade_fixtures(grade_id: str, *, include_live: bool = True, force:
             "away_org_id": away_org.get("id"),
             "home_logo": home_org.get("logoUrl"),
             "away_logo": away_org.get("logoUrl"),
+            # The CLUB's name (the team's own is "Maddington Seventh Grade").
+            "home_org_name": home_org.get("name"),
+            "away_org_name": away_org.get("name"),
         })
     return out
 

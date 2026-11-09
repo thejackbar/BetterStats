@@ -12,6 +12,7 @@ import { GrainSVG as Grain, Halftone, Stripes, ClubLogo, BrandLockup, CreditMark
 import { aspectOf, pick, share, grow } from './postAspect'
 import { LayerRoot } from './postLayers'
 import { pc, pt, inkOn, registerParts, colorPart, textPart, picked as partPicked } from './layoutParts'
+import { clubOfTeamName } from './clubNames'
 import { usePostLook } from './postLook'
 
 const DISPLAY = "var(--social-display-font, 'Anton', sans-serif)"
@@ -180,7 +181,7 @@ function outcomeBits(r) {
   const tied = r.winner === 'tie'
   const won = r.winner === 'us'
   const winnerName = tied ? '' : (won ? r.us.name : r.them.name)
-  const line = tied ? 'MATCH TIED' : `${winnerName} WIN ${r.margin || ''}`.trim()
+  const line = tied ? (r.resultLabel || 'MATCH TIED') : `${winnerName} WIN ${r.margin || ''}`.trim()
   return { tied, won, winnerName, line }
 }
 
@@ -310,7 +311,7 @@ export function FixtureList({ palette: pal, width = 1080, height = 1080, meta = 
                 <div style={{ fontFamily: DISPLAY, fontSize: t(30), letterSpacing: 0.5, lineHeight: 0.95, color: pc(parts, 'gradeColor', undefined) }}>{r.grade}</div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 16, minWidth: 0 }}>
-                <span style={{ fontFamily: DISPLAY, fontSize: 20, letterSpacing: 2, color: home ? pc(parts, 'homeColor', pal.accent) : pc(parts, 'awayColor', pal.ink), opacity: home ? 1 : 0.55, width: 40, flexShrink: 0 }}>{home ? 'VS' : '@'}</span>
+                <span style={{ fontFamily: DISPLAY, fontSize: 20, letterSpacing: 2, color: home ? pc(parts, 'homeColor', pal.accent) : pc(parts, 'awayColor', pal.ink), opacity: home ? 1 : 0.55, width: 40, flexShrink: 0 }}>{home || meta.allVs ? 'VS' : '@'}</span>
                 <Monogram text={r.oppMono} logo={r.oppLogo} size={50} fg={pc(parts, 'crestColor', pal.ink)} bg={pc(parts, 'crestBg', `${pal.ink}12`)} ring={pc(parts, 'crestRing', `${pal.ink}33`)} />
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontFamily: DISPLAY, fontSize: t(31), letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{r.opp}</div>
@@ -392,7 +393,7 @@ export function FixtureHype({ palette: pal, width = 1080, height = 1080, meta = 
               <div style={{ fontFamily: MONO, fontSize: 22, letterSpacing: 1, color: pc(parts, 'numColor', pal.accent) }}>{String(i + 1).padStart(2, '0')}</div>
               <div style={{ fontFamily: DISPLAY, fontSize: t(30), letterSpacing: 0.5, lineHeight: 0.95, color: pc(parts, 'gradeColor', undefined) }}>{r.grade}</div>
               <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 14 }}>
-                <span style={{ fontFamily: DISPLAY, fontSize: 22, letterSpacing: 1, color: home ? pc(parts, 'homeColor', pal.accent) : pc(parts, 'awayColor', pal.ink), opacity: home ? 1 : 0.5, flexShrink: 0 }}>{home ? 'V' : '@'}</span>
+                <span style={{ fontFamily: DISPLAY, fontSize: 22, letterSpacing: 1, color: home ? pc(parts, 'homeColor', pal.accent) : pc(parts, 'awayColor', pal.ink), opacity: home ? 1 : 0.5, flexShrink: 0 }}>{home || meta.allVs ? 'V' : '@'}</span>
                 <div style={{ flex: 1, minWidth: 0, fontFamily: DISPLAY, fontSize: t(38), letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{r.opp}</div>
               </div>
               <div style={{ textAlign: 'right' }}>
@@ -536,7 +537,7 @@ export function FixtureBoard({ palette: pal, width = 1080, height = 1080, meta =
             <div key={i} style={{ flex: 1, display: 'grid', gridTemplateColumns: cols, gap: 18, alignItems: 'center', padding: '0 14px', background: i % 2 ? pc(parts, 'cardBg', `${pal.ink}08`) : 'transparent' }}>
               <div style={{ fontFamily: DISPLAY, fontSize: t(26), letterSpacing: 0.5, lineHeight: 0.92, color: pc(parts, 'gradeColor', undefined) }}>{r.grade}</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-                <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1, color: home ? pc(parts, 'homeColor', pal.accent) : pc(parts, 'awayColor', pal.ink), opacity: home ? 1 : 0.5, flexShrink: 0, width: 22 }}>{home ? 'VS' : '@'}</span>
+                <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1, color: home ? pc(parts, 'homeColor', pal.accent) : pc(parts, 'awayColor', pal.ink), opacity: home ? 1 : 0.5, flexShrink: 0, width: 22 }}>{home || meta.allVs ? 'VS' : '@'}</span>
                 <span style={{ fontFamily: DISPLAY, fontSize: t(28), letterSpacing: 0.5, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{r.opp}</span>
                 <span style={{ fontFamily: MONO, fontSize: 10, letterSpacing: 1.2, padding: '2px 7px', borderRadius: 3, border: `1px solid ${pc(parts, 'fx4TagBorder', `${pal.ink}30`)}`, color: pc(parts, 'haColor', pal.ink), opacity: 0.6, flexShrink: 0 }}>{home ? 'HOME' : 'AWAY'}</span>
               </div>
@@ -631,7 +632,7 @@ export function FixtureHeadline({ palette: pal, width = 1080, height = 1080, met
             return (
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '7px 0', borderBottom: `1px solid ${pc(parts, 'dividerColor', `${pal.ink}14`)}` }}>
                 <span style={{ fontFamily: DISPLAY, fontSize: t(19), width: 104, flexShrink: 0, lineHeight: 1, color: pc(parts, 'gradeColor', undefined) }}>{r.grade}</span>
-                <span style={{ fontFamily: MONO, fontSize: 11, color: home ? pc(parts, 'homeColor', pal.accent) : pc(parts, 'awayColor', pal.ink), opacity: home ? 1 : 0.5, flexShrink: 0 }}>{home ? 'v' : '@'}</span>
+                <span style={{ fontFamily: MONO, fontSize: 11, color: home ? pc(parts, 'homeColor', pal.accent) : pc(parts, 'awayColor', pal.ink), opacity: home ? 1 : 0.5, flexShrink: 0 }}>{home || meta.allVs ? 'v' : '@'}</span>
                 <span style={{ fontFamily: DISPLAY, fontSize: t(20), flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{r.opp}</span>
                 <span style={{ fontFamily: MONO, fontSize: 12, color: pc(parts, 'fx5ListTimeColor', pal.accent), flexShrink: 0 }}>{r.time}</span>
               </div>
@@ -707,7 +708,7 @@ export function FixtureSchedule({ palette: pal, width = 1080, height = 1080, met
                 <div style={{ width: 16, height: 16, borderRadius: '50%', background: pc(parts, 'fx6DotColor', pal.accent), border: `3px solid ${pc(parts, 'fx6DotRing', pal.primary)}`, zIndex: 2, flexShrink: 0 }} />
                 <div style={{ flex: 1, minWidth: 0, paddingLeft: 26, display: 'flex', alignItems: 'center', gap: 14 }}>
                   <span style={{ fontFamily: DISPLAY, fontSize: 26, width: 132, flexShrink: 0, lineHeight: 0.95, color: pc(parts, 'gradeColor', undefined) }}>{r.grade}</span>
-                  <span style={{ fontFamily: MONO, fontSize: 13, color: home ? pc(parts, 'homeColor', pal.accent) : pc(parts, 'awayColor', pal.ink), opacity: home ? 1 : 0.5, flexShrink: 0, width: 24 }}>{home ? 'VS' : '@'}</span>
+                  <span style={{ fontFamily: MONO, fontSize: 13, color: home ? pc(parts, 'homeColor', pal.accent) : pc(parts, 'awayColor', pal.ink), opacity: home ? 1 : 0.5, flexShrink: 0, width: 24 }}>{home || meta.allVs ? 'VS' : '@'}</span>
                   <span style={{ fontFamily: DISPLAY, fontSize: t(30), flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{r.opp}</span>
                   <span style={{ fontFamily: MONO, fontSize: 12, color: pc(parts, 'venueColor', pal.ink), opacity: 0.6, flexShrink: 0, whiteSpace: 'nowrap' }}>{r.venue} · {home ? 'H' : 'A'}</span>
                 </div>
@@ -784,7 +785,7 @@ export function ResultMarginHero({ palette: pal, width = 1080, height = 1080, re
   const S = roundScale(width, height)
   const b = sz(S.big)
   const { won, winnerName, tied } = outcomeBits(r)
-  const bigWord = pt(parts, 'rs1Word', tied ? 'TIE' : 'WIN')
+  const bigWord = pt(parts, 'rs1Word', tied ? (r.resultWord || 'TIE') : 'WIN')
   // The player-of-the-match bar sits just above the credit strip; the score boxes sit above it.
   const potmB = creditH(height) + grow(height, 18, 0.1)
   const band = pc(parts, 'bandBg', pal.accent)
@@ -1108,7 +1109,7 @@ export function ResultStar({ palette: pal, width = 1080, height = 1080, result: 
       </div>
       <div style={{ position: 'absolute', left: 0, right: 0, bottom: barB, padding: '0 56px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 20px', background: pc(parts, 'resultBg', pal.secondary), borderLeft: `4px solid ${pc(parts, 'resultRule', pal.accent)}` }}>
-          <span style={{ fontFamily: DISPLAY, fontSize: 24, letterSpacing: 0.5, whiteSpace: 'nowrap', flexShrink: 0, color: pc(parts, 'resultLineColor', undefined) }}>{tied ? 'MATCH TIED' : line}</span>
+          <span style={{ fontFamily: DISPLAY, fontSize: 24, letterSpacing: 0.5, whiteSpace: 'nowrap', flexShrink: 0, color: pc(parts, 'resultLineColor', undefined) }}>{tied ? (r.resultLabel || 'MATCH TIED') : line}</span>
           <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1, color: pc(parts, 'statColor', pal.ink), opacity: 0.7, marginLeft: 'auto', whiteSpace: 'nowrap', flexShrink: 0 }}>{r.us.mono} {r.us.score} · {r.them.mono} {r.them.score}</span>
         </div>
       </div>
@@ -1949,19 +1950,19 @@ export function ResultsSplit({ palette: pal, width = 1080, height = 1080, meta =
   const loss = pc(parts, 'lossColor', LOSS)
   const band = pc(parts, 'bandBg', pal.accent)
   const Side = ({ title, items, color, count, fillKey }) => (
-    <div style={{ flex: 1, background: `${color}12`, border: `2px solid ${color}`, display: 'flex', flexDirection: 'column' }}>
+    <div style={{ flex: 1, minWidth: 0, background: `${color}12`, border: `2px solid ${color}`, display: 'flex', flexDirection: 'column' }}>
       <div style={{ padding: '16px 22px', background: color, color: rrOnFill(parts, fillKey, color, pal.primary), display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span style={{ fontFamily: DISPLAY, fontSize: b(30), letterSpacing: 1 }}>{title}</span>
         <span style={{ fontFamily: DISPLAY, fontSize: b(42), letterSpacing: -1, lineHeight: 1 }}>{count}</span>
       </div>
-      <div style={{ flex: 1, padding: '8px 22px' }}>
+      <div style={{ flex: 1, minWidth: 0, padding: '8px 22px' }}>
         {items.map((r, i) => (
-          <div key={i} style={{ padding: '14px 0', borderBottom: i < items.length - 1 ? `1px solid ${rrFaint(parts, 'dividerColor', pal.ink, '1a')}` : 'none' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ fontFamily: DISPLAY, fontSize: t(22), letterSpacing: 0.5, flexShrink: 0, whiteSpace: 'nowrap', color: pc(parts, 'gradeColor', undefined) }}>{r.grade}</span>
+          <div key={i} style={{ minWidth: 0, padding: '14px 0', borderBottom: i < items.length - 1 ? `1px solid ${rrFaint(parts, 'dividerColor', pal.ink, '1a')}` : 'none' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+              <span style={{ fontFamily: DISPLAY, fontSize: t(22), letterSpacing: 0.5, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: pc(parts, 'gradeColor', undefined) }}>{r.grade}</span>
               <span style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 1, color: pc(parts, 'subColor', pal.ink), opacity: 0.5, marginLeft: 'auto', flexShrink: 0, whiteSpace: 'nowrap' }}>{r.margin}</span>
             </div>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginTop: 4 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginTop: 4, minWidth: 0 }}>
               <span style={{ fontFamily: DISPLAY, fontSize: t(26), letterSpacing: 0.5, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{r.opp}</span>
               <span style={{ fontFamily: MONO, fontSize: 12, color: pc(parts, 'statColor', pal.ink), opacity: 0.7, flexShrink: 0 }}>{r.us} v {r.them}</span>
             </div>
@@ -2062,6 +2063,120 @@ SponsorFooter.displayName = 'SponsorFooter'
 AutoFit.displayName = 'AutoFit'
 Shield.displayName = 'Shield'
 
+// ═══════════════════════════ RS9: MATCH SUMMARY ═══════════════════════════════
+// A broadcast-style summary: each side gets a score bar, with its batters on the left
+// and, on the right, the bowlers who bowled AGAINST it, so a reader can see who
+// bowled to whom without knowing the club. A side's `topBowl` is the bowling of the
+// innings that side FIELDED (see the scorecard rule), so the bowlers under a side's
+// batting are the OTHER side's list.
+
+// "84* (96)" -> { runs: '84*', balls: '96' }; a line with no balls leaves balls blank.
+function splitBat(line) {
+  const m = String(line || '').match(/^\s*(\d+\*?)\s*(?:\((\d+)\))?\s*$/)
+  return m ? { runs: m[1], balls: m[2] || '' } : { runs: String(line || ''), balls: '' }
+}
+// "3/14" -> { w: '3', r: '14' }
+function splitBowl(line) {
+  const m = String(line || '').match(/^\s*(\d+)\s*\/\s*(\d+)/)
+  return m ? { w: m[1], r: m[2] } : { w: String(line || ''), r: '' }
+}
+
+export function ResultSummary({ palette: pal, width = 1080, height = 1080, result: r, sponsors, parts }) {
+  const S = roundScale(width, height)
+  const t = sz(S.row)
+  const { won, tied, line } = outcomeBits(r)
+  const band = pc(parts, 'bandBg', pal.accent)
+  const barBg = pc(parts, 'rs9BarBg', pal.ink)
+  const barInk = pc(parts, 'rs9BarInk', partPicked(parts, 'rs9BarBg') ? inkOn(barBg) : pal.primary)
+  const scoreInk = pc(parts, 'rs9ScoreColor', partPicked(parts, 'rs9BarBg') ? inkOn(barBg) : pal.primary)
+  const colHead = pc(parts, 'rs9ColHead', pal.ink)
+  const nameInk = pc(parts, 'nameColor', pal.ink)
+  const figInk = pc(parts, 'statColor', pal.ink)
+  const rule = pc(parts, 'dividerColor', pal.ink)
+  const wordBat = pt(parts, 'rs9BatWord', 'BATTING')
+  const wordBowl = pt(parts, 'rs9BowlWord', 'BOWLING')
+  const Row = ({ name, a, b, last }) => (
+    <div style={{ flex: 1, minHeight: 0, maxHeight: t(104), display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 64px 64px', gap: 10, alignItems: 'center', padding: `${t(4)}px 0`, borderBottom: last ? 'none' : `1px solid ${rule}1a`, fontFamily: DISPLAY, lineHeight: 1.05 }}>
+      <span style={{ fontSize: t(27), letterSpacing: 0.5, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: nameInk }}>{name}</span>
+      <span style={{ fontSize: t(27), textAlign: 'right', color: figInk }}>{a}</span>
+      <span style={{ fontSize: t(22), textAlign: 'right', color: figInk, opacity: 0.7 }}>{b}</span>
+    </div>
+  )
+  const Head = ({ a, b, c }) => (
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 64px 64px', gap: 10, fontFamily: MONO, fontSize: 11, letterSpacing: 1.6, color: colHead, opacity: 0.6, paddingBottom: 6, borderBottom: `1px solid ${rule}33` }}>
+      <span>{a}</span><span style={{ textAlign: 'right' }}>{b}</span><span style={{ textAlign: 'right' }}>{c}</span>
+    </div>
+  )
+  const Side = ({ team, other, bat, bowl, winner }) => (
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 16, padding: '12px 20px', background: barBg, borderLeft: winner ? `8px solid ${pc(parts, 'winColor', pal.accent)}` : `8px solid ${pal.ink}22` }}>
+        <Monogram text={team.mono} logo={team.logo} size={t(58)} fg={barInk} bg="transparent" ring={`${barInk}55`} />
+        <span style={{ flex: 1, minWidth: 0, fontFamily: DISPLAY, fontSize: t(String(team.name || '').length > 26 ? 30 : 40), letterSpacing: 0.5, lineHeight: 1, color: barInk, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{team.name}</span>
+        {team.overs ? <span style={{ fontFamily: MONO, fontSize: 14, letterSpacing: 1.5, color: barInk, opacity: 0.7, flexShrink: 0 }}>{team.overs} OVERS</span> : null}
+        <span style={{ fontFamily: DISPLAY, fontSize: t(48), letterSpacing: -0.5, lineHeight: 1, color: scoreInk, flexShrink: 0 }}>{team.score}</span>
+      </div>
+      <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 36, padding: '0 6px' }}>
+        <div style={{ minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          <Head a={wordBat} b="R" c="B" />
+          {bat.slice(0, 3).map((p, i) => { const f = splitBat(p.l); return <Row key={i} name={p.n} a={f.runs} b={f.balls} last={i === Math.min(bat.length, 3) - 1} /> })}
+        </div>
+        <div style={{ minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          <Head a={`${other.mono || other.name} ${wordBowl}`} b="W" c="R" />
+          {bowl.slice(0, 3).map((p, i) => { const f = splitBowl(p.l); return <Row key={i} name={p.n} a={f.w} b={f.r} last={i === Math.min(bowl.length, 3) - 1} /> })}
+        </div>
+      </div>
+    </div>
+  )
+  return (
+    <Post palette={pal} w={width} h={height}>
+      <Halftone color={pal.ink} opacity={0.06} size={10} />
+      <Stripes color={pal.accent} opacity={0.03} gap={30} angle={0} />
+      {topBar({ pal, width, height, parts, team: { logo: r.us.logo, mono: r.us.mono }, left: (
+        <>
+          <Slab bg={band} fg={pc(parts, 'title1Color', partPicked(parts, 'bandBg') ? inkOn(band) : pal.primary)} size={t(28)} style={{ padding: '8px 16px' }}>{pt(parts, 'title1', 'MATCH SUMMARY')}</Slab>
+          <Kicker color={pc(parts, 'roundColor', pal.ink)} size={12} style={{ marginTop: 11, opacity: 0.72 }}>{`${clubOfTeamName(r.us.name)} V ${clubOfTeamName(r.them.name)}${headLine(r, false) ? ` · ${headLine(r, false)}` : ''}`}</Kicker>
+        </>
+      ) })}
+      <div style={{ position: 'absolute', left: 56, right: 56, top: barGeo(width, height).h + 22, bottom: bodyEnd(height), display: 'flex', flexDirection: 'column', gap: 22 }}>
+        <Side team={r.us} other={r.them} bat={r.topBat.us} bowl={r.topBowl.them} winner={won} />
+        <Side team={r.them} other={r.us} bat={r.topBat.them} bowl={r.topBowl.us} winner={!won && !tied} />
+        <div style={{ flexShrink: 0, padding: '14px 22px', background: pc(parts, 'resultBg', barBg), color: pc(parts, 'resultLineColor', barInk), borderLeft: `8px solid ${pc(parts, 'resultRule', pal.accent)}` }}>
+          <div style={{ fontFamily: DISPLAY, fontSize: t(38), letterSpacing: 0.5, lineHeight: 1.05 }}>{line}</div>
+          {(r.potm.first || r.potm.last) ? <div style={{ fontFamily: MONO, fontSize: 14, letterSpacing: 1.5, opacity: 0.75, marginTop: 6 }}>{`${pt(parts, 'potmLabel', '★ POTM')} ${[r.potm.first && `${r.potm.first[0]}.`, r.potm.last].filter(Boolean).join(' ')}${r.potm.line ? ` · ${r.potm.line}` : ''}`}</div> : null}
+        </div>
+      </div>
+      {creditStrip(pal, height, parts)}
+      <Grain opacity={0.3} id="rs9-g" />
+    </Post>
+  )
+}
+registerParts({
+  RS9: [
+    textPart('title1', 'Heading words', RS_HEAD, () => 'MATCH SUMMARY'),
+    colorPart('title1Color', 'Heading word colour', RS_HEAD, (p) => p.primary),
+    colorPart('bandBg', 'Heading band', RS_HEAD, (p) => p.accent),
+    colorPart('roundColor', 'Teams, grade and round line', RS_HEAD, (p) => p.ink),
+    colorPart('headerBg', 'Header bar', RS_HEAD, null, { autoLabel: 'No fill' }),
+    colorPart('headerRule', 'Line under the header', RS_HEAD, (p) => p.accent),
+    colorPart('rs9BarBg', 'Team bars', RS_TEAMS, (p) => p.ink),
+    colorPart('rs9BarInk', 'Team bar name and overs', RS_TEAMS, (p) => p.primary),
+    colorPart('rs9ScoreColor', 'Team bar score', RS_TEAMS, (p) => p.primary),
+    colorPart('winColor', 'Winning side edge', RS_TEAMS, (p) => p.accent),
+    textPart('rs9BatWord', 'Batting heading word', 'Performers', () => 'BATTING'),
+    textPart('rs9BowlWord', 'Bowling heading word', 'Performers', () => 'BOWLING'),
+    colorPart('rs9ColHead', 'Column headings', 'Performers', (p) => p.ink),
+    colorPart('nameColor', 'Player names', 'Performers', (p) => p.ink),
+    colorPart('statColor', 'Runs, balls, wickets and runs against', 'Performers', (p) => p.ink),
+    colorPart('dividerColor', 'Lines between rows', 'Performers', (p) => p.ink),
+    colorPart('resultBg', 'Result bar', RS_RESULT, null, { autoLabel: 'Same as the team bars' }),
+    colorPart('resultRule', 'Line beside the result bar', RS_RESULT, (p) => p.accent),
+    colorPart('resultLineColor', 'Result line', RS_RESULT, (p) => p.primary),
+    textPart('potmLabel', 'Player of the match label', RS_POTM, () => '★ POTM'),
+    ...rsFooter(),
+  ],
+})
+ResultSummary.displayName = 'ResultSummary'
+
 // Where this file's layouts keep the sponsor grid (see sponsorSlots.js).
 // Baseline for every roundup layout: the strip along the foot. A layout that has
 // a better place for the grid (a header, a free corner) replaces its entry AND
@@ -2069,6 +2184,6 @@ Shield.displayName = 'Shield'
 const _foot = (w, h) => footerSlot(w, h)
 export const SPONSOR_SLOTS = {
   FX1: slotBar, FX2: slotHype, FX3: slotBarBare, FX4: slotBar, FX5: slotBarBare, FX6: slotBar,
-  RS1: slotBar, RS2: slotBar, RS3: slotBar, RS4: slotBarBare, RS5: slotBar, RS6: slotTicket,
+  RS1: slotBar, RS2: slotBar, RS3: slotBar, RS4: slotBarBare, RS5: slotBar, RS6: slotTicket, RS9: slotBar,
   RR1: slotRR, RR2: slotRR, RR3: slotRR3, RR4: slotRR, RR5: slotRR, RR6: slotRR, RR7: slotRR,
 }

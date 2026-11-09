@@ -29,7 +29,7 @@ import {
 } from '../../social/cricket-templates'
 import {
   FixtureList, FixtureHype, FixtureGrid, FixtureBoard, FixtureHeadline, FixtureSchedule,
-  ResultMarginHero, ResultBroadcast, ResultVersusColumns, ResultStar, ResultInningsBars, ResultTicket,
+  ResultMarginHero, ResultBroadcast, ResultVersusColumns, ResultStar, ResultInningsBars, ResultTicket, ResultSummary,
   ResultsList, ResultsListLeaders, ResultsScoreboard, ResultsRecord, ResultsHeadline, ResultsBoard, ResultsSplit,
   DEFAULT_FIXTURES, DEFAULT_RESULTS, perfKeys,
 } from '../../social/round-templates'
@@ -47,6 +47,9 @@ import MilestonePicker from '../../components/admin/socialpost/MilestonePicker'
 import { TeamOfWeekGrid, TeamOfWeekBoard, TOTW_MIN, TOTW_MAX, TOTW_DEFAULT } from '../../social/totw-templates'
 import { MAKEUP_KINDS, MAKEUP_LABELS, FANTASY_MAKEUP, makeupSize, poolKinds, pickMakeup, shortfallText } from '../../social/totwMakeup'
 import { exportNodeToPng } from '../../social/exportImage'
+import { shortClubName, stripGradeTail } from '../../social/clubNames'
+import { crestColour, paletteFromColour } from '../../social/crestColour'
+import { NO_WINNER_KINDS, noWinnerLine, noWinnerWord, detectNoWinner } from '../../social/resultOutcome'
 import { SocialBackground, SocialBackgroundDefs, SOCIAL_BACKGROUNDS, GRADIENT_ANGLES, DEFAULT_COLORS as BG_DEFAULT_COLORS } from '../../social/SocialBackgrounds'
 import { EVENT_TEMPLATES, EVENT_PRESETS, DEFAULT_EVENT, resolveMotif, eventPaletteFor, prepareEventList, defaultEventList } from '../../social/event-templates'
 import EventPostEditor from '../../components/admin/EventPostEditor'
@@ -60,7 +63,7 @@ import { useBlankLayer } from '../../social/useBlankLayer'
 import { useTemplateLayers } from '../../social/useTemplateLayers'
 import { PostLayerProvider } from '../../social/postLayers'
 import { PostLookContext, alphaHex, DEFAULT_VEIL } from '../../social/postLook'
-import { partsFor, partsKey, cleanParts } from '../../social/layoutParts'
+import { partsFor, partsKey, cleanParts, inkOn } from '../../social/layoutParts'
 import { useEditHistory } from '../../social/useEditHistory'
 import { usePages } from '../../social/usePages'
 import PageStrip from '../../components/admin/socialpost/PageStrip'
@@ -110,6 +113,7 @@ const ALL_TEMPLATES = [
   { id: 'RS4', name: 'Star of the Day', component: ResultStar,        desc: 'Player-of-the-match hero',        maxPlayers: 0, kind: 'singleresult' },
   { id: 'RS5', name: 'Innings Bars',   component: ResultInningsBars,  desc: 'Proportional score bars',         maxPlayers: 0, kind: 'singleresult' },
   { id: 'RS6', name: 'Match Ticket',   component: ResultTicket,       desc: 'Ticket-stub aesthetic',           maxPlayers: 0, kind: 'singleresult' },
+  { id: 'RS9', name: 'Match Summary', component: ResultSummary,     desc: 'Score bar per side with batters and the bowlers they faced', maxPlayers: 0, kind: 'singleresult' },
   { id: 'RS7', name: 'Glass Card',     component: ResultGlass,        desc: 'Your photo, glass scorecards, six positions', maxPlayers: 0, kind: 'singleresult' },
   { id: 'RS8', name: 'Highlights Cover', component: ResultHighlights, desc: 'Full-bleed photo, title and one score card', maxPlayers: 0, kind: 'singleresult' },
   // Fixtures roundup — one post, all grades.
@@ -153,7 +157,7 @@ const ALL_TEMPLATES = [
 // The football build drops the layouts that only mean anything with cricket
 // data: the batting order, the results wrap's batting/bowling leaders, and
 // every layout of the three hidden post types (toss, scorecard, final score).
-const AFL_HIDDEN_TEMPLATES = new Set([...CUSTOM_LAYOUT_IDS, 'T4', 'T11', 'T12', 'T13', 'C5', 'RR7', 'C2', 'C4', 'RS1', 'RS2', 'RS3', 'RS4', 'RS5', 'RS6', 'RS7', 'RS8', 'SC1', 'SC2', 'SC3', 'TW1', 'TW2', 'MS1', 'MS2'])
+const AFL_HIDDEN_TEMPLATES = new Set([...CUSTOM_LAYOUT_IDS, 'T4', 'T11', 'T12', 'T13', 'C5', 'RR7', 'C2', 'C4', 'RS1', 'RS2', 'RS3', 'RS4', 'RS5', 'RS6', 'RS7', 'RS8', 'RS9', 'SC1', 'SC2', 'SC3', 'TW1', 'TW2', 'MS1', 'MS2'])
 const TEMPLATES = IS_AFL ? ALL_TEMPLATES.filter(t => !AFL_HIDDEN_TEMPLATES.has(t.id)) : ALL_TEMPLATES
 
 // The lineup templates that crop the hero photo into a fixed box, and the shape
@@ -188,7 +192,7 @@ const TAB_MAP = {
   ...Object.fromEntries(Object.entries(CUSTOM_LAYOUTS).map(([type, id]) => [id, type])),
   FX1: 'fixtures', FX2: 'fixtures', FX3: 'fixtures', FX4: 'fixtures', FX5: 'fixtures', FX6: 'fixtures',
   C1: 'announcement', C5: 'announcement', C2: 'toss', C3: 'motm',
-  C4: 'result', RS1: 'result', RS2: 'result', RS3: 'result', RS4: 'result', RS5: 'result', RS6: 'result', RS7: 'result', RS8: 'result',
+  C4: 'result', RS1: 'result', RS2: 'result', RS3: 'result', RS4: 'result', RS5: 'result', RS6: 'result', RS7: 'result', RS8: 'result', RS9: 'result',
   RR1: 'results', RR2: 'results', RR3: 'results', RR4: 'results', RR5: 'results', RR6: 'results', RR7: 'results',
   TW1: 'totw', TW2: 'totw',
   MS1: 'milestones', MS2: 'milestones',
@@ -274,6 +278,25 @@ const BG_COLOR_KEYS = [
   { key: 'paper', label: 'Paper' },
   { key: 'ink', label: 'Ink' },
 ]
+
+// Faces for player names and scores, so the club font can stay on the headings.
+// All are already loaded by index.html. Empty key = follow the headings.
+const NAMES_FONTS = [
+  { key: 'inter',        name: 'Inter',            family: "'Inter', sans-serif",            weight: 700 },
+  { key: 'hanken',       name: 'Hanken Grotesk',   family: "'Hanken Grotesk', sans-serif",   weight: 700 },
+  { key: 'geist',        name: 'Geist',            family: "'Geist', sans-serif",            weight: 700 },
+  { key: 'barlow',       name: 'Barlow Condensed', family: "'Barlow Condensed', sans-serif", weight: 700 },
+  { key: 'saira',        name: 'Saira Condensed',  family: "'Saira Condensed', sans-serif",  weight: 700 },
+  { key: 'oswald',       name: 'Oswald',           family: "'Oswald', sans-serif",           weight: 600 },
+  { key: 'archivo',      name: 'Archivo',          family: "'Archivo', sans-serif",          weight: 700 },
+]
+
+// The opposition as a CLUB on a roundup row: the owning club's own name when the pull
+// carried it ("Maddington Cricket Club"), else the team name with its grade taken off.
+function clubOnlyRow(row, shorten) {
+  const base = row.oppClub || stripGradeTail(row.opp)
+  return { ...row, opp: (shorten ? shortClubName(base) : base).toUpperCase() }
+}
 
 const DISPLAY_FONTS = [
   { key: 'barlow',       name: 'Barlow Condensed', family: "'Barlow Condensed', sans-serif", weight: 800 },
@@ -852,13 +875,14 @@ function tidyClubName(n) {
   return cleanClubName(n).toLowerCase().replace(/\b[a-z]/g, (c) => c.toUpperCase())
 }
 
-// '2022-10-01' → 'SAT 1 OCT' (matches the date style used across the templates).
+// '2022-10-01' → 'Sat 1 Oct'. Written the way a club writes it; a layout that wants
+// capitals (the poster styles) upper-cases it itself, so nothing is forced here.
 function fmtIsoDate(iso) {
   if (!iso) return ''
   const d = new Date(`${iso}T00:00:00`)
   if (Number.isNaN(d.getTime())) return iso
-  const DAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT']
-  const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
+  const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
   return `${DAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`
 }
 
@@ -891,7 +915,7 @@ function topBatters(t) {
     .slice(0, 3)
     .map((b) => ({
       last: b.short || b.last || b.first || '',
-      line: `${b.r}${b.notOut ? '*' : ''} (${b.b})`,
+      line: `${b.r}${b.notOut ? '*' : ''}${Number(b.b) > 0 ? ` (${b.b})` : ''}`,
       pid: b.pid || null,
       first: b.first || '',
       surname: b.last || '',
@@ -998,7 +1022,7 @@ function OppRowSearch({ value, onType, onPick, placeholder = 'Opponent (search c
 }
 
 // Logo preview / status for a roundup row's pulled opponent crest.
-function OppLogoChip({ logo, loading, onClear }) {
+function OppLogoChip({ logo, loading, onClear, alt = null, onUseAlt = null }) {
   if (!logo && !loading) return null
   return (
     <div className="flex items-center gap-2">
@@ -1007,6 +1031,7 @@ function OppLogoChip({ logo, loading, onClear }) {
         : <>
             <img src={logo} alt="" className="h-7 max-w-[88px] object-contain rounded bg-pb-surface" onError={e => { e.target.style.display = 'none' }} />
             <span className="font-mono text-[9px] text-pb-faint">club logo</span>
+            {alt && onUseAlt && <button onClick={onUseAlt} className="text-pb-faint hover:text-pb-text text-[10px] underline" title="Use the crest Cricket Australia holds for this club">use official crest</button>}
             <button onClick={onClear} className="text-pb-faintest hover:text-red-400 text-[10px] ml-auto">✕ logo</button>
           </>}
     </div>
@@ -1612,6 +1637,24 @@ export default function AdminSocialPost() {
   const [fontKey, setFontKey] = useState(() =>
     localStorage.getItem('bs_social_font') || 'barlow'
   )
+  // Display options a club sets once and keeps (this browser): a face for player
+  // names and scores, and club names without "Cricket Club" on the end.
+  const [namesFontKey, setNamesFontKey] = useState(() => {
+    try { return localStorage.getItem('bs_social_names_font') || '' } catch { return '' }
+  })
+  const [shortClubNames, setShortClubNames] = useState(() => {
+    try { return localStorage.getItem('bs_social_short_names') === '1' } catch { return false }
+  })
+  useEffect(() => { try { localStorage.setItem('bs_social_names_font', namesFontKey) } catch { /* private window */ } }, [namesFontKey])
+  useEffect(() => { try { localStorage.setItem('bs_social_short_names', shortClubNames ? '1' : '0') } catch { /* private window */ } }, [shortClubNames])
+  // Fixtures and Results lists: "vs" on every row (no "@" on away games), and the
+  // opponent as a club ("Maddington Cricket Club") rather than a grade team.
+  const [roundOpts, setRoundOpts] = useState(() => {
+    try { return { allVs: false, clubOnly: false, ...(JSON.parse(localStorage.getItem('bs_social_round_opts') || '{}') || {}) } } catch { return { allVs: false, clubOnly: false } }
+  })
+  useEffect(() => { try { localStorage.setItem('bs_social_round_opts', JSON.stringify(roundOpts)) } catch { /* private window */ } }, [roundOpts])
+  // Result · Classic: put the club name and logo on the left and the result on the right.
+  const [resultSwap, setResultSwap] = useState(false)
   // The club's own display font (Typography settings — a preset or an uploaded
   // file) offered as one more entry in the font picker, key 'club_font'. Null
   // when the club hasn't chosen one; picking it then falls back to Barlow via
@@ -1885,7 +1928,7 @@ export default function AdminSocialPost() {
   const [toss, setToss] = useState({ winner: 'TEAM', decision: 'BAT' })
   const [motm, setMotm] = useState({ playerIdx: 0, stats: [{ label: 'Runs', value: '' }, { label: 'SR', value: '' }], summary: '' })
   const [result, setResult] = useState({
-    winner: 'TEAM', margin: '', grade: '', teamScore: '', oppScore: '', teamOvers: '', oppOvers: '', motmLast: '',
+    winner: 'TEAM', noWinner: 'TIE', noWinnerText: '', margin: '', grade: '', teamScore: '', oppScore: '', teamOvers: '', oppOvers: '', motmLast: '',
     motmFirst: '', motmRole: '', motmBat: '', motmBowl: '', motmPlayerId: '',
     topBatters: { team: [{ last: '', line: '' }, { last: '', line: '' }, { last: '', line: '' }], opponent: [{ last: '', line: '' }, { last: '', line: '' }, { last: '', line: '' }] },
     topBowlers: { team: [{ last: '', line: '' }, { last: '', line: '' }, { last: '', line: '' }], opponent: [{ last: '', line: '' }, { last: '', line: '' }, { last: '', line: '' }] },
@@ -1950,6 +1993,13 @@ export default function AdminSocialPost() {
   // 1920×1080 canvas — always exactly 2 pages (batted-first team, then the
   // chasing team), no page-count picker needed.
   const [scSplit, setScSplit] = useState(false)
+  // Scorecard squares: the opposition's page in THEIR colours (crest or hand-picked), so
+  // our page and theirs read as two different tiles.
+  const [scOppColours, setScOppColours] = useState(() => {
+    try { return localStorage.getItem('bs_social_sc_opp_colours') === '1' } catch { return false }
+  })
+  useEffect(() => { try { localStorage.setItem('bs_social_sc_opp_colours', scOppColours ? '1' : '0') } catch { /* private window */ } }, [scOppColours])
+  const [scCrestStatus, setScCrestStatus] = useState(null)
   const [scSplitIdx, setScSplitIdx] = useState(0)
   // Player of the match on the scorecard: our side ranked by the same points the
   // Player of Match tab uses, so the import picks the top one and the select
@@ -2492,7 +2542,7 @@ export default function AdminSocialPost() {
       const data = await api.getSocialScorecard(matchId)
       setScorecardMatch(prev => ({
         ...data,
-        meta: { ...data.meta, sponsors: prev.meta.sponsors },
+        meta: { ...data.meta, date: fmtIsoDate(data.meta?.date) || data.meta?.date || '', sponsors: prev.meta.sponsors },
         home: { ...data.home, headerInk: prev.home?.headerInk || '#0a0a0a' },
         away: { ...data.away, headerInk: prev.away?.headerInk || '#0a0a0a' },
       }))
@@ -2569,9 +2619,11 @@ export default function AdminSocialPost() {
     const usRuns = parseInt(String(us.total || '0'), 10) || 0
     const themRuns = parseInt(String(them.total || '0'), 10) || 0
     const resultText = (data.meta?.result || '').toUpperCase()
-    const tieRe = /\b(TIE|TIED|DRAW|DREW|NO ?RESULT|ABANDON|WASH)/
+    // No winner covers a tie, an abandoned game (dry or wet) and no result; the
+    // text says which, so an abandoned game is not printed as a tie.
+    const noWin = detectNoWinner(resultText)
     let winner
-    if (tieRe.test(resultText) || usRuns === themRuns) winner = 'TIE'
+    if (noWin || usRuns === themRuns) winner = 'TIE'
     else winner = usRuns > themRuns ? 'TEAM' : 'OPPONENT'
     const marginMatch = resultText.match(/\bBY\b(.+)$/)
     const margin = marginMatch ? `BY ${marginMatch[1].trim()}` : ''
@@ -2594,6 +2646,8 @@ export default function AdminSocialPost() {
     setResult((r) => ({
       ...r,
       winner,
+      noWinner: winner === 'TIE' ? (noWin || 'TIE') : 'TIE',
+      noWinnerText: '',
       margin,
       grade: data.meta?.competition || r.grade,
       teamScore: scoreString(us) || r.teamScore,
@@ -2602,7 +2656,7 @@ export default function AdminSocialPost() {
       oppOvers: them.overs || r.oppOvers,
       motmFirst: topBat?.first || '',
       motmLast: topBat?.last || '',
-      motmBat: topBat ? `${topBat.r}${topBat.notOut ? '*' : ''} (${topBat.b})` : '',
+      motmBat: topBat ? `${topBat.r}${topBat.notOut ? '*' : ''}${Number(topBat.b) > 0 ? ` (${topBat.b})` : ''}` : '',
       motmBowl: sameBowl ? `${sameBowl.w}/${sameBowl.r}` : '',
       motmPlayerId: motmPlayer?.id || '',
       topBatters: { team: topBatters(us), opponent: topBatters(them) },
@@ -2623,7 +2677,9 @@ export default function AdminSocialPost() {
         name: tidyClubName(them.name) || o.name,
         short: them.short || o.short,
         monogram: them.monogram || o.monogram,
-        logo: them.logo || o.logo,
+        // A new opponent with no crest of its own must not keep the LAST opponent's.
+        logo: them.logo || (tidyClubName(them.name) === o.name ? o.logo : null),
+        logoAlt: null,
       }))
     }
   }, [settings, playerForPid])
@@ -3076,15 +3132,31 @@ export default function AdminSocialPost() {
 
   // Best logo URL for a searched club: prefer a matching BetterStats org's
   // (same-origin, so background removal can fetch it), else the CA CDN logo.
+  //
+  // Only a club that really HAS a crest on file supplies one (the old version built
+  // our image URL for any matching club, so a club with no crest on file returned a
+  // 404 and the post fell back to a monogram). The id is the match; a name is only a
+  // guess and counts when it names exactly one club. The stored URL carries its own
+  // ?v= cache-buster, which the old hand-built URL threw away (a wrong crest was then
+  // cached for a week).
   const resolveClubLogo = useCallback(async (org) => {
     let logoUrl = org.logoURL || org.logo_url || null
     try {
       const bsOrgs = await api.listOrgs()
-      const matched = bsOrgs.find(o => o.name?.toLowerCase() === org.name?.toLowerCase() || o.id === org.id)
-      if (matched?.id) logoUrl = `${BASE_URL}/images/organisations/${matched.id}/logo`
+      const wantId = String(org.id || org.organisationGuid || '').toLowerCase()
+      let matched = wantId ? bsOrgs.find(o => String(o.id).toLowerCase() === wantId) : null
+      if (!matched && org.name) {
+        const same = bsOrgs.filter(o => (o.name || '').trim().toLowerCase() === org.name.trim().toLowerCase())
+        if (same.length === 1) matched = same[0]
+      }
+      if (matched?.logo_url) logoUrl = matched.logo_url
     } catch { /* fall back to CA logo */ }
     return logoUrl
   }, [])
+
+  // The crest Cricket Australia itself holds for a searched club, kept beside ours so a
+  // wrong stored crest can be swapped for the official one with one click.
+  const officialCrest = (org) => org?.logoURL || org?.logoUrl || null
 
   const selectScTeam = useCallback(async (side, org) => {
     const logoUrl = await resolveClubLogo(org)
@@ -3112,10 +3184,12 @@ export default function AdminSocialPost() {
 
   const selectOpponent = useCallback(async (org) => {
     const logoUrl = await resolveClubLogo(org)
+    const official = officialCrest(org)
     patchOpp({
       name: org.name || org.shortName || '',
       short: org.shortName || deriveShort(org.name || 'OPP'),
       logo: logoUrl,
+      logoAlt: official && official !== logoUrl ? official : null,
     })
     setOppSearch('')
     setOppResults([])
@@ -3129,7 +3203,8 @@ export default function AdminSocialPost() {
     const mono = (org.shortName || deriveShort(org.name || 'OPP')).toUpperCase().slice(0, 3)
     setter(rows => rows.map((r, j) => j === idx ? { ...r, opp: name, oppMono: mono, oppLogoLoading: true } : r))
     const logo = await resolveClubLogo(org)
-    setter(rows => rows.map((r, j) => j === idx ? { ...r, oppLogo: logo, oppLogoLoading: false } : r))
+    const official = officialCrest(org)
+    setter(rows => rows.map((r, j) => j === idx ? { ...r, oppLogo: logo, oppLogoAlt: official && official !== logo ? official : null, oppLogoLoading: false } : r))
   }, [resolveClubLogo])
 
   const handleHeroFile = useCallback((e) => {
@@ -3316,9 +3391,10 @@ export default function AdminSocialPost() {
     ? clubFont
     : (DISPLAY_FONTS.find(f => f.key === fontKey) || DISPLAY_FONTS[0])
 
+  const namesFont = NAMES_FONTS.find((f) => f.key === namesFontKey) || null
   const team = settings ? {
-    name: (settings.name || 'CLUB').toUpperCase(),
-    fullName: settings.name || 'Club',
+    name: (shortClubNames ? shortClubName(settings.name || 'CLUB') : (settings.name || 'CLUB')).toUpperCase(),
+    fullName: shortClubNames ? shortClubName(settings.name || 'Club') : (settings.name || 'Club'),
     short: deriveShort(settings.name || 'Club'),
     monogram: deriveShort(settings.name || 'Club').slice(0, 2),
     // Football: a club's crest is usually PlayHQ's own URL (no bytes held), and
@@ -3330,8 +3406,8 @@ export default function AdminSocialPost() {
   } : { name: 'CLUB', fullName: 'Club', short: 'CLB', monogram: 'CL', logo: null }
 
   const oppData = {
-    name: opponent.name.toUpperCase() || 'OPPONENT',
-    fullName: opponent.name || 'Opponent',
+    name: (shortClubNames ? shortClubName(opponent.name) : opponent.name).toUpperCase() || 'OPPONENT',
+    fullName: (shortClubNames ? shortClubName(opponent.name) : opponent.name) || 'Opponent',
     short: opponent.short || deriveShort(opponent.name || 'OPP'),
     monogram: opponent.monogram || deriveShort(opponent.name || 'OPP').slice(0, 2),
     logo: opponent.logo || null,
@@ -3506,6 +3582,14 @@ export default function AdminSocialPost() {
   const ownPhotoBg = bgStyle === 'custom-image'
   const bgTintEff = bgTint ?? (ownPhotoBg ? 0 : 0.6)
   const bgTextureEff = bgTexture ?? !ownPhotoBg
+  // Which side of the scorecard is the opposition (the one that is not this club).
+  const scOppSide = (() => {
+    const tokens = clubTokens(settings?.name)
+    const ours = (side) => tokens.length > 0 && tokens.some((t) => (scorecardMatch[side]?.name || '').toLowerCase().includes(t))
+    return ours('home') ? 'away' : ours('away') ? 'home' : 'away'
+  })()
+  // The page for `side` in that team's own colours, or null to leave the club's look.
+  const scPagePalette = (side) => (scOppColours && side === scOppSide ? paletteFromColour(scorecardMatch[side]?.color, templatePalette) : null)
   const postLook = { veil: bgActive ? alphaHex(bgTintEff) : null, texture: bgActive ? bgTextureEff : true }
   const openParts = partsFor(templateId) ? cleanParts(templateId, layoutParts[partsKey(templateId)]) : null
 
@@ -3587,8 +3671,11 @@ export default function AdminSocialPost() {
   // The three card layouts keep a slot for the sponsor grid and ask how many logos it holds.
   if (templateId === 'T13' || templateId === 'C5') extraProps.sponsorCount = gridLogoCount
   if (templateId === 'C4') {
+    if (resultSwap) extraProps.swap = true
     extraProps.result = {
       winner: result.winner, margin: result.margin, grade: result.grade, teamScore: result.teamScore,
+      // What a game with no winner says: "MATCH TIED", "MATCH ABANDONED"...
+      noWinnerLine: result.winner === 'TIE' ? noWinnerLine(result.noWinner, result.noWinnerText) : '',
       oppScore: result.oppScore, motmLast: result.motmLast,
       motmFirst: result.motmFirst, motmBat: result.motmBat, motmBowl: result.motmBowl,
       topBatters: result.topBatters, topBowlers: result.topBowlers,
@@ -3596,7 +3683,12 @@ export default function AdminSocialPost() {
   }
   if (isScorecard) {
     extraProps.match = scorecardMatch
-    if (scSplitOn) { extraProps.square = true; extraProps.only = scSplitIdx === 0 ? 'home' : 'away' }
+    if (scSplitOn) {
+      extraProps.square = true
+      extraProps.only = scSplitIdx === 0 ? 'home' : 'away'
+      const pagePal = scPagePalette(extraProps.only)
+      if (pagePal) extraProps.palette = pagePal
+    }
   }
 
   // The watch answer for the open layout, only while it is switched on and drawn here.
@@ -3733,7 +3825,7 @@ export default function AdminSocialPost() {
       announcement: { kind: announcement.kind, headline: announcement.headline, subheadline: announcement.subheadline, player: annPlayer },
       toss: { winner: toss.winner, decision: toss.decision, teamName: team.name, oppName: oppData.name },
       motm: { player: motmPlayer, stats: motm.stats.filter((s) => s.label && s.value), summary: motm.summary },
-      result: { winner: result.winner, teamName: team.name, oppName: oppData.name, teamScore: result.teamScore, oppScore: result.oppScore, margin: result.margin, motmLast: result.motmLast },
+      result: { winner: result.winner, noWinnerLine: result.winner === 'TIE' ? noWinnerLine(result.noWinner, result.noWinnerText) : '', teamName: team.name, oppName: oppData.name, teamScore: result.teamScore, oppScore: result.oppScore, margin: result.margin, motmLast: result.motmLast },
     })
   }
   const beginCustomEdit = () => {
@@ -3750,16 +3842,18 @@ export default function AdminSocialPost() {
   // Fixtures / single-result / results roundups (new BetterSocials post sets).
   // They share the club identity, sponsor logos and round meta with the rest.
   const clubMark = { name: team.name, full: team.fullName, mono: team.monogram, logo: team.logo }
-  const roundMeta = { round: matchData.round, date: matchData.date, comp: matchData.competition, season: matchData.season }
+  // allVs only travels when it is on, so a post nobody touched is as it was.
+  const roundMeta = { round: matchData.round, date: matchData.date, comp: matchData.competition, season: matchData.season, ...(roundOpts.allVs ? { allVs: true } : null) }
+  const asClubs = (rows) => (roundOpts.clubOnly ? rows.map((r) => clubOnlyRow(r, shortClubNames)) : rows)
   if (tmpl.kind === 'fixtures') {
     extraProps.meta = roundMeta
-    extraProps.fixtures = roundPagesOn ? chunkEven(fixtures, roundPage.count)[roundPage.idx] || [] : fixtures
+    extraProps.fixtures = asClubs(roundPagesOn ? chunkEven(fixtures, roundPage.count)[roundPage.idx] || [] : fixtures)
     extraProps.club = clubMark
     extraProps.sponsors = scorecardMatch.meta.sponsors
   }
   if (tmpl.kind === 'results') {
     extraProps.meta = roundMeta
-    extraProps.results = roundPagesOn ? chunkEven(results, roundPage.count)[roundPage.idx] || [] : results
+    extraProps.results = asClubs(roundPagesOn ? chunkEven(results, roundPage.count)[roundPage.idx] || [] : results)
     if (tmpl.hasLeaders) extraProps.perfSide = rrPerfSide
     extraProps.club = clubMark
     extraProps.sponsors = scorecardMatch.meta.sponsors
@@ -3797,6 +3891,8 @@ export default function AdminSocialPost() {
       us: { name: team.name, mono: team.monogram, logo: team.logo, score: result.teamScore || '—', overs: result.teamOvers || '' },
       them: { name: oppData.name, mono: oppData.monogram, logo: oppData.logo, score: result.oppScore || '—', overs: result.oppOvers || '' },
       winner: result.winner === 'OPPONENT' ? 'them' : result.winner === 'TIE' ? 'tie' : 'us',
+      resultLabel: result.winner === 'TIE' ? noWinnerLine(result.noWinner, result.noWinnerText) : '',
+      resultWord: result.winner === 'TIE' ? noWinnerWord(result.noWinner, result.noWinnerText) : '',
       margin: result.margin || '',
       potm: {
         first: result.motmFirst || '', last: result.motmLast || '', role: result.motmRole || '',
@@ -3841,6 +3937,8 @@ export default function AdminSocialPost() {
   const fontStyle = {
     '--social-display-font': displayFont.family,
     '--social-display-font-weight': String(displayFont.weight),
+    // Absent when unset, so a post nobody touched keeps one face throughout.
+    ...(namesFont ? { '--social-names-font': namesFont.family, '--social-names-font-weight': String(namesFont.weight) } : null),
     fontWeight: displayFont.weight,
   }
 
@@ -3864,7 +3962,7 @@ export default function AdminSocialPost() {
     setToss({ winner: 'TEAM', decision: 'BAT' })
     setMotm({ playerIdx: 0, stats: [{ label: 'Runs', value: '' }, { label: 'SR', value: '' }], summary: '' })
     setResult({
-      winner: 'TEAM', margin: '', grade: '', teamScore: '', oppScore: '', teamOvers: '', oppOvers: '', motmLast: '',
+      winner: 'TEAM', noWinner: 'TIE', noWinnerText: '', margin: '', grade: '', teamScore: '', oppScore: '', teamOvers: '', oppOvers: '', motmLast: '',
       motmFirst: '', motmRole: '', motmBat: '', motmBowl: '', motmPlayerId: '',
       topBatters: { team: [{ last: '', line: '' }, { last: '', line: '' }, { last: '', line: '' }], opponent: [{ last: '', line: '' }, { last: '', line: '' }, { last: '', line: '' }] },
       topBowlers: { team: [{ last: '', line: '' }, { last: '', line: '' }, { last: '', line: '' }], opponent: [{ last: '', line: '' }, { last: '', line: '' }, { last: '', line: '' }] },
@@ -4119,7 +4217,7 @@ export default function AdminSocialPost() {
       }))
     }
     if (roundPagesOn) {
-      return chunkEven(tmpl.kind === 'fixtures' ? fixtures : results, roundPage.count).map((chunk, i) => ({
+      return chunkEven(asClubs(tmpl.kind === 'fixtures' ? fixtures : results), roundPage.count).map((chunk, i) => ({
         key: `round-${i}`, label: `Page ${i + 1}`,
         setRef: (el) => { roundPageRefs.current[i] = el },
         content: <>{pageBackground}{templateNode(tmpl.kind === 'fixtures' ? { fixtures: chunk } : { results: chunk })}</>,
@@ -4129,7 +4227,7 @@ export default function AdminSocialPost() {
       return ['home', 'away'].map((side, i) => ({
         key: `sc-${side}`, label: i === 0 ? 'Batted first' : 'Chasing',
         setRef: (el) => { scSplitPageRefs.current[i] = el },
-        content: <>{pageBackground}{templateNode({ only: side })}</>,
+        content: <>{pageBackground}{templateNode({ only: side, ...(scPagePalette(side) ? { palette: scPagePalette(side) } : null) })}</>,
       }))
     }
     return [{
@@ -5133,6 +5231,18 @@ export default function AdminSocialPost() {
                   </select>
                 </div>
               </div>
+              <div className="flex items-center justify-between gap-2 mb-3" data-testid="names-font-row">
+                <span className="text-[11px] text-pb-dim font-mono">Names and scores font</span>
+                <select value={namesFontKey} onChange={e => setNamesFontKey(e.target.value)}
+                  className="bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-[11px] font-mono text-pb-text">
+                  <option value="">Same as headings</option>
+                  {NAMES_FONTS.map(f => <option key={f.key} value={f.key}>{f.name}</option>)}
+                </select>
+              </div>
+              <label className="flex items-center gap-2 mb-3 cursor-pointer" data-testid="short-names-row">
+                <input type="checkbox" checked={shortClubNames} onChange={e => setShortClubNames(e.target.checked)} />
+                <span className="text-[11px] text-pb-dim font-mono">Club names without "Cricket Club" (Leeming Spartan)</span>
+              </label>
               <div className="flex gap-2 flex-wrap items-center">
                 <button
                   onClick={() => setPaletteKey('club')}
@@ -5674,6 +5784,7 @@ export default function AdminSocialPost() {
                     <div className="col-span-2 flex items-center gap-2">
                       <img src={opponent.logo} alt="" className="w-8 h-8 rounded object-contain bg-pb-surface2" onError={e => e.target.style.display='none'} />
                       <span className="text-[10px] text-pb-faint font-mono truncate flex-1">{opponent.logo}</span>
+                      {opponent.logoAlt && <button onClick={() => patchOpp({ logo: opponent.logoAlt, logoAlt: null })} className="text-pb-faint hover:text-pb-text text-[10px] underline shrink-0" title="Use the crest Cricket Australia holds for this club">use official crest</button>}
                       <button onClick={() => patchOpp({ logo: null })} className="text-pb-faintest hover:text-red-400 text-xs">✕</button>
                     </div>
                   )}
@@ -6195,14 +6306,33 @@ export default function AdminSocialPost() {
 
                 <div className="grid grid-cols-2 gap-3 mb-4">
                   <div className="col-span-2"><Field label="Grade"><TextInput value={result.grade} onChange={v => setResult(r => ({ ...r, grade: v }))} placeholder="1ST GRADE" /></Field></div>
+                  {templateId === 'C4' && (
+                    <label className="col-span-2 flex items-center gap-2 cursor-pointer" data-testid="result-swap">
+                      <input type="checkbox" checked={resultSwap} onChange={e => setResultSwap(e.target.checked)} />
+                      <span className="text-[11px] text-pb-dim font-mono">Swap sides: club name and logo on the left, RESULT and details on the right</span>
+                    </label>
+                  )}
                   <Field label="Winner">
                     <select value={result.winner} onChange={e => setResult(r => ({ ...r, winner: e.target.value }))}
                       className="w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-sm text-pb-text">
                       <option value="TEAM">Us ({team.name})</option>
                       <option value="OPPONENT">Them ({oppData.name})</option>
-                      <option value="TIE">Tie / No result</option>
+                      <option value="TIE">No winner (tie, abandoned, no result)</option>
                     </select>
                   </Field>
+                  {result.winner === 'TIE' && (
+                    <div className="col-span-2 grid grid-cols-2 gap-3">
+                      <Field label="No winner because">
+                        <select value={result.noWinner || 'TIE'} onChange={e => setResult(r => ({ ...r, noWinner: e.target.value }))}
+                          className="w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-sm text-pb-text">
+                          {NO_WINNER_KINDS.map(k => <option key={k.key} value={k.key}>{k.label}</option>)}
+                        </select>
+                      </Field>
+                      {result.noWinner === 'CUSTOM' && (
+                        <Field label="Words on the post"><TextInput value={result.noWinnerText || ''} onChange={v => setResult(r => ({ ...r, noWinnerText: v }))} placeholder="MATCH ABANDONED" /></Field>
+                      )}
+                    </div>
+                  )}
                   <Field label="Margin"><TextInput value={result.margin} onChange={v => setResult(r => ({ ...r, margin: v }))} placeholder="BY 4 WICKETS" /></Field>
                   <Field label="Our Score"><TextInput value={result.teamScore} onChange={v => setResult(r => ({ ...r, teamScore: v }))} placeholder="6/188" /></Field>
                   <Field label="Their Score"><TextInput value={result.oppScore} onChange={v => setResult(r => ({ ...r, oppScore: v }))} placeholder="184" /></Field>
@@ -6432,6 +6562,16 @@ export default function AdminSocialPost() {
                   </div>
                 </div>
                 <p className="text-[11px] text-pb-faint mb-3">Round, date &amp; competition come from <strong>Match Info</strong> above. Drag a row by its ⋮⋮ handle, or use ▲▼.</p>
+                <div className="flex flex-col gap-1.5 mb-3" data-testid="round-opts">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={roundOpts.allVs} onChange={e => setRoundOpts(o => ({ ...o, allVs: e.target.checked }))} />
+                    <span className="text-[11px] text-pb-dim font-mono">"vs" on every row (no "@" for away games)</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={roundOpts.clubOnly} onChange={e => setRoundOpts(o => ({ ...o, clubOnly: e.target.checked }))} />
+                    <span className="text-[11px] text-pb-dim font-mono">Show the club, not the grade team (Maddington Cricket Club)</span>
+                  </label>
+                </div>
                 <div className="flex items-center gap-2 mb-3">
                   <span className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faint">Pages</span>
                   <button onClick={() => patchRoundPages('fixtures', { count: roundPages.fixtures.count - 1 })} disabled={roundPages.fixtures.count <= 1}
@@ -6471,7 +6611,7 @@ export default function AdminSocialPost() {
                           <input value={f.oppMono} onChange={e => set({ oppMono: e.target.value.toUpperCase().slice(0, 3) })} placeholder="SUB"
                             className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono text-center placeholder:text-pb-faintest" />
                         </div>
-                        <OppLogoChip logo={f.oppLogo} loading={f.oppLogoLoading} onClear={() => set({ oppLogo: null })} />
+                        <OppLogoChip logo={f.oppLogo} loading={f.oppLogoLoading} onClear={() => set({ oppLogo: null })} alt={f.oppLogoAlt} onUseAlt={() => set({ oppLogo: f.oppLogoAlt, oppLogoAlt: null })} />
                         <div className="grid grid-cols-2 gap-1.5">
                           <input value={f.time} onChange={e => set({ time: e.target.value })} placeholder="12:30 PM"
                             className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
@@ -6499,6 +6639,12 @@ export default function AdminSocialPost() {
                   </div>
                 </div>
                 <p className="text-[11px] text-pb-faint mb-3">Round &amp; date come from <strong>Match Info</strong> above. W/L colour-codes the post. Drag a row by its ⋮⋮ handle, or use ▲▼.</p>
+                <div className="flex flex-col gap-1.5 mb-3" data-testid="round-opts">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={roundOpts.clubOnly} onChange={e => setRoundOpts(o => ({ ...o, clubOnly: e.target.checked }))} />
+                    <span className="text-[11px] text-pb-dim font-mono">Show the club, not the grade team (Maddington Cricket Club)</span>
+                  </label>
+                </div>
                 <div className="flex items-center gap-2 mb-3">
                   <span className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faint">Pages</span>
                   <button onClick={() => patchRoundPages('results', { count: roundPages.results.count - 1 })} disabled={roundPages.results.count <= 1}
@@ -6557,7 +6703,7 @@ export default function AdminSocialPost() {
                           <input value={r.oppMono} onChange={e => set({ oppMono: e.target.value.toUpperCase().slice(0, 3) })} placeholder="SUB"
                             className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono text-center placeholder:text-pb-faintest" />
                         </div>
-                        <OppLogoChip logo={r.oppLogo} loading={r.oppLogoLoading} onClear={() => set({ oppLogo: null })} />
+                        <OppLogoChip logo={r.oppLogo} loading={r.oppLogoLoading} onClear={() => set({ oppLogo: null })} alt={r.oppLogoAlt} onUseAlt={() => set({ oppLogo: r.oppLogoAlt, oppLogoAlt: null })} />
                         <div className="grid gap-1.5" style={{ gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr)' }}>
                           <input value={r.us} onChange={e => set({ us: e.target.value })} placeholder="Us 6/188"
                             className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
@@ -6646,6 +6792,31 @@ export default function AdminSocialPost() {
                   {scSplit && (
                     <p className="text-pb-faintest text-[10px] mt-2 leading-relaxed">One square per team — the side that batted first, then the side that chased. Downloads as 2 PNGs.</p>
                   )}
+                </div>
+
+                {/* The opposition's colours, for their page */}
+                <div className="mb-4 p-3 rounded border pb-hairline bg-pb-surface2" data-testid="sc-opp-colours">
+                  <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-2">Opposition colours</p>
+                  <label className="flex items-center gap-2 cursor-pointer mb-2">
+                    <input type="checkbox" checked={scOppColours} onChange={e => setScOppColours(e.target.checked)} />
+                    <span className="text-[11px] text-pb-dim font-mono">Their page in their colours (2 Instagram squares)</span>
+                  </label>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <input type="color" value={/^#[0-9a-fA-F]{6}$/.test(scorecardMatch[scOppSide]?.color || '') ? scorecardMatch[scOppSide].color : '#cc1f2c'}
+                      onChange={e => { patchScTeam(scOppSide, { color: e.target.value, headerInk: inkOn(e.target.value) }); setScCrestStatus(null) }}
+                      className="w-9 h-8 rounded cursor-pointer border-0 bg-transparent p-0" aria-label="Opposition colour" />
+                    <button type="button" disabled={scCrestStatus === 'reading'}
+                      onClick={async () => {
+                        setScCrestStatus('reading')
+                        const c = await crestColour(scorecardMatch[scOppSide]?.logo)
+                        if (c) { patchScTeam(scOppSide, { color: c, headerInk: inkOn(c) }); setScCrestStatus('ok') } else setScCrestStatus('none')
+                      }}
+                      className="px-2.5 py-1 rounded border pb-hairline text-[11px] font-mono text-pb-faint hover:text-pb-text disabled:opacity-50">Read it from their crest</button>
+                    <span className="text-[10px] font-mono text-pb-faintest">
+                      {scCrestStatus === 'reading' ? 'Reading…' : scCrestStatus === 'ok' ? 'Colour set from the crest' : scCrestStatus === 'none' ? 'Could not read that crest, pick a colour' : (scorecardMatch[scOppSide]?.name || 'Opposition')}
+                    </span>
+                  </div>
+                  <p className="text-pb-faintest text-[10px] mt-2 leading-relaxed">Sets the opposition's colour for their team header and, with the box ticked, their whole square.</p>
                 </div>
 
                 {/* Meta fields */}

@@ -2,7 +2,7 @@
 // See base.jsx for the shared data and probe_layout_parts.jsx for the contract.
 import React from 'react'
 import { pal, team, opponent, match, players, meta, sponsors, club, PHOTO, LOGO } from './base.jsx'
-import { ResultMarginHero, ResultBroadcast, ResultVersusColumns, ResultStar, ResultInningsBars, ResultTicket } from '../../src/social/round-templates.jsx'
+import { ResultMarginHero, ResultBroadcast, ResultVersusColumns, ResultStar, ResultInningsBars, ResultTicket, ResultSummary } from '../../src/social/round-templates.jsx'
 void React; void pal; void team; void opponent; void match; void players; void meta; void sponsors; void club
 
 // The opposition has no crest here, so the badge letters (a colour part) show on their side. A decided single result shaped as the editor builds it for a 'singleresult' layout. We won, so the
@@ -37,4 +37,5 @@ export const FIXTURES = {
   RS4: [ResultStar, noPhoto],
   RS5: [ResultInningsBars, props],
   RS6: [ResultTicket, props],
+  RS9: [ResultSummary, props],
 }

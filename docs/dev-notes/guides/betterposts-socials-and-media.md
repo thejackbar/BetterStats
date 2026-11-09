@@ -149,6 +149,14 @@
 80. The badge and strip read `GET /admin/social/milestone-watch`, which reuses `milestone_totals.profile_totals` and the club's `Scheme`/`reach_window`; never a second milestone rule. A lineup layout opts in only once its rows and footer hold `MilestoneBadge` and `watchStrip` at every size with 12 names (`WATCH_TEMPLATES`; others say so on screen). The new props (`p.milestone`, `watch`) are absent when off, so an old post is unchanged.
 81. Stale means the last round was never pulled (a past `UPCOMING`/`LIVE` club game, or the last successful sync older than the last scored game). It blocks both save paths in the handlers (`watchBlock`), not just the buttons; `unknown` (no sync history) says so and never blocks. Check: `verify_social_milestones.py`, `verify_lineup_milestones_browser.mjs`.
 
+**Club feedback round (v9.141.0)**
+82. A layout takes a share of its row, not the text's own width, for anything that can be cut (`flex: 1 1 auto; min-width: 0`). A `nowrap` span with `text-overflow: ellipsis` still has a full-width min-content, so a flex column holding long names must carry `min-width: 0` on the column, its body and each row (RR6 pushed the LOST column off the post). Check the panels' right edge against the post's, never leaf text boxes.
+83. `winner: 'TIE'` is the one no-winner bucket; `result.noWinner` (see `social/resultOutcome.js`) says which, and a layout prints `result.noWinnerLine` (C4) or `r.resultLabel` and `r.resultWord` (RS). Never print "MATCH TIED" for a no-winner game without reading them.
+84. `BrandLockup` prints `team.fullName` first. A club-name option must set `fullName` as well as `name`. Roundup rows carry `oppClub` (the owning club's name); use it before stripping a grade off the team name.
+85. A scorecard's panel height is measured (`useBoxHeight` on the heading, `offsetHeight`), never a fixed 800 or 880: the heading grows when the result line wraps. The sponsor bar and its margin are `SC_CLEAR` (84).
+86. `organisations.logo_data` is written only by a club upload (and the demo clone). A wrong opponent crest is stored data: run `python -m app.scripts.audit_org_logos`. The editor takes our crest only for an id match that has `logo_url`, and keeps the Cricket Australia URL as `logoAlt`.
+87. `_org_for_team` matches on distinctive words only (`_GENERIC_CLUB_WORDS` and the grade words are dropped); one shared word such as "Cricket" is never a match.
+
 ## Traps and failure signatures
 - Geometry checks pass but a layout reads wrong (black bands, clumped story names). Judge from real screenshots.
 - Hero layouts show a crest, not the cut-out: harness roster stubbed `photo_url: null`. Stubs must cover every conditional's data (give players a photo and a route for it).
