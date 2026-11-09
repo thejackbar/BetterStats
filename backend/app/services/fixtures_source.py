@@ -107,7 +107,8 @@ async def current_grade_rows_with_live(db: AsyncSession, org_id) -> list[tuple]:
 
 
 async def org_grassroots_fixtures_checked(
-    db: AsyncSession, org, hidden_grade_ids=(), *, force: bool = False, discover_live: bool = False
+    db: AsyncSession, org, hidden_grade_ids=(), *, force: bool = False, discover_live: bool = False,
+    include_completed: bool = False,
 ) -> tuple[list[dict], dict]:
     """``org_grassroots_fixtures`` plus what CA said about every match it knows.
 
@@ -128,6 +129,10 @@ async def org_grassroots_fixtures_checked(
     ``discover_live`` also reads grades CA lists for the club that we have not
     stored yet (``current_grade_rows_with_live``). Off by default: those grades
     have no row of ours, so ``db_grade_id`` comes back ``None`` for them.
+
+    ``include_completed`` adds the games CA has already finished this season
+    (status ``COMPLETED``), for the fixtures sync only: voting needs a fixture
+    row for a round played before the club first synced.
     """
     rows = await (current_grade_rows_with_live(db, org.id) if discover_live else _current_grade_rows(db, org.id))
     if hidden_grade_ids:
@@ -141,7 +146,7 @@ async def org_grassroots_fixtures_checked(
     meta = {guid: (grade_id, gname, sname) for guid, grade_id, gname, sname in rows}
     categories = await org_grade_categories(db, org.id)
     fixtures = await gr.get_grades_fixtures(
-        [guid for guid, _, _, _ in rows], club=org, force=force
+        [guid for guid, _, _, _ in rows], club=org, force=force, include_completed=include_completed
     )
     for guid, grade_id, _, _ in rows:
         if grade_id is None:
