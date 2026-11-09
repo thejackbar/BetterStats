@@ -120,14 +120,14 @@ html,body{width:1920px;height:1080px;overflow:hidden;background:#04070b;font-fam
 #sty{zoom:1.1;position:absolute;left:918px;top:172px;width:800px;height:640px;border-radius:18px;background:rgba(10,13,20,.8);box-shadow:0 30px 80px rgba(0,0,0,.55),0 0 0 2px rgba(96,165,250,.5);opacity:0;overflow:visible}
 #sty .bar{position:absolute;left:0;top:0;width:800px;height:54px;border-bottom:1px solid rgba(255,255,255,.08);display:flex;align-items:center;gap:8px;padding-left:20px;font:700 22px 'Inter',sans-serif;color:#e5e7eb}
 #sty .bar i{width:12px;height:12px;border-radius:50%;background:#3a3f50;display:block}
-.scol{position:absolute;top:74px;width:178px;height:540px;border-radius:12px;background:#0f1420;border:1px solid rgba(255,255,255,.07);padding:12px 10px}
-.scol .hd{display:flex;justify-content:space-between;align-items:center;font:700 20px 'Inter',sans-serif;color:#e5e7eb;margin-bottom:12px}
+.scol{position:absolute;top:74px;width:184px;height:540px;border-radius:12px;background:#0f1420;border:1px solid rgba(255,255,255,.07);padding:12px 10px}
+.scol .hd{position:relative;display:flex;justify-content:space-between;align-items:center;font:700 20px 'Inter',sans-serif;color:#e5e7eb;margin-bottom:12px}
 .scol .hd u{text-decoration:none;font:700 14px 'Inter',sans-serif;border-radius:999px;padding:3px 10px;background:#f5b542;color:#2a1c00}
 .scol .hd u.ok{background:rgba(59,130,246,.3);color:#bfdbfe}
-.sc{position:relative;height:56px;border-radius:10px;background:#161b27;border:1px solid rgba(255,255,255,.06);margin-bottom:9px;display:flex;align-items:center;gap:10px;padding-left:16px;overflow:hidden;opacity:0}
+.sc{position:relative;height:56px;border-radius:10px;background:#161b27;border:1px solid rgba(255,255,255,.06);margin-bottom:9px;display:flex;align-items:center;gap:8px;padding-left:14px;overflow:hidden;opacity:0}
 .sc .ed{position:absolute;left:0;top:0;bottom:0;width:6px;background:var(--e,#16c784)}
-.sc .av{flex:none;width:30px;height:30px;border-radius:50%;border:1.5px solid rgba(255,255,255,.18);display:grid;place-items:center;font:600 11px 'JetBrains Mono',monospace;color:#9aa3b5}
-.sc .nm{font:600 18px 'Inter',sans-serif;color:#e5e7eb;white-space:nowrap}
+.sc .av{flex:none;width:26px;height:26px;border-radius:50%;border:1.5px solid rgba(255,255,255,.18);display:grid;place-items:center;font:600 10px 'JetBrains Mono',monospace;color:#9aa3b5}
+.sc .nm{font:600 15px 'Inter',sans-serif;color:#e5e7eb;white-space:nowrap}
 .sc .tg{font:700 13px 'JetBrains Mono',monospace;font-style:normal;margin-left:4px}
 .sc.open{background:transparent;border:1.5px dashed rgba(255,255,255,.14);justify-content:center;padding-left:0;font:500 16px 'Inter',sans-serif;color:#566074}
 #sdrag{position:absolute;left:24px;top:187px;z-index:5;width:230px;height:62px;border-radius:12px;background:#1b2434;border:2px solid #60a5fa;box-shadow:0 22px 50px rgba(0,0,0,.6),0 0 0 8px rgba(96,165,250,.16);display:flex;align-items:center;gap:10px;padding-left:20px;opacity:0}
@@ -159,6 +159,9 @@ html,body{width:1920px;height:1080px;overflow:hidden;background:#04070b;font-fam
 #jedge{transform-origin:0 50%}
 #end-logo{left:110px;top:150px;width:170px;height:170px}
 #end-w{left:312px;top:205px;font-size:66px}
+
+.col .ttl{white-space:nowrap}
+#i-sub{max-width:860px}
 </style></head><body>
 <div id="root" data-composition-id="main" data-start="0" data-duration="112.9" data-width="1920" data-height="1080">
 <div id="bg"></div>
@@ -166,7 +169,7 @@ html,body{width:1920px;height:1080px;overflow:hidden;background:#04070b;font-fam
 <div id="bug"><img src="assets/img/bettercricket-logo.png" alt=""><span>BetterCricket</span></div>
 <div id="prog"><i></i></div>
 
-<div id="sty" data-layout-ignore><div class="bar"><i></i><i></i><i></i><span style="margin-left:14px">Selection Whiteboard</span></div><div class="scol" style="left:20px"><div class="hd"><span>Pool</span><u class="ok">17</u></div><div class="sc" id="sc00" style="--e:#4cc2ff;"><i class="ed"></i><b class="av">EB</b><span class="nm">Ethan Black</span></div><div class="sc" id="sc01" style="--e:#16c784;"><i class="ed"></i><b class="av">JB</b><span class="nm">Jack Barendse</span></div><div class="sc" id="sc02" style="--e:#f5b542;"><i class="ed"></i><b class="av">MB</b><span class="nm">Max Bryant</span></div><div class="sc" id="sc03" style="--e:#16c784;"><i class="ed"></i><b class="av">RD</b><span class="nm">Reece Dawson</span></div><div class="sc" id="sc04" style="--e:#16c784;"><i class="ed"></i><b class="av">CR</b><span class="nm">Cam Reid</span></div></div><div class="scol" style="left:210px"><div class="hd"><span>1st XI</span><u class="ok">11/11</u></div><div class="sc" id="sc10" style="--e:#16c784;"><i class="ed"></i><b class="av">TB</b><span class="nm">Tom Baker</span></div><div class="sc" id="sc11" style="--e:#f5a524;"><i class="ed"></i><b class="av">SB</b><span class="nm">Sam Barlow</span></div><div class="sc" id="sc12" style="--e:#16c784;"><i class="ed"></i><b class="av">LB</b><span class="nm">Liam Bates</span></div><div class="sc" id="sc13" style="--e:#16c784;"><i class="ed"></i><b class="av">WC</b><span class="nm">Will Carter</span></div><div class="sc" id="sc14" style="--e:#16c784;"><i class="ed"></i><b class="av">DC</b><span class="nm">Dan Clarke</span></div></div><div class="scol" style="left:400px"><div class="hd"><span>2nd XI</span><u class="ok">11/11</u></div><div class="sc" id="sc20" style="--e:#16c784;"><i class="ed"></i><b class="av">OH</b><span class="nm">Owen Harris</span></div><div class="sc" id="sc21" style="--e:#16c784;"><i class="ed"></i><b class="av">KH</b><span class="nm">Kai Hughes</span></div><div class="sc" id="sc22" style="--e:#16c784;"><i class="ed"></i><b class="av">RI</b><span class="nm">Ryan Irwin</span></div><div class="sc" id="sc23" style="--e:#16c784;"><i class="ed"></i><b class="av">TK</b><span class="nm">Toby Kelly</span></div><div class="sc open" id="so24">Open</div></div><div class="scol" style="left:590px"><div class="hd"><span>3rd XI</span><u class="">6/11</u></div><div class="sc" id="sc30" style="--e:#16c784;"><i class="ed"></i><b class="av">PY</b><span class="nm">Pat Young</span></div><div class="sc" id="sc31" style="--e:#16c784;"><i class="ed"></i><b class="av">AW</b><span class="nm">Alex Webb</span></div><div class="sc open" id="so32">Open</div><div class="sc open" id="so33">Open</div><div class="sc open" id="so34">Open</div></div><div class="sc" id="sjack" style="--e:#16c784;position:absolute;left:600px;top:256px;width:158px;margin:0;"><i class="ed"></i><b class="av">JB</b><span class="nm">Jack Barendse</span></div><div id="sdrag"><i class="ed"></i><b class="av" style="flex:none;width:34px;height:34px;border-radius:50%;border:1.5px solid rgba(255,255,255,.2);display:grid;place-items:center;font:600 12px JetBrains Mono,monospace;color:#9aa3b5">JB</b><span style="font:700 21px Inter,sans-serif;color:#fff">Jack Barendse</span></div></div>
+<div id="sty" data-layout-ignore><div class="bar"><i></i><i></i><i></i><span style="margin-left:14px">Selection Whiteboard</span></div><div class="scol" style="left:14px"><div class="hd"><span>Pool</span><u class="ok" id="cnt0a">17</u><u class="ok" id="cnt0b" style="position:absolute;right:0;opacity:0">16</u></div><div class="sc" id="sc00" style="--e:#4cc2ff;"><i class="ed"></i><b class="av">EB</b><span class="nm">Ethan Black</span></div><div class="sc" id="sc01" style="--e:#16c784;"><i class="ed"></i><b class="av">JB</b><span class="nm">Jack Barendse</span></div><div class="sc" id="sc02" style="--e:#f5b542;"><i class="ed"></i><b class="av">MB</b><span class="nm">Max Bryant</span></div><div class="sc" id="sc03" style="--e:#16c784;"><i class="ed"></i><b class="av">RD</b><span class="nm">Reece Dawson</span></div><div class="sc" id="sc04" style="--e:#16c784;"><i class="ed"></i><b class="av">CR</b><span class="nm">Cam Reid</span></div></div><div class="scol" style="left:206px"><div class="hd"><span>1st XI</span><u class="ok" id="cnt1a">11/11</u></div><div class="sc" id="sc10" style="--e:#16c784;"><i class="ed"></i><b class="av">TB</b><span class="nm">Tom Baker</span></div><div class="sc" id="sc11" style="--e:#f5a524;"><i class="ed"></i><b class="av">SB</b><span class="nm">Sam Barlow</span></div><div class="sc" id="sc12" style="--e:#16c784;"><i class="ed"></i><b class="av">LB</b><span class="nm">Liam Bates</span></div><div class="sc" id="sc13" style="--e:#16c784;"><i class="ed"></i><b class="av">WC</b><span class="nm">Will Carter</span></div><div class="sc" id="sc14" style="--e:#16c784;"><i class="ed"></i><b class="av">DC</b><span class="nm">Dan Clarke</span></div></div><div class="scol" style="left:398px"><div class="hd"><span>2nd XI</span><u class="ok" id="cnt2a">11/11</u></div><div class="sc" id="sc20" style="--e:#16c784;"><i class="ed"></i><b class="av">OH</b><span class="nm">Owen Harris</span></div><div class="sc" id="sc21" style="--e:#16c784;"><i class="ed"></i><b class="av">KH</b><span class="nm">Kai Hughes</span></div><div class="sc" id="sc22" style="--e:#16c784;"><i class="ed"></i><b class="av">RI</b><span class="nm">Ryan Irwin</span></div><div class="sc" id="sc23" style="--e:#16c784;"><i class="ed"></i><b class="av">TK</b><span class="nm">Toby Kelly</span></div><div class="sc open" id="so24">Open</div></div><div class="scol" style="left:590px"><div class="hd"><span>3rd XI</span><u class="" id="cnt3a">5/11</u><u id="cnt3b" style="position:absolute;right:0;opacity:0">6/11</u></div><div class="sc" id="sc30" style="--e:#16c784;"><i class="ed"></i><b class="av">PY</b><span class="nm">Pat Young</span></div><div class="sc" id="sc31" style="--e:#16c784;"><i class="ed"></i><b class="av">AW</b><span class="nm">Alex Webb</span></div><div class="sc open" id="so32">Open</div><div class="sc open" id="so33">Open</div><div class="sc open" id="so34">Open</div></div><div class="sc" id="sjack" style="--e:#16c784;position:absolute;left:601px;top:252px;width:164px;margin:0;"><i class="ed"></i><b class="av">JB</b><span class="nm">Jack Barendse</span></div><div id="sdrag"><i class="ed"></i><b class="av" style="flex:none;width:34px;height:34px;border-radius:50%;border:1.5px solid rgba(255,255,255,.2);display:grid;place-items:center;font:600 12px JetBrains Mono,monospace;color:#9aa3b5">JB</b><span style="font:700 21px Inter,sans-serif;color:#fff">Jack Barendse</span></div></div>
 
 <!-- whiteboard window, persistent. #wbi is the camera: it zooms and pans inside the fixed window -->
 <div id="wb">
@@ -200,15 +203,15 @@ html,body{width:1920px;height:1080px;overflow:hidden;background:#04070b;font-fam
     <div id="i-kick" class="kick" style="opacity:0">Introducing</div>
     <div id="i-brand" style="display:flex;align-items:center;gap:26px;margin-top:34px;opacity:0"><img src="assets/img/betterselect.svg" style="width:112px;height:112px" alt=""><span style="font:800 italic 84px/1 'AC',sans-serif;text-transform:uppercase;padding-right:.16em">Better<span style="color:#60a5fa">Select</span></span></div>
     <div id="i-title" style="margin-top:34px"><div class="ttl i-a" style="font-size:108px;opacity:0">Selection</div><div class="ttl i-b" style="font-size:108px;color:var(--hot);opacity:0">Whiteboard</div></div>
-    <div id="i-sub" class="sub" style="margin-top:50px;opacity:0">Every team. One screen. Selection, together.</div>
+    <div id="i-sub" class="sub" style="margin-top:50px;opacity:0">Every team. One screen.<br>Selection, together.</div>
   </div>
 </div>
 
 <!-- S1 availability through the link -->
 <div id="s1" class="clip scene" data-start="7.0" data-duration="14.0" data-track-index="1">
-  <div class="col" style="top:150px">
+  <div class="col" style="top:150px;width:1120px">
     <div id="a-kick" class="kick" style="opacity:0">Availability</div>
-    <div id="a-ttl" class="ttl" style="margin-top:22px;opacity:0">Send one link.<br><em>Players answer.</em></div>
+    <div id="a-ttl" class="ttl" style="margin-top:22px;font-size:88px;opacity:0">Send one link.<br><em>Players answer.</em></div>
     <div id="pt1" class="pt"><i>1</i><span>Paste the link in your WhatsApp group</span></div>
     <div id="pt2" class="pt"><i>2</i><span>Players pick their name and PIN</span></div>
     <div id="pt3" class="pt"><i>3</i><span>One tap: Available, Maybe or Out<small>The same answers sit on their Player Dashboard</small></span></div>
@@ -393,10 +396,12 @@ stycards.forEach((id, i) => { const el = document.getElementById('sc' + id) || d
 // a player is picked up from the pool and dropped into the 3rd XI
 F('#sdrag', { opacity: 0, x: 0, y: 0, rotation: 0, scale: 1 }, { opacity: 1, scale: 1.05, rotation: -3, duration: 0.4, ease: 'power2.out' }, t0 + 3.9);
 hide('#sc01', t0 + 3.9, 0.2);
+['#sc02', '#sc03', '#sc04'].forEach((id, i) => F(id, { y: 0 }, { y: -65, duration: 0.5, ease: 'power2.inOut' }, t0 + 4.1 + 0.05 * i));
 F('#sdrag', { x: 0, y: 0 }, { x: 574, y: 62, duration: 1.4, ease: 'power2.inOut' }, t0 + 4.2);
 hide('#so32', t0 + 5.5, 0.2);
 F('#sdrag', { opacity: 1, rotation: -3 }, { opacity: 0, rotation: 0, duration: 0.25 }, t0 + 5.7);
 show('#sjack', t0 + 5.6, 0.3);
+hide('#cnt0a', t0 + 5.6, 0.25); show('#cnt0b', t0 + 5.6, 0.25); hide('#cnt3a', t0 + 5.6, 0.25); show('#cnt3b', t0 + 5.6, 0.25);
 
 // ---- S1 availability through the link (WhatsApp group)
 t0 = S.s1;
