@@ -500,7 +500,6 @@ const STAGE_CHIPS = [
 ]
 
 function ClubRow({ c, busy, onFlag, onRestore }) {
-  const terms = c.queries.filter(Boolean)
   return (
     <tr data-testid="club-row" className={`border-b pb-hairline last:border-0 hover:bg-pb-surface2/40 ${c.hidden ? 'opacity-50' : ''}`}>
       <td className="px-2 py-2 text-pb-text font-medium whitespace-nowrap">
@@ -519,11 +518,6 @@ function ClubRow({ c, busy, onFlag, onRestore }) {
         </span>
       </td>
       <td className="px-2 py-2 text-pb-dim whitespace-nowrap">{c.email || '–'}</td>
-      <td className="px-2 py-2 text-pb-dim max-w-[16rem]">
-        <span className="block truncate" title={`${fmtNum(c.visitors)} visitor${c.visitors === 1 ? '' : 's'}, ${fmtNum(c.searches)} search${c.searches === 1 ? '' : 'es'}`}>
-          {terms.length ? terms.map((t) => `“${t}”`).join(' · ') : '–'}
-        </span>
-      </td>
       <td className="px-2 py-2 text-pb-dim whitespace-nowrap">{fmtTime(c.last_at)}</td>
       <td className="px-2 py-2 text-right whitespace-nowrap">
         {c.hidden ? (
@@ -632,7 +626,6 @@ function ClubsPanel({ selected, searched, scope, onScope, period, failed, busyKe
                 <th className="px-2 py-2">Stage</th>
                 <th className="px-2 py-2">Source</th>
                 <th className="px-2 py-2">Contact email</th>
-                <th className="px-2 py-2">Typed</th>
                 <th className="px-2 py-2">Last seen</th>
                 <th className="px-2 py-2"></th>
               </tr>
@@ -1225,10 +1218,11 @@ export default function SuperMetaAds() {
   const [selectedClubs, setSelectedClubs] = useState(null)
   const [searchedClubs, setSearchedClubs] = useState(null)
   const [busySelectionKey, setBusySelectionKey] = useState('')
-  // One period and one scope for every on-site panel below the money. 7 days of the selected
-  // campaign is the default: a list going back to July is not a follow-up list.
+  // One period and one scope for every on-site panel below the money. It opens on ALL traffic
+  // for the last 7 days (a list going back to July is not a follow-up list); "This campaign"
+  // narrows it to the selected campaign's visitors.
   const [period, setPeriod] = useState(7)
-  const [scope, setScope] = useState('campaign')
+  const [scope, setScope] = useState('all')
   const [panelsNonce, setPanelsNonce] = useState(0)
 
   const [trendDays, setTrendDays] = useState(14)

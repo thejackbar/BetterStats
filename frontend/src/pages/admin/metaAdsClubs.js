@@ -32,8 +32,7 @@ export function mergeClubs(selected, searched) {
     if (!m) {
       m = {
         key, name: (c.name || '').trim(), stage, email: null, slug: null, org_id: null,
-        via_meta: false, via_campaign: false, queries: [], searches: 0, visitors: 0,
-        last_at: null, hidden: false,
+        via_meta: false, via_campaign: false, last_at: null, hidden: false,
       }
       out.set(key, m)
     }
@@ -43,9 +42,6 @@ export function mergeClubs(selected, searched) {
     m.org_id = m.org_id || c.org_id || null
     m.via_meta = m.via_meta || !!c.via_meta
     m.via_campaign = m.via_campaign || !!c.via_campaign
-    for (const q of c.queries || []) if (q && !m.queries.includes(q)) m.queries.push(q)
-    m.searches = Math.max(m.searches, c.searches || 0)
-    m.visitors = Math.max(m.visitors, c.visitors || 0)
     m.last_at = later(m.last_at, c.last_at)
     // Flagged as test on either list is flagged: the server keys both on the same name.
     m.hidden = m.hidden || hidden

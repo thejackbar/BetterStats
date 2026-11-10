@@ -163,7 +163,7 @@ const ONSITE = {
 }
 
 async function open({ summary, signups = { rows: ROWS, campaigns: [] }, signupsFail = false, listsFail = false,
-                      selected = SELECTED, searched = SEARCHED,
+                      selected = SELECTED_ALL, searched = SEARCHED,
                       tokens = null, width = 1500 } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: 3200 } })
   const page = await ctx.newPage()
@@ -203,7 +203,7 @@ async function open({ summary, signups = { rows: ROWS, campaigns: [] }, signupsF
         { key: 'b', label: 'Completed', value: 6, pct_of_top: 30, pct_of_prev: 30 },
       ] })
     }
-    if (/meta-ads\/selected-clubs/.test(p)) return listsFail ? json({ detail: 'boom' }, 500) : json(scopeQ === 'all' && selected === SELECTED ? SELECTED_ALL : selected)
+    if (/meta-ads\/selected-clubs/.test(p)) return listsFail ? json({ detail: 'boom' }, 500) : json(scopeQ === 'campaign' && selected === SELECTED_ALL ? SELECTED : selected)
     if (/meta-ads\/searched-clubs/.test(p)) return listsFail ? json({ detail: 'boom' }, 500) : json(searched)
     if (/meta-ads\/onsite/.test(p)) return json({ ...ONSITE, scope: scopeQ || 'campaign', days: Number(u.searchParams.get('days') || 30) })
     if (/meta-ads\/ad-signups/.test(p)) return signupsFail ? json({ detail: 'boom' }, 500) : json(signups)
@@ -324,28 +324,28 @@ const money = (n) => `A$${n.toFixed(2)}`
   ck('the section has no tabs', (await page.locator('[role="tab"], [data-testid^="demand-tab-"]').count()) === 0)
   ck('the clubs panel is on screen with nothing clicked', await has(page.locator('[data-testid="clubs-panel"]')))
   ck('each club that typed in is named, once (the two lists are folded)',
-     (await page.locator('[data-testid="club-row"]').count()) === 4
-     && ['Applegrove CC', 'Bayview CC', 'Cresthill CC', 'Dunmore CC'].every((n) => bodyNow.includes(n)),
+     (await page.locator('[data-testid="club-row"]').count()) === 5
+     && ['Applegrove CC', 'Bayview CC', 'Cresthill CC', 'Dunmore CC', 'Organic CC'].every((n) => bodyNow.includes(n)),
      String(await page.locator('[data-testid="club-row"]').count()))
   ck('a completed club says Completed', (await stageOf('Applegrove')).includes('completed'), await stageOf('Applegrove'))
   ck('a club that reached the Terms step says so', (await stageOf('Bayview')).includes('reached terms'), await stageOf('Bayview'))
   ck('a club that only picked one says Selected a club', (await stageOf('Cresthill')).includes('selected a club'), await stageOf('Cresthill'))
   ck('a club only searched is told apart', (await stageOf('Dunmore')).includes('searched only'), await stageOf('Dunmore'))
-  ck('what was typed is shown', bodyNow.includes('“dunmore”'))
+  ck('there is no Typed column any more', !/\btyped\b/i.test(await textOf(page.locator('[data-testid="clubs-panel"] thead'))) && !bodyNow.includes('“dunmore”'))
   const count = async (k) => (await textOf(page.locator(`[data-testid="club-chip-count-${k}"]`))).trim()
-  ck('the stage chips carry counts', [await count('all'), await count('completed'), await count('terms'), await count('selected'), await count('searched')].join(',') === '4,1,1,1,1',
-     [await count('all'), await count('completed'), await count('terms'), await count('selected'), await count('searched')].join(','))
+  const chips = async () => [await count('all'), await count('completed'), await count('terms'), await count('selected'), await count('searched')].join(',')
+  ck('the stage chips carry counts', (await chips()) === '5,1,2,1,1', await chips())
   await clickIf(page.locator('[data-testid="club-chip-terms"]'))
-  ck('"Reached terms, not finished" shows only the club that stopped at Terms',
-     (await page.locator('[data-testid="club-row"]').count()) === 1 && (await page.locator('[data-testid="club-row"]').first().innerText()).includes('Bayview'))
+  ck('"Reached terms, not finished" shows the clubs that stopped at Terms',
+     (await page.locator('[data-testid="club-row"]').count()) === 2 && (await textOf(page.locator('[data-testid="clubs-panel"] tbody'))).includes('Bayview') && (await textOf(page.locator('[data-testid="clubs-panel"] tbody'))).includes('Organic'))
   await clickIf(page.locator('[data-testid="club-chip-searched"]'))
   ck('"Searched only" shows only Dunmore', (await page.locator('[data-testid="club-row"]').count()) === 1 && (await page.locator('[data-testid="club-row"]').first().innerText()).includes('Dunmore'))
   await clickIf(page.locator('[data-testid="club-chip-all"]'))
   await page.locator('input[type="search"]').first().fill('crest')
   ck('the name search narrows it', (await page.locator('[data-testid="club-row"]').count()) === 1 && (await page.locator('[data-testid="club-row"]').first().innerText()).includes('Cresthill'))
   await page.locator('input[type="search"]').first().fill('')
-  ck('what the campaign view left out is counted, with a way to see it', /2 more clubs started in this period from other traffic/i.test(await textOf(page.locator('[data-testid="clubs-outside"]'))))
-  ck('selections that could not be named are counted too', /2 club selections in this period could not be named/i.test(await textOf(page.locator('[data-testid="clubs-unnamed"]'))))
+  ck('it opens on all traffic, so nothing is hidden and no "left out" note shows', !(await has(page.locator('[data-testid="clubs-outside"]'))))
+  ck('selections that could not be named are counted', /2 club selections in this period could not be named/i.test(await textOf(page.locator('[data-testid="clubs-unnamed"]'))))
   ck('no empty or failed message when there is data', !(await has(page.locator('[data-testid="clubs-empty"], [data-testid="lists-failed"]'))))
   ck('the wizard funnel and the traffic card are on screen too',
      /wizard: where visitors drop off \(7 days\)/i.test(bodyNow) && await has(page.locator('[data-testid="traffic-card"]')))
@@ -360,37 +360,42 @@ const money = (n) => `A$${n.toFixed(2)}`
 
   // ── The wire: one period and one scope, sent to every on-site panel ─────────────
   const reads = (re) => wire.filter((w) => re.test(w))
-  ck('the first load asks for 7 days of THIS CAMPAIGN for the funnel, both lists and the traffic card',
-     reads(/registration-funnel\?days=7&scope=campaign/).length >= 1 && reads(/selected-clubs\?days=7&scope=campaign/).length >= 1
-     && reads(/searched-clubs\?days=7&scope=campaign/).length >= 1 && reads(/onsite\?days=7&scope=campaign/).length >= 1, wire.filter((w) => /meta-ads\/(reg|sel|sea|ons)/.test(w)).join(' | '))
-  ck('and no longer reads the Usage page\'s all-traffic card', reads(/usage\/campaigns/).length === 0, reads(/usage\/campaigns/).join(','))
+  ck('the first load asks for 7 days of ALL TRAFFIC for the funnel, both lists and the traffic card',
+     reads(/registration-funnel\?days=7&scope=all/).length >= 1 && reads(/selected-clubs\?days=7&scope=all/).length >= 1
+     && reads(/searched-clubs\?days=7&scope=all/).length >= 1 && reads(/onsite\?days=7&scope=all/).length >= 1, wire.filter((w) => /meta-ads\/(reg|sel|sea|ons)/.test(w)).join(' | '))
+  ck('and nothing is asked for at campaign scope until it is chosen', reads(/scope=campaign/).length === 0, reads(/scope=campaign/).join(' | '))
+  ck('the scope note says every source', /every source/i.test(await textOf(page.locator('[data-testid="scope-note"]'))))
+  ck('"All traffic" is the pressed option', (await page.locator('[data-testid="scope-all"]').getAttribute('aria-pressed')) === 'true')
   const before = wire.length
   await clickIf(page.locator('[data-testid="period-30"]'))
   await page.waitForTimeout(600)
   const afterPeriod = wire.slice(before)
-  ck('picking 30 days re-reads every panel for 30 days, still this campaign',
-     afterPeriod.some((w) => /selected-clubs\?days=30&scope=campaign/.test(w)) && afterPeriod.some((w) => /registration-funnel\?days=30&scope=campaign/.test(w))
-     && afterPeriod.some((w) => /onsite\?days=30&scope=campaign/.test(w)), afterPeriod.join(' | '))
+  ck('picking 30 days re-reads every panel for 30 days, still all traffic',
+     afterPeriod.some((w) => /selected-clubs\?days=30&scope=all/.test(w)) && afterPeriod.some((w) => /registration-funnel\?days=30&scope=all/.test(w))
+     && afterPeriod.some((w) => /onsite\?days=30&scope=all/.test(w)), afterPeriod.join(' | '))
   const before2 = wire.length
   await clickIf(page.locator('[data-testid="period-730"]'))
   await page.waitForTimeout(600)
   const afterWhole = wire.slice(before2)
   ck('"Whole campaign" asks each endpoint for its own maximum (the funnel caps at 90, the card at 365)',
-     afterWhole.some((w) => /selected-clubs\?days=730&scope=campaign/.test(w)) && afterWhole.some((w) => /registration-funnel\?days=90&scope=campaign/.test(w))
-     && afterWhole.some((w) => /onsite\?days=365&scope=campaign/.test(w)), afterWhole.join(' | '))
+     afterWhole.some((w) => /selected-clubs\?days=730&scope=all/.test(w)) && afterWhole.some((w) => /registration-funnel\?days=90&scope=all/.test(w))
+     && afterWhole.some((w) => /onsite\?days=365&scope=all/.test(w)), afterWhole.join(' | '))
   await clickIf(page.locator('[data-testid="period-7"]'))
   const before3 = wire.length
-  await clickIf(page.locator('[data-testid="scope-all"]'))
+  await clickIf(page.locator('[data-testid="scope-campaign"]'))
   await page.waitForTimeout(600)
   const afterScope = wire.slice(before3)
-  ck('"All traffic" re-reads everything with scope=all', afterScope.some((w) => /selected-clubs\?days=7&scope=all/.test(w)) && afterScope.some((w) => /onsite\?days=7&scope=all/.test(w)) && afterScope.some((w) => /registration-funnel\?days=7&scope=all/.test(w)), afterScope.join(' | '))
-  ck('the scope note changes to say every source', /every source/i.test(await textOf(page.locator('[data-testid="scope-note"]'))))
-  ck('the other traffic\'s club now appears', (await page.locator('[data-testid="club-row"]', { hasText: 'Organic CC' }).count()) === 1)
-  ck('and the "left out" note is gone', !(await has(page.locator('[data-testid="clubs-outside"]'))))
-  ck('a Meta-only filter appears for all traffic', await has(page.locator('[data-testid="club-meta-only"]')))
+  ck('"This campaign" re-reads everything with scope=campaign',
+     afterScope.some((w) => /selected-clubs\?days=7&scope=campaign/.test(w)) && afterScope.some((w) => /onsite\?days=7&scope=campaign/.test(w)) && afterScope.some((w) => /registration-funnel\?days=7&scope=campaign/.test(w)), afterScope.join(' | '))
+  ck('the scope note says this campaign only', /this campaign.s visitors only/i.test(await textOf(page.locator('[data-testid="scope-note"]'))))
+  ck('the other traffic\'s club drops out', (await page.locator('[data-testid="club-row"]', { hasText: 'Organic CC' }).count()) === 0)
+  ck('and what the campaign view left out is counted, with a way back to all traffic', /2 more clubs started in this period from other traffic/i.test(await textOf(page.locator('[data-testid="clubs-outside"]'))))
+  await clickIf(page.locator('[data-testid="clubs-outside"] button'))
+  await page.waitForTimeout(500)
+  ck('that link returns to all traffic', (await page.locator('[data-testid="club-row"]', { hasText: 'Organic CC' }).count()) === 1)
+  ck('a Meta-only filter is offered for all traffic', await has(page.locator('[data-testid="club-meta-only"]')))
   await page.locator('[data-testid="club-meta-only"]').check().catch(() => {})
   ck('and it hides the club that did not come through Meta', (await page.locator('[data-testid="club-row"]', { hasText: 'Organic CC' }).count()) === 0)
-  await clickIf(page.locator('[data-testid="scope-campaign"]'))
   await page.screenshot({ path: '/tmp/meta_ads_kpi_desktop.png', fullPage: true })
   ck('no page errors', errors.length === 0, errors.join(' | '))
   await ctx.close()
@@ -400,7 +405,7 @@ const money = (n) => `A$${n.toFixed(2)}`
 {
   const empty = { clubs: [], hidden_clubs: [], identified: 0, hidden_count: 0, anonymous: 0, searched_only_count: 0, converted_count: 0, outside_campaign: 0 }
   const { page, ctx } = await open({ summary: summaryFor(), selected: empty, searched: empty })
-  ck('an empty list says no club typed in during the period instead of vanishing', /no club typed into the trial page from this campaign in the last 7 days/i.test(await textOf(page.locator('[data-testid="clubs-empty"]'))))
+  ck('an empty list says no club typed in during the period instead of vanishing', /no club typed into the trial page in the last 7 days/i.test(await textOf(page.locator('[data-testid="clubs-empty"]'))))
   ck('and that is not reported as a load failure', !(await has(page.locator('[data-testid="lists-failed"]'))))
   await ctx.close()
 }

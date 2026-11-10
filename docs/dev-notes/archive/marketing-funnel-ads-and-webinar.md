@@ -1616,3 +1616,12 @@ What changed:
 - A webinar stream with no ad and no result is not drawn; the stream card and its funnel sit side by side.
 - Proof: `verify_meta_ads_campaign_scope.py` (20; control on the previous code fails 15 with no crash), `verify_meta_ads_snapshot_fixes.py` (18; control fails 14, reproducing 88 for 44, A$1,421.44 stream spend and -A$1,419.84 unattributed), `verify_meta_ads_kpi_browser.mjs` (92; control on the previous page fails 29), plus the existing suites unchanged (`verify_meta_ads_streams.py` 71 passed and 2 old date-rot failures; streams browser 57; capture 20; tags end to end 32; new campaign 20).
 - Limits, said plainly: a Terms-step acknowledgement with no campaign beacon behind it carries no ad signal, so campaign scope cannot list it (it is counted in `outside_campaign`); the wizard funnel caps at 90 days and the traffic card at 365, whatever "whole campaign" asks; a historical `meta_ad_snapshots` row written before this fix keeps its doubled leads until the next refresh rewrites it.
+
+
+## v9.143.0.1: opens on all traffic, no Typed column
+
+Jack, on v9.143.0: the default should be close to what it was (all traffic), and the Typed section is not needed; the other filters are good.
+
+- The page state opens on scope `all`, period 7 days (not 365 as before: a list back to July was the other complaint). "This campaign" is still one click and still reports `outside_campaign`. The API's own default stays `campaign`; the page always sends `scope` explicitly, so the page default and the API default are different on purpose. Rule 64 says so.
+- The Typed column (search terms) is removed from the club list, and `mergeClubs` no longer carries `queries`, `searches` or `visitors`. The `Searched only` stage and its chip stay: that is a stage, not the typed text.
+- Proof: `verify_meta_ads_kpi_browser.mjs` is now 95 and asserts the first load sends `scope=all` for every panel and nothing at campaign scope until it is chosen. The control on the page from v9.143.0 fails 13, all of them the default and the column. The streams browser suite is unchanged at 57.
