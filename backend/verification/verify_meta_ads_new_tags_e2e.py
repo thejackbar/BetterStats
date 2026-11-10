@@ -212,7 +212,8 @@ async def main() -> int:
         async with Session() as db:
             return await safe(pss.submit(body, fake_request(ip), Response(), BackgroundTasks(), db))
 
-    for label, name in (("new", "New Ad CC"), ("dupes", "Dupes CC"), ("ret", "Returning CC"), ("org", "Organic CC")):
+    for label, name in (("new", "New Ad CC"), ("dupes", "Dupes CC"), ("ret", "Returning CC"), ("org", "Organic CC"),
+                        ("sep", "September CC"), ("nodate", "Undated CC")):
         await make_club(label, name)
 
     print("registering through the public route")
@@ -221,8 +222,21 @@ async def main() -> int:
         "dupes": await register("dupes", records["dupes"], "198.51.100.32"),
         "ret": await register("ret", records["returning"], "198.51.100.33"),
         "org": await register("org", None, "198.51.100.34"),
+        # Same tags as the live ad, so by tag alone both belong to the campaign. The first is then
+        # backdated to September (a registration from the earlier run), the second loses its timestamp.
+        "sep": await register("sep", records["new"], "198.51.100.35"),
+        "nodate": await register("nodate", records["new"], "198.51.100.36"),
     }
-    check("all four registrations completed", all(r.get("status") == "completed" for r in results.values()),
+    async with Session() as db:
+        await db.execute(text("UPDATE self_serve_idempotency_keys SET created_at = :at WHERE idempotency_key = 'k-sep'"),
+                         {"at": dt.datetime(2026, 9, 20, 3, 0, tzinfo=dt.timezone.utc)})
+        await db.execute(text("DELETE FROM self_serve_idempotency_keys WHERE idempotency_key = 'k-nodate'"))
+        # Manual +/- corrections: one made in September (the earlier run), one after the restart.
+        for delta, at in ((5, dt.datetime(2026, 9, 22, 3, 0, tzinfo=dt.timezone.utc)), (1, NOW)):
+            await db.execute(text("INSERT INTO meta_lead_adjustments (delta, note, campaign_id, created_at) VALUES (:d, 'x', :c, :at)"),
+                             {"d": delta, "c": NEW, "at": at})
+        await db.commit()
+    check("all six registrations completed", all(r.get("status") == "completed" for r in results.values()),
           str({k: v.get("status") or v for k, v in results.items()}))
 
     async def stored(label):
@@ -255,6 +269,15 @@ async def main() -> int:
           "Dupes CC" not in names_new and "Returning CC" not in names_new, str(names_new))
     check("an organic registration is not counted", "Organic CC" not in names_new, str(names_new))
     check("so the headline count is exactly one", count_new == 1 and len(rows_new) == 1, f"{count_new} / {len(rows_new)}")
+
+    print("a registration from BEFORE the restart, carrying the same tags, is not this campaign's")
+    check("the September registration is NOT counted, though its tags match", "September CC" not in names_new, str(names_new))
+    check("the registration with no timestamp is NOT counted either (cannot be placed)", "Undated CC" not in names_new, str(names_new))
+    scope_fn = getattr(meta_ads, "get_registration_scope", None)
+    async with Session() as db:
+        scope = await scope_fn(db) if scope_fn else {}
+    check("both are REPORTED as left out, one each", (scope.get("before"), scope.get("undated")) == (1, 1), str(scope))
+    check("the count itself is the one that belongs", scope.get("count") == 1, str(scope))
     live = next((r for r in rows_new if r["name"] == "New Ad CC"), {})
     check("its row carries the campaign and creative tags", (live.get("utm_campaign"), live.get("utm_content")) == ("BC_AU_Trial_CBO_Sep2026", "check_out_your_club_v2"), str(live))
 
@@ -272,7 +295,9 @@ async def main() -> int:
         summary = await safe(meta_ads.get_latest_summary(db))
     trial = next((s for s in (summary.get("streams") or []) if s.get("stream") == "trial"), {})
     creatives = {c.get("utm_content"): c for c in (summary.get("creatives") or [])}
-    check("summary: the trial stream shows one result", trial.get("results") == 1, str(trial.get("results") or summary))
+    # 1 counted registration + the 1 manual adjustment made after the restart (the September +5 is not in it).
+    check("summary: the trial stream's result is the 1 counted registration plus the 1 counted adjustment",
+          trial.get("results") == 2, str(trial.get("results") or summary))
     check("summary: from its own A$1.57 of spend", trial.get("spend") == 1.57, str(trial.get("spend")))
     row = creatives.get("check_out_your_club_v2", {})
     check("summary: a check_out_your_club_v2 creative row exists with the spend AND the signup on the same row",
@@ -283,6 +308,28 @@ async def main() -> int:
           summary.get("campaign_budget") == 450.0 and any(a.get("date") == "2026-11-10" for a in summary.get("annotations", [])),
           f"{summary.get('campaign_budget')} {summary.get('annotations')}")
 
+    print("the restart date also drives Meta's window, adjustments and the summary")
+    check("the summary says where counting starts and what it left out",
+          summary.get("counts_from") and summary.get("counts_from", "").startswith("2026-11-10")
+          and (summary.get("registrations_excluded") or {}) == {"before_restart": 1, "undated": 1}, str(summary.get("registrations_excluded")))
+    window = getattr(meta_ads, "_window_start", None)
+    check("Meta's window starts at the restart date with no manual cutoff set",
+          bool(window) and window() is not None and window().date().isoformat() == "2026-11-10", str(window and window()))
+    tr = meta_ads._date_range_params().get("time_range", "")
+    check("so Meta's insights are asked for from 10 Nov (not the lifetime preset)", '"since": "2026-11-10"' in tr, tr or str(meta_ads._date_range_params()))
+    meta_ads._counting_since.set(dt.datetime(2026, 11, 12, tzinfo=dt.timezone.utc))
+    check("a LATER manual counting-since still wins",
+          bool(window) and window() is not None and window().date().isoformat() == "2026-11-12", str(window and window()))
+    meta_ads._counting_since.set(None)
+    async with Session() as db:
+        adj_total = await meta_ads.get_leads_adjustment_total(db)
+        adj_rows = await meta_ads.get_lead_adjustments(db)
+    check("a manual adjustment from September is not in the total, the one after the restart is", adj_total == 1, str(adj_total))
+    check("the September adjustment stays in the audit trail, marked not counted",
+          sorted((a["delta"], a.get("counted")) for a in adj_rows) == [(1, True), (5, False)], str(adj_rows))
+    check("the headline lead figure is the counted registration plus only the counted adjustment",
+          (summary.get("campaign") or {}).get("leads_effective") == 2, str((summary.get("campaign") or {}).get("leads_effective")))
+
     print("what the OLD campaign counts (so the checks above can fail)")
     async with Session() as db:
         await meta_ads._use_active_campaign(db)
@@ -292,6 +339,12 @@ async def main() -> int:
     old_names = sorted(n for n, a in found if meta_ads._attribution_matches_campaign(a))
     check("the old campaign claims the old-tag registrations and refuses the new one",
           "Dupes CC" in old_names and "Returning CC" in old_names and "New Ad CC" not in old_names, str(old_names))
+
+    meta_ads._active_campaign.set(OLD)
+    rs = getattr(meta_ads, "registration_scope", None)
+    check("a campaign that never restarted keeps every registration (scope is always counted)",
+          bool(rs) and rs(None) == "counted" and rs(dt.datetime(2020, 1, 1, tzinfo=dt.timezone.utc)) == "counted")
+    check("and has no window start of its own", bool(getattr(meta_ads, "_window_start", None)) and meta_ads._window_start() is None)
 
     await engine.dispose()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")

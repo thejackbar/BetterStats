@@ -108,7 +108,7 @@ const ROWS = [
   row(6),
 ]
 
-const summaryFor = ({ webinar = webinarEmpty, countingSince = null } = {}) => ({
+const summaryFor = ({ webinar = webinarEmpty, countingSince = null, countsFrom = null, excluded = { before_restart: 0, undated: 0 } } = {}) => ({
   campaign: {
     spend: TRIAL_SPEND + webinar.spend, impressions: 90000, link_clicks: 800, link_ctr: 0.9,
     landing_page_views: 700, cost_per_lpv: 2.43, leads: 9, registrations: SIGNUPS,
@@ -119,6 +119,7 @@ const summaryFor = ({ webinar = webinarEmpty, countingSince = null } = {}) => ({
   recommendation: null, recommendation_status: null, last_updated: new Date().toISOString(),
   leads_adjustment: 0, campaign_budget: 750, campaign_length_days: 30, insights: [],
   counting_since: countingSince, token_configured: true,
+  counts_from: countsFrom, registrations_excluded: excluded,
 })
 
 const HISTORY = Array.from({ length: 14 }, (_, i) => ({
@@ -173,7 +174,10 @@ async function open({ summary, signups = { rows: ROWS, campaigns: [] }, signupsF
       return json({ campaigns: [{ id: CAMPAIGN_ID, name: 'BC_AU_Trial_CBO_Sep2026', effective_status: 'ACTIVE' }],
                     active_campaign_id: CAMPAIGN_ID, token_configured: true })
     }
-    if (/meta-ads\/leads\/adjustments/.test(p)) return json({ adjustments: [] })
+    if (/meta-ads\/leads\/adjustments/.test(p)) return json({ adjustments: [
+      { delta: 5, note: 'older run', created_by_email: 'a@x.example', created_at: '2026-09-22T03:00:00Z', counted: false },
+      { delta: 1, note: 'after restart', created_by_email: 'a@x.example', created_at: '2026-11-10T10:00:00Z', counted: true },
+    ] })
     if (/meta-ads\/registration-funnel/.test(p)) {
       return json({ funnel: [
         { key: 'a', label: 'Club selected', value: 20, pct_of_top: 100, pct_of_prev: 100 },
@@ -328,6 +332,25 @@ const money = (n) => `A$${n.toFixed(2)}`
   const { page, ctx } = await open({ summary: summaryFor(), listsFail: true })
   ck('a failed load of the lists is shown, not swallowed', await has(page.locator('[data-testid="lists-failed"]')))
   ck('and no misleading "none recorded" appears beside it', !(await has(page.locator('[data-testid="selected-empty"], [data-testid="searched-empty"]'))))
+  await ctx.close()
+}
+
+// ── A3. A restarted campaign says where counting starts and what it left out ──
+{
+  const { page, ctx } = await open({ summary: summaryFor({ countsFrom: '2026-11-09T16:00:00Z', excluded: { before_restart: 1, undated: 2 } }) })
+  const note = await textOf(page.locator('[data-testid="counts-from-note"]'))
+  ck('the restart date is stated on the page', /restarted/i.test(note) && /counting registrations and spend from/i.test(note), note.slice(0, 160))
+  ck('the earlier registration left out is reported, singular', /1 earlier registration from this campaign is from before the restart and not counted/i.test(note), note)
+  ck('registrations with no date are reported too', /2 more carry no signup date/i.test(note), note)
+  await clickIf(page.getByRole('button', { name: /^log \(/ }))
+  await page.waitForTimeout(400)
+  const marks = await page.locator('[data-testid="adjustment-not-counted"]').count()
+  ck('only the adjustment from before the restart is marked not counted', marks === 1, String(marks))
+  await ctx.close()
+}
+{
+  const { page, ctx } = await open({ summary: summaryFor() })
+  ck('a campaign that never restarted shows no restart note', !(await has(page.locator('[data-testid="counts-from-note"]'))))
   await ctx.close()
 }
 

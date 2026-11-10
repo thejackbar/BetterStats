@@ -333,6 +333,13 @@ async def ad_signups(db: AsyncSession = Depends(get_db), _: User = Depends(requi
         )).all():
             signed_up_at[oid] = ts
 
+    # A campaign restarted under the same id (meta_ads.CAMPAIGN_COUNTS_FROM) lists
+    # only the registrations from its restart date on, by the SAME rule the headline
+    # count uses, so the table and the number cannot disagree. A no-op for any
+    # campaign that never restarted.
+    orgs = [(o, sc, at) for o, sc, at in orgs
+            if meta_ads.registration_scope(signed_up_at.get(o.id)) == "counted"]
+
     rows = []
     for org, score, scored_at in orgs:
         paid, trial, _renewals = _module_split(org)

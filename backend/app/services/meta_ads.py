@@ -81,7 +81,7 @@ def _date_range_params() -> dict:
     (no hour precision), so an exact "6am" cutoff only applies to our own
     usage_events-derived numbers (_SINCE_LOWER_BOUND); this rounds down to
     the whole day it falls on."""
-    since = _since()
+    since = _window_start()
     if not since:
         return {"date_preset": "maximum"}
     return {"time_range": json.dumps({
@@ -357,6 +357,49 @@ CAMPAIGN_ANNOTATIONS: dict[str, list[dict]] = {
 # the most recent 7 days always under-report and fill in retrospectively. Every
 # figure covering that stretch is provisional; nothing alerts off it.
 ATTRIBUTION_WINDOW_DAYS = 7
+
+
+# A campaign RESTARTED as if it were a new one. HQ identifies a campaign by its
+# Meta id, and a registration keeps its tags forever, so a restart under the same
+# id would otherwise go on showing every earlier registration (the 10 Nov 2026
+# restart of BC_AU_Trial_CBO_Sep2026 showed a September one). An entry here means:
+# only registrations (and manual adjustments, and webinar registrations) dated on
+# or after it belong to this campaign, and Meta's spend and the on-site funnel are
+# measured from it too. A registration we hold NO timestamp for cannot be placed
+# either side, so it is left out and reported, never guessed.
+#
+# This is NOT the platform "counting since" setting. That one is a manual cutoff
+# that narrows Meta's insights and the funnel but never a real registration
+# (get_registration_count's rule). This is a fixed fact about one campaign, and it
+# does narrow registrations; the later of the two applies to Meta's window.
+_PERTH_TZ = timezone(timedelta(hours=8))
+CAMPAIGN_COUNTS_FROM: dict[str, datetime] = {
+    "120251284365570121": datetime(2026, 11, 10, 0, 0, tzinfo=_PERTH_TZ),   # BC_AU_Trial_CBO_Sep2026, restarted
+}
+
+
+def _counts_from() -> datetime | None:
+    """The CURRENT campaign's restart date, or None for one that never restarted."""
+    return CAMPAIGN_COUNTS_FROM.get(_campaign_id())
+
+
+def _window_start() -> datetime | None:
+    """Where Meta's insights and the on-site funnel start for the CURRENT campaign:
+    the later of the manual counting-since cutoff and the campaign's restart date."""
+    dates = [d for d in (_since(), _counts_from()) if d]
+    return max(dates) if dates else None
+
+
+def registration_scope(signed_up_at: datetime | None) -> str:
+    """'counted', 'before' (a registration from before the restart) or 'undated'
+    (no timestamp, so it cannot be placed). Always 'counted' for a campaign that
+    never restarted, so nothing changes for the others."""
+    start = _counts_from()
+    if start is None:
+        return "counted"
+    if signed_up_at is None:
+        return "undated"
+    return "counted" if signed_up_at >= start else "before"
 
 
 def _campaign_plan() -> tuple[float, int]:
@@ -925,7 +968,7 @@ async def get_club_selected_count(db: AsyncSession, days: int = CAMPAIGN_LENGTH_
           AND ue.created_at >= {_SINCE_LOWER_BOUND}
           AND ue.visitor_id IS NOT NULL
           AND {_META_VISITOR_EXISTS}
-    """), {"days": days, "since": _since()})).scalar()
+    """), {"days": days, "since": _window_start()})).scalar()
     return int(count or 0)
 
 
@@ -946,7 +989,7 @@ async def get_registration_step_funnel(db: AsyncSession, days: int = CAMPAIGN_LE
           AND created_at >= {_SINCE_LOWER_BOUND}
           AND visitor_id IS NOT NULL
         GROUP BY route
-    """), {"days": days, "since": _since()})).mappings().all()
+    """), {"days": days, "since": _window_start()})).mappings().all()
     counts = {r["route"]: int(r["n"]) for r in rows}
 
     top = counts.get(REGISTRATION_STEP_ORDER[0][0], 0)
@@ -1511,8 +1554,9 @@ async def get_leads_adjustment_total(db: AsyncSession) -> int:
     deflating a later one's numbers forever."""
     await _use_active_campaign(db)
     total = (await db.execute(text(
-        "SELECT COALESCE(SUM(delta), 0) FROM meta_lead_adjustments WHERE campaign_id = :campaign_id"
-    ), {"campaign_id": _campaign_id()})).scalar()
+        "SELECT COALESCE(SUM(delta), 0) FROM meta_lead_adjustments WHERE campaign_id = :campaign_id "
+        "AND (CAST(:counts_from AS timestamptz) IS NULL OR created_at >= CAST(:counts_from AS timestamptz))"
+    ), {"campaign_id": _campaign_id(), "counts_from": _counts_from()})).scalar()
     return int(total or 0)
 
 
@@ -1548,6 +1592,9 @@ async def get_lead_adjustments(db: AsyncSession, limit: int = 20) -> list[dict]:
             "note": r["note"],
             "created_by_email": r["created_by_email"],
             "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            # Still listed (it is the audit trail), but an entry from before the
+            # restart is not in the running total.
+            "counted": registration_scope(r["created_at"]) == "counted",
         }
         for r in rows
     ]
@@ -1644,6 +1691,49 @@ def _attribution_matches_campaign(attribution: dict | None) -> bool:
     return click_source in {"facebook", "instagram"}
 
 
+async def attributed_registrations(db: AsyncSession) -> list[dict]:
+    """Every non-archived self-serve registration attributed to the CURRENT
+    campaign, each with its signup time and where it sits against the campaign's
+    restart date (`scope`: counted / before / undated). The one place that
+    decides this, so the headline count, the signups table and the creative rows
+    can never disagree about what belongs to the campaign.
+
+    A campaign that never restarted skips the timestamp join entirely: its scope
+    is always 'counted' and the query is the one it always was."""
+    await _use_active_campaign(db)
+    if _counts_from() is None:
+        rows = (await db.execute(text("""
+            SELECT signup_attribution AS attribution, NULL::timestamptz AS signed_up_at
+            FROM organisations
+            WHERE signup_source IS NOT NULL AND archived_at IS NULL AND signup_attribution IS NOT NULL
+        """))).mappings().all()
+    else:
+        rows = (await db.execute(text("""
+            SELECT o.signup_attribution AS attribution, MIN(k.created_at) AS signed_up_at
+              FROM organisations o
+              LEFT JOIN self_serve_idempotency_keys k ON k.org_id = o.id
+             WHERE o.signup_source IS NOT NULL AND o.archived_at IS NULL AND o.signup_attribution IS NOT NULL
+             GROUP BY o.id, o.signup_attribution
+        """))).mappings().all()
+    return [
+        {"attribution": r["attribution"], "signed_up_at": r["signed_up_at"],
+         "scope": registration_scope(r["signed_up_at"])}
+        for r in rows if _attribution_matches_campaign(r["attribution"])
+    ]
+
+
+async def get_registration_scope(db: AsyncSession) -> dict:
+    """{'count', 'before', 'undated'}: the registrations that belong to the
+    campaign, and the attributed ones left out because they pre-date its restart
+    or carry no timestamp. The left-out ones are reported, never dropped quietly."""
+    rows = await attributed_registrations(db)
+    return {
+        "count": sum(1 for r in rows if r["scope"] == "counted"),
+        "before": sum(1 for r in rows if r["scope"] == "before"),
+        "undated": sum(1 for r in rows if r["scope"] == "undated"),
+    }
+
+
 async def get_registration_count(db: AsyncSession) -> int:
     """Real, completed free-trial registrations attributed to the CURRENT
     Meta campaign — ground truth from our own DB (organisations.
@@ -1663,13 +1753,12 @@ async def get_registration_count(db: AsyncSession) -> int:
     dashboard — a genuine completed registration always counts, however long
     ago it happened. Filtered in Python rather than SQL — self-serve signup
     volume is small, and it keeps this in lockstep with ad_signups()'s own
-    filtering instead of two hand-matched queries."""
-    await _use_active_campaign(db)
-    rows = (await db.execute(text("""
-        SELECT signup_attribution FROM organisations
-        WHERE signup_source IS NOT NULL AND archived_at IS NULL AND signup_attribution IS NOT NULL
-    """))).scalars().all()
-    return sum(1 for attribution in rows if _attribution_matches_campaign(attribution))
+    filtering instead of two hand-matched queries.
+
+    A campaign restarted under the same id (CAMPAIGN_COUNTS_FROM) is the one
+    exception: it counts only the registrations from its restart date on (see
+    attributed_registrations), and reports the ones it left out."""
+    return (await get_registration_scope(db))["count"]
 
 
 async def get_registration_count_since(db: AsyncSession, since: date) -> dict:
@@ -1738,11 +1827,13 @@ async def get_webinar_registration_counts(db: AsyncSession) -> dict:
     await _use_active_campaign(db)
     from app.services import webinar
 
+    counts_from = _counts_from()
     rows = (await db.execute(text("""
         SELECT utm_source, utm_campaign, utm_content, click_source
           FROM webinar_registrations
          WHERE event_key = :event_key
-    """), {"event_key": webinar.EVENT.key})).mappings().all()
+           AND (CAST(:counts_from AS timestamptz) IS NULL OR created_at >= CAST(:counts_from AS timestamptz))
+    """), {"event_key": webinar.EVENT.key, "counts_from": counts_from})).mappings().all()
 
     attributed = 0
     unattributed = 0
@@ -2062,17 +2153,13 @@ async def get_creative_performance(db: AsyncSession, ads: list[dict]) -> list[di
     await _use_active_campaign(db)
     from app.services import webinar
 
-    trial_tags = (await db.execute(text("""
-        SELECT signup_attribution FROM organisations
-         WHERE signup_source IS NOT NULL
-           AND archived_at IS NULL
-           AND signup_attribution IS NOT NULL
-    """))).scalars().all()
+    trial_tags = [r["attribution"] for r in await attributed_registrations(db) if r["scope"] == "counted"]
     webinar_tags = (await db.execute(text("""
         SELECT utm_source, utm_campaign, utm_content, click_source
           FROM webinar_registrations
          WHERE event_key = :event_key
-    """), {"event_key": webinar.EVENT.key})).mappings().all()
+           AND (CAST(:counts_from AS timestamptz) IS NULL OR created_at >= CAST(:counts_from AS timestamptz))
+    """), {"event_key": webinar.EVENT.key, "counts_from": _counts_from()})).mappings().all()
 
     rows: dict[str, dict] = {}
 
@@ -2093,9 +2180,9 @@ async def get_creative_performance(db: AsyncSession, ads: list[dict]) -> list[di
             bucket[key] += ad.get(key) or 0.0
 
     for attribution in trial_tags:
-        if _attribution_matches_campaign(attribution):
-            tag = (attribution or {}).get("utm_content")
-            _bucket(tag, stream_for_attribution(attribution) or STREAM_TRIAL)["trial_signups"] += 1
+        # attributed_registrations has already applied the campaign match AND the restart date.
+        tag = (attribution or {}).get("utm_content")
+        _bucket(tag, stream_for_attribution(attribution) or STREAM_TRIAL)["trial_signups"] += 1
     for row in webinar_tags:
         if _attribution_matches_campaign(dict(row)):
             _bucket(row["utm_content"], STREAM_WEBINAR)["webinar_registrations"] += 1
@@ -2146,7 +2233,9 @@ async def get_latest_summary(db: AsyncSession) -> dict:
                 "streams": [], "creatives": [], "unattributed_spend": 0.0,
                 "annotations": campaign_annotations(),
                 "attribution_window_days": ATTRIBUTION_WINDOW_DAYS,
-                "counting_since": _since().isoformat() if _since() else None}
+                "counting_since": _since().isoformat() if _since() else None,
+                "counts_from": _counts_from().isoformat() if _counts_from() else None,
+                "registrations_excluded": {"before_restart": 0, "undated": 0}}
 
     latest_date = campaign_row["snapshot_date"]
     ad_rows = (await db.execute(text("""
@@ -2169,7 +2258,8 @@ async def get_latest_summary(db: AsyncSession) -> dict:
             "delivery_status": r["delivery_status"],
         }
 
-    registrations = await get_registration_count(db)
+    registration_scope_counts = await get_registration_scope(db)
+    registrations = registration_scope_counts["count"]
     webinar_counts = await get_webinar_registration_counts(db)
 
     campaign = _row_to_dict(campaign_row)
@@ -2268,6 +2358,13 @@ async def get_latest_summary(db: AsyncSession) -> dict:
         "campaign_length_days": campaign_length_days,
         "insights": insights,
         "counting_since": _since().isoformat() if _since() else None,
+        # The campaign's restart date (None for one that never restarted) and what
+        # it left out, so "1 trial signup" never hides the earlier ones silently.
+        "counts_from": _counts_from().isoformat() if _counts_from() else None,
+        "registrations_excluded": {
+            "before_restart": registration_scope_counts["before"],
+            "undated": registration_scope_counts["undated"],
+        },
     }
 
 

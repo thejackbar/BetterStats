@@ -1337,6 +1337,22 @@ export default function SuperMetaAds() {
           <>
             <KpiStrip kpis={kpis} signupsLoaded={!!adSignups} />
 
+            {/* A campaign restarted under the same Meta id counts only what happened from
+                its restart date. Said out loud, with what it left out, so "1 trial signup"
+                never hides the earlier ones silently. */}
+            {summary?.counts_from && (
+              <p data-testid="counts-from-note" className="font-mono text-[9px] text-pb-faint -mt-1 mb-3 leading-relaxed">
+                Restarted: counting registrations and spend from {fmtTime(summary.counts_from)}.
+                {(summary.registrations_excluded?.before_restart || 0) > 0 && (
+                  <> {summary.registrations_excluded.before_restart} earlier registration{summary.registrations_excluded.before_restart === 1 ? '' : 's'} from this campaign
+                  {summary.registrations_excluded.before_restart === 1 ? ' is' : ' are'} from before the restart and not counted.</>
+                )}
+                {(summary.registrations_excluded?.undated || 0) > 0 && (
+                  <> {summary.registrations_excluded.undated} more carry no signup date, so cannot be placed, and are not counted.</>
+                )}
+              </p>
+            )}
+
             {/* Headlines — short, worst-first, only fires on something worth
                 a glance. Capped so this stays a quick scan, not a report. */}
             {insights.length > 0 && (
@@ -1467,6 +1483,11 @@ export default function SuperMetaAds() {
                         <span className={a.delta > 0 ? 'text-emerald-400 font-mono' : 'text-red-400 font-mono'}>
                           {a.delta > 0 ? `+${a.delta}` : a.delta}
                         </span>
+                        {a.counted === false && (
+                          <span data-testid="adjustment-not-counted" className="font-mono text-[9px] text-pb-faintest">
+                            before the restart, not counted
+                          </span>
+                        )}
                         <span className="font-mono text-[10px] text-pb-faintest">{fmtTime(a.created_at)}</span>
                         {a.created_by_email && <span className="text-pb-faint">{a.created_by_email}</span>}
                         {a.note && <span className="text-pb-dim">{a.note}</span>}
