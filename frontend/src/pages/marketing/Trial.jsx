@@ -390,7 +390,8 @@ export default function Trial() {
   const [extensionClub, setExtensionClub] = useState(null)   // paused club asking for more trial time
 
   // Search-first hero state.
-  const [query, setQuery] = useState('')
+  // /trial?club=Name (from a club page we could not find) starts with that club searched.
+  const [query, setQuery] = useState(() => (searchParams.get('club') || '').slice(0, 100))
   const [results, setResults] = useState([])
   const [searching, setSearching] = useState(false)
   const [searchError, setSearchError] = useState('')
