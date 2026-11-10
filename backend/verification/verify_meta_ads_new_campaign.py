@@ -94,6 +94,20 @@ others = {v.get("utm_content") for v in m.AD_DESTINATIONS.values()
           if v.get("campaign_id") != NEW and v.get("utm_content")}
 ck("none of them reuses another campaign's tag", bool(contents) and not (set(contents) & others), str(set(contents) & others))
 
+# ── the paused ads, with the tags their URLs carry TODAY (read from Meta, 10 Nov 2026) ──
+using(NEW)
+sheet_v2 = {"utm_source": "meta", "utm_medium": "paid_social", "utm_campaign": "trial_evergreen_sep2026", "utm_content": "spreadsheet_hero_v2"}
+sheet_v3 = dict(sheet_v2, utm_content="spreadsheet_hero_v3")
+ck("the Spreadsheet ad's real tag (spreadsheet_hero_v2) is on record for the new campaign",
+   (m.AD_DESTINATIONS.get("120251284367910121") or {}).get("utm_content") == "spreadsheet_hero_v2")
+ck("a signup through it counts for the new campaign even though its campaign tag is the old taxonomy's",
+   m._attribution_matches_campaign(sheet_v2) and m._attribution_matches_campaign(sheet_v3))
+baked = {"utm_source": "facebook", "utm_medium": "paid_social", "utm_campaign": "bc_au_trials_cbo_aug2026", "utm_content": "checkout_your_club_v2"}
+ck("a ClubSearch signup carrying its baked-in Aug tags is REFUSED by the new campaign (so the URL must be stripped first)",
+   not m._attribution_matches_campaign(baked))
+using(OLD)
+ck("and the old campaign claims it", m._attribution_matches_campaign(baked))
+
 # ── plan and fresh start ─────────────────────────────────────────────────────
 using(NEW)
 ck("the plan is A$450 over 30 days, not the A$750 fallback", m._campaign_plan() == (450.0, 30), str(m._campaign_plan()))

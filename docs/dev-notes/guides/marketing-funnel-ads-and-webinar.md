@@ -91,6 +91,8 @@
 57. The strip is `computeKpis` in `pages/admin/metaAdsKpi.js`. Revenue is PAID CLUBS (`converted_to_paid` rows of `/ad-signups`) times the trial stream's `unit_value_aud`; ROAS is that over the TRIAL stream's spend. Never read `stream.roas` for it: the service's figure is signups times 399, which counts every unpaid trial as revenue.
 58. When any attributed signup pre-dates `counting_since`, cost per trial and ROAS are withheld with the reason (spend is narrowed by the cutoff, the registration count never is, so the quotient would read too good). Converted is "unknown", not 0, until `/ad-signups` loads.
 59. A new ad needs its `utm_content` in `AD_DESTINATIONS` (BC_AU_Trial_CBO_Sep2026 has its own, listed in `docs/meta-ad-campaign-self-serve.md` 4b; its tag is the campaign name, never the old Sep tags, so a restart counts from zero). Without one its spend files under "(untagged)" in `get_creative_performance` and its signups under the tag in its URL, so per-ad Converted and ROAS cannot be read; the creative table names such ads. A campaign that reuses another's tags is excluded by `_attribution_matches_campaign` until its id is in `CAMPAIGN_UTM_CAMPAIGNS`.
+60. An ad's website URL is the BARE page; tags go only in Ads Manager's URL parameters. `visitor.js` reads the FIRST value of a repeated tag (`URLSearchParams.get`) and Meta appends after the existing query, so tags in both places make the old ones win. The registration also carries the visitor's FIRST-touch record (`bs_attr`, never expires, never overwritten by a later signal), so a prospect who clicked any earlier ad registers under the old tags. Proof: `frontend/verification/verify_ad_attribution_capture_browser.mjs` then `backend/verification/verify_meta_ads_new_tags_e2e.py`.
+61. A page-post ad's destination is not in the Meta API (`link_url` is empty). Read it from the ad preview: `ads_get_ad_preview`, fetch the iframe, take the `l.facebook.com/l.php?u=` target. The preview merges the website URL with URL parameters, so it cannot tell which field a tag is in.
 
 ## Traps and failure signatures
 
@@ -113,6 +115,7 @@
 
 ## Open follow-ups
 
+- Mid-day counting-since reset leaves stale LIFETIME ad rows (same `snapshot_date`) for ads with no delivery in the window; they feed the stream totals, funnel, ad list and creative table until the next day's snapshot. `_parse_row` sums `lead` and `offsite_conversion.fb_pixel_lead`, doubling Meta's leads. The funnel shows "Club selected" and "Started registering" as sequential stages though they are one moment. The "most efficient ad" headline ignores paused ads. The strip's Cost / trial and ROAS use stream spend while Spend uses the campaign row. All reported in the v9.142.6.2 archive entry, none fixed.
 - Meta's own `content_category` breakdown is unread, so Meta-reported conversions cannot be split by product.
 - `CAMPAIGN_PLANS` is one budget per campaign, not per stream.
 - No attended/no-show record; a second webinar means editing both `EVENT` copies (`event_key` exists).

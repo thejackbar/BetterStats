@@ -152,12 +152,17 @@ parameters"; do not touch the destination URL itself):
 utm_source=meta&utm_medium=paid_social&utm_campaign=BC_AU_Trial_CBO_Sep2026&utm_content=<content>
 ```
 
-| Ad (id) | `utm_content` |
-|---|---|
-| `Ad_CheckOutYourClub_v2_Relaunch` (120251342626760121), the one delivering | `check_out_your_club_v2` |
-| `Ad_ClubSearch_Static_Sep2026` (120251550833470121), paused | `club_search_static` |
-| `Ad_Trial_Spreadsheet_Sep2026_v3` (120251301631290121), paused | `spreadsheet_hero_v3` |
-| `Ad_Trial_Spreadsheet_Sep2026` (120251284367910121), paused | `spreadsheet_hero_v1` |
+| Ad (id) | Intended `utm_content` | What its URL carries today (read from Meta, 10 Nov 2026) |
+|---|---|---|
+| `Ad_CheckOutYourClub_v2_Relaunch` (120251342626760121), live | `check_out_your_club_v2` | Done: bare website URL plus the URL parameters above. |
+| `Ad_ClubSearch_Static_Sep2026` (120251550833470121), paused | `club_search_static` | The Aug tags are baked into the website URL (`utm_source=facebook`, `utm_campaign=bc_au_trials_cbo_aug2026`, `utm_content=checkout_your_club_v2`). Strip the website URL to `https://betterat.cricket/trial` and set the URL parameters, or its signups are refused. |
+| `Ad_Trial_Spreadsheet_Sep2026_v3` (120251301631290121), paused | `spreadsheet_hero_v3` | `utm_campaign=trial_evergreen_sep2026`, `utm_content=spreadsheet_hero_v3`. Counted via the content tag. Change the campaign tag when it goes back on. |
+| `Ad_Trial_Spreadsheet_Sep2026` (120251284367910121), paused | `spreadsheet_hero_v2` | `utm_campaign=trial_evergreen_sep2026`, `utm_content=spreadsheet_hero_v2`. Same. |
+
+Before switching any of them back on, open it in Ads Manager and check whether
+its tags are in the website URL field or in URL parameters. Tags in BOTH is the
+trap that cost the live ad its attribution: the browser reads the first value of
+a repeated tag, so the old one wins. The website URL should be the bare page.
 
 These are mapped in `meta_ads.AD_DESTINATIONS` and `CAMPAIGN_UTM_CAMPAIGNS`. The
 three video ads are not mapped: their reels were removed, so they cannot

@@ -156,7 +156,7 @@ async def setup(session_maker) -> None:
         """))
         await db.execute(text(
             "INSERT INTO platform_settings (id, settings) VALUES (1, CAST(:s AS jsonb))"
-        ), {"s": json.dumps({"active_meta_campaign_id": CAMPAIGN_ID})})
+        ), {"s": json.dumps({"meta_campaign_id": CAMPAIGN_ID})})
         await db.commit()
 
 

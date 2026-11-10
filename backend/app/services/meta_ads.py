@@ -169,9 +169,20 @@ AD_DESTINATIONS = {
     # The three video ads are left out on purpose: their reels were removed, so
     # they cannot deliver, and they are not part of this restart.
     "120251342626760121": {"campaign_id": "120251284365570121", "name": "Ad_CheckOutYourClub_v2_Relaunch", "destination": "betterat.cricket/trial", "utm_content": "check_out_your_club_v2", "utm_campaign": "BC_AU_Trial_CBO_Sep2026", "stream": STREAM_TRIAL},
+    # ClubSearch's website URL still has the Aug campaign's tags baked in
+    # (utm_source=facebook, bc_au_trials_cbo_aug2026, checkout_your_club_v2), so
+    # switched on as it is, its signups are refused by this campaign. This entry
+    # is the tag it must carry once the website URL is stripped bare and the tags
+    # moved to Ads Manager's URL parameters (as was done for the live ad).
     "120251550833470121": {"campaign_id": "120251284365570121", "name": "Ad_ClubSearch_Static_Sep2026", "destination": "betterat.cricket/trial", "utm_content": "club_search_static", "utm_campaign": "BC_AU_Trial_CBO_Sep2026", "stream": STREAM_TRIAL},
-    "120251301631290121": {"campaign_id": "120251284365570121", "name": "Ad_Trial_Spreadsheet_Sep2026_v3", "destination": "betterat.cricket/trial", "utm_content": "spreadsheet_hero_v3", "utm_campaign": "BC_AU_Trial_CBO_Sep2026", "stream": STREAM_TRIAL},
-    "120251284367910121": {"campaign_id": "120251284365570121", "name": "Ad_Trial_Spreadsheet_Sep2026", "destination": "betterat.cricket/trial", "utm_content": "spreadsheet_hero_v1", "utm_campaign": "BC_AU_Trial_CBO_Sep2026", "stream": STREAM_TRIAL},
+    # The two Spreadsheet ads are tagged TODAY as the preview shows them
+    # (read from Meta on 10 Nov 2026): utm_campaign=trial_evergreen_sep2026 with
+    # utm_content=spreadsheet_hero_v3 / spreadsheet_hero_v2. That campaign tag is
+    # the Aug campaign's, so these signups reach this campaign through the
+    # utm_content alone (check 1 of _attribution_matches_campaign). Retag the
+    # campaign to BC_AU_Trial_CBO_Sep2026 when either is switched back on.
+    "120251301631290121": {"campaign_id": "120251284365570121", "name": "Ad_Trial_Spreadsheet_Sep2026_v3", "destination": "betterat.cricket/trial", "utm_content": "spreadsheet_hero_v3", "utm_campaign": "trial_evergreen_sep2026", "stream": STREAM_TRIAL},
+    "120251284367910121": {"campaign_id": "120251284365570121", "name": "Ad_Trial_Spreadsheet_Sep2026", "destination": "betterat.cricket/trial", "utm_content": "spreadsheet_hero_v2", "utm_campaign": "trial_evergreen_sep2026", "stream": STREAM_TRIAL},
     # BC_AU_SelfServe_Aug2026 — every ad lands on /trial; utm_content is the
     # same tag the ad-signups report groups by (see routers/meta_ads.py).
     "120249908493850121": {"campaign_id": "120249890918010121", "name": "Ad1_SelfServe_StaticShowcase", "destination": "betterat.cricket/trial", "utm_content": "static_showcase_full"},
