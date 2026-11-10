@@ -262,6 +262,9 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
   const [adminErrors, setAdminErrors] = useState({})
   const [adminValidating, setAdminValidating] = useState(false)
   const [adminValid, setAdminValid] = useState(false)
+  // True when the email is an earlier admin of this club whose trial ended (the server says so).
+  // They keep their existing login: no password is asked and nobody is signed in afterwards.
+  const [returningAdmin, setReturningAdmin] = useState(false)
   const adminDebounceRef = useRef(null)
 
   const setAdminField = (field, value) => setAdminForm((f) => ({ ...f, [field]: value }))
@@ -304,17 +307,21 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
     adminDebounceRef.current = setTimeout(async () => {
       setAdminValidating(true)
       try {
-        const result = await calls.validateAdmin(adminForm)
+        const result = await calls.validateAdmin({
+          ...adminForm, org_id: preparedClub?.org_id || '', club_name: preparedClub?.name || '',
+        })
         setAdminErrors(result?.errors || {})
         setAdminValid(!!result?.valid)
+        setReturningAdmin(!!result?.valid && !!result?.returning_admin)
       } catch {
         setAdminValid(false)
+        setReturningAdmin(false)
       } finally {
         setAdminValidating(false)
       }
     }, 350)
     return () => clearTimeout(adminDebounceRef.current)
-  }, [adminForm, step])
+  }, [adminForm, step, preparedClub?.org_id])
 
   const canContinueFromClub = !!preparedClub && !preparing && !prepareError
 
@@ -430,7 +437,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
     match: !!password && password === confirmPassword,
   }
   const passwordValid = Object.values(passwordChecks).every(Boolean)
-  const canSubmit = !!preparedClub && adminValid && verified && ackAccepted && passwordValid && !submitting
+  const canSubmit = !!preparedClub && adminValid && verified && ackAccepted && (passwordValid || returningAdmin) && !submitting
 
   const submitRegistration = async () => {
     setSubmitting(true)
@@ -483,11 +490,15 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
           if (typeof window !== 'undefined' && typeof window.gtag === 'function') {
             window.gtag('event', 'sign_up', { method: 'self_serve_trial' })
           }
-          // Same fresh-login marker the internal login-as flow sets — makes
-          // the post-redirect fetchMe() count as a genuine first login so
-          // the bell and setup-wizard auto-open fire for the new admin.
-          try { sessionStorage.setItem('bs_pending_fresh_login', '1') } catch { /* skip */ }
-          setTimeout(() => window.location.assign(result.redirect || '/admin'), 1200)
+          // A returning admin is not signed in (their login is untouched), so they stay on
+          // this screen and are pointed at the sign-in page. Everyone else goes straight in.
+          if (!result.returning_admin) {
+            // Same fresh-login marker the internal login-as flow sets — makes
+            // the post-redirect fetchMe() count as a genuine first login so
+            // the bell and setup-wizard auto-open fire for the new admin.
+            try { sessionStorage.setItem('bs_pending_fresh_login', '1') } catch { /* skip */ }
+            setTimeout(() => window.location.assign(result.redirect || '/admin'), 1200)
+          }
         }
       }
     } catch (e) {
@@ -811,11 +822,19 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
                 <p className="font-mono text-[10px] text-emerald-400">✓ All details valid</p>
               )}
 
-              <div className="pb-card p-4 bg-pb-surface2">
-                <p className="font-mono text-[11px] text-pb-faint">
-                  Password isn't set here. You'll set it once email verification and
-                  acknowledgements are confirmed.
-                </p>
+              <div className="pb-card p-4 bg-pb-surface2" data-testid={returningAdmin ? 'returning-admin-note' : undefined}>
+                {returningAdmin ? (
+                  <p className="font-mono text-[11px] text-pb-faint">
+                    Welcome back. This email is already an admin of this club, so we'll restart
+                    your trial on it. Your existing login stays as it is: there's no password to
+                    set, and you'll sign in with the one you already use.
+                  </p>
+                ) : (
+                  <p className="font-mono text-[11px] text-pb-faint">
+                    Password isn't set here. You'll set it once email verification and
+                    acknowledgements are confirmed.
+                  </p>
+                )}
               </div>
             </div>
           )}
@@ -915,7 +934,22 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
 
           {step === 'submit' && (
             <div className="space-y-3">
-              {submitted && publicMode ? (
+              {submitted && publicMode && submitResult?.returning_admin ? (
+                <div className="pb-card p-4 bg-pb-surface2" data-testid="returning-admin-done">
+                  <p className="font-mono text-[11px] text-emerald-400">
+                    ✓ Your trial has restarted.
+                  </p>
+                  <p className="font-mono text-[10px] text-pb-faint mt-2">
+                    Sign in with the email and password you already use and your club is back as
+                    you left it. If you've forgotten the password, use "Forgot your password?" on
+                    the sign-in page.
+                  </p>
+                  <a href={submitResult.redirect || '/login'}
+                    className="inline-block mt-3 font-mono text-[11px] px-3 py-1.5 rounded border pb-hairline text-pb-text hover:bg-pb-surface2">
+                    Go to sign in
+                  </a>
+                </div>
+              ) : submitted && publicMode ? (
                 <div className="pb-card p-4 bg-pb-surface2">
                   <p className="font-mono text-[11px] text-emerald-400">
                     ✓ Your club is set up. Taking you to your dashboard…
@@ -972,6 +1006,12 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
                     ))}
                   </div>
 
+                  {returningAdmin && (
+                    <p className="font-mono text-[10px] text-pb-faint" data-testid="returning-admin-no-password">
+                      No password needed. You keep the login you already have.
+                    </p>
+                  )}
+                  {!returningAdmin && (<>
                   <div>
                     <label className="font-mono text-[10px] text-pb-faint block mb-1">Password</label>
                     <div className="relative">
@@ -1016,6 +1056,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
                       {passwordChecks.match ? '✓' : '·'} Passwords match
                     </li>
                   </ul>
+                  </>)}
 
                   {submitError && <p className="font-mono text-[10px] text-pb-red">{submitError}</p>}
                 </>
