@@ -44,6 +44,7 @@ from app.services.iq_filters import (
     grade_match_clause,
     grade_scope_fragment,
     season_member_clause,
+    season_member_clause_cross_club,
 )
 
 # A "mover" needs enough of a recent sample to be real, and enough prior history
@@ -93,7 +94,10 @@ def _pull_filters(season_id: str | None, grade_id: str | None) -> str:
     bound (``grade_canonical_label`` reads it)."""
     parts = []
     if season_id:
-        parts.append(season_member_clause("g.season_id", season_id))
+        # Cross-club: a game belongs to no club, and a shared fixture the opponent synced
+        # first carries THEIR season row. Every caller pairs this with `_ours_clause`
+        # (owner OR home/away side), so widening the season cannot reach other clubs' games.
+        parts.append(season_member_clause_cross_club("g.season_id", season_id))
     if grade_id:
         parts.append(f"AND {grade_match_clause(grade_canonical_label('gr', 'org'))}")
     # The club-wide Grade Type / Match Type filter. These are the per-GAME

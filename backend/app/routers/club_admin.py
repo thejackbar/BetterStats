@@ -838,13 +838,18 @@ async def list_games(
     db: AsyncSession = Depends(get_db),
 ):
     from sqlalchemy import text
+    from app.services.club_grades import club_game_sql
+    from app.services.season_aliases import resolve_season_filter
     # Reads `v_effective_games` (synced `games` ∪ imported/hand-uploaded
     # `manual_games`), so a club whose season came in from CricketStatz or an
     # uploaded scorecard sees its matches here too — not only its CA-synced
     # ones. Scope and season come off the VIEW'S OWN season_id/organisation_id
     # columns (migration 169), never by joining through grade_id: a manual game
     # can legitimately have no grade, and reading `organisation_id` off the view
-    # avoids the blanket `source = 'manual'` cross-club leak (see v8.76.1). The
+    # avoids the blanket `source = 'manual'` cross-club leak (see v8.76.1). A game
+    # belongs to no club, so "ours" is the standard predicate (`club_game_sql`: the
+    # view's owner OR we are the home/away side), never the owner column alone: a
+    # fixture another synced club created first would otherwise be missing here. The
     # grade/season joins are therefore LEFT (a grade-less manual game keeps its
     # row) and only supply display names.
     #
@@ -859,18 +864,22 @@ async def list_games(
         SELECT g.id, g.played_at, g.home_team, g.away_team, g.result, g.winning_team,
                g.status, g.source,
                CASE WHEN g.status IN (""" + NOT_PLAYED_SQL_LIST + """) THEN (
-                   SELECT COUNT(*) FROM game_appearances ga WHERE ga.game_id = g.id
+                   SELECT COUNT(*) FROM game_appearances ga
+                   JOIN players gp ON gp.id = ga.player_id AND gp.organisation_id = CAST(:org_id AS UUID)
+                   WHERE ga.game_id = g.id
                ) ELSE NULL END AS players_named,
                COALESCE(gr.display_name_override, gr.name) AS grade_name, s.name AS season_name
         FROM v_effective_games g
         LEFT JOIN grades gr ON gr.id = g.grade_id
         LEFT JOIN seasons s ON s.id = g.season_id
-        WHERE g.organisation_id = :org_id
+        WHERE """ + club_game_sql("g", "org_id") + """
     """
     params: dict = {"org_id": str(club.id)}
     if season_id:
-        query += " AND g.season_id = :season_id"
-        params["season_id"] = season_id
+        # A game belongs to no club: a fixture another synced club created first sits under
+        # THAT club's season row, so the same real-world season is matched across clubs.
+        query += " AND g.season_id = ANY(CAST(:season_ids AS uuid[]))"
+        params["season_ids"] = await resolve_season_filter(db, club.id, season_id, include_shared=True) or [season_id]
     query += " ORDER BY g.played_at DESC NULLS LAST LIMIT 200"
 
     rows = await db.execute(text(query), params)

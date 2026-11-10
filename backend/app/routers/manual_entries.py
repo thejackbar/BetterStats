@@ -1740,7 +1740,8 @@ async def check_scorecard_duplicate(
                g.opp_club_name, g.source, gr.name AS grade
         FROM v_effective_games g
         LEFT JOIN grades gr ON gr.id = g.grade_id
-        WHERE g.organisation_id = :org AND g.played_at = :d {exclude_clause}
+        WHERE (g.organisation_id = :org OR g.home_org_id = :org OR g.away_org_id = :org)
+          AND g.played_at = :d {exclude_clause}
         ORDER BY g.source
     """), params)).mappings().all()
     opp_toks = [w for w in re.split(r"[^a-z0-9]+", (opponent or "").lower()) if len(w) > 2]
