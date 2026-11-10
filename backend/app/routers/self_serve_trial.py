@@ -32,6 +32,7 @@ from app.services import password_policy
 from app.services import platform_settings as ps
 from app.services import playhq_client
 from app.services import rate_limit
+from app.services import registration_blocks
 from app.services import self_serve_verification as verification
 from app.services.login_audit import client_ip
 from app.services.memberships import ensure_primary_admin
@@ -64,6 +65,15 @@ async def get_status(db: AsyncSession = Depends(get_db)):
         "enabled": True,
         "default_trial_days": await ps.get_default_trial_days(db),
     }
+
+
+async def _refuse_if_blocked(db: AsyncSession, *, ca_org_id=None, name=None, email=None) -> None:
+    """403 when the club id, club name or email is on the block list
+    (services/registration_blocks). The same plain message whichever check fired
+    and whichever router called, so the person refused learns nothing about why."""
+    if await registration_blocks.registration_refused(
+            db, ca_org_id=ca_org_id, name=name, email=email):
+        raise HTTPException(status_code=403, detail=registration_blocks.REFUSAL_MESSAGE)
 
 
 def _duplicate_club_message(name: str, admin_label: str | None, slug: str | None = None) -> str:
@@ -324,6 +334,7 @@ async def prepare_club(data: PrepareClubRequest, db: AsyncSession = Depends(get_
         raise HTTPException(status_code=422, detail="Invalid club id — pick a club from the search results")
 
     name = (data.name or "").strip()
+    await _refuse_if_blocked(db, ca_org_id=org_id, name=name)
     existing = await _reclaimable_existing(
         db, await find_matching_organisation(db, org_id, name, include_archived=False))
     if existing:
@@ -421,6 +432,8 @@ async def send_verification_code(data: SendCodeRequest, db: AsyncSession = Depen
     email = (data.email or "").strip().lower()
     if not email or not _EMAIL_RE.match(email):
         raise HTTPException(status_code=422, detail="Enter a valid email address")
+
+    await _refuse_if_blocked(db, email=email)
 
     rate_limit.enforce(
         f"ssvr:send:{email}", SEND_LIMIT, SEND_WINDOW_SECONDS,
@@ -617,6 +630,11 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
     key = (data.idempotency_key or "").strip()
     if not key:
         raise HTTPException(status_code=422, detail="Missing idempotency key")
+
+    # The block list is checked before anything else, the idempotent replay
+    # included: a refused registration must never answer "completed".
+    await _refuse_if_blocked(
+        db, ca_org_id=_parse_uuid(data.org_id), name=data.name, email=data.email)
 
     # Idempotent replay: a key already seen returns its stored outcome instead
     # of reprocessing — the guarantee that makes a double-click, refresh, or

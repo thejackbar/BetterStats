@@ -70,6 +70,12 @@ async def get_current_user(request: Request, db: AsyncSession = Depends(get_db))
     user = await db.get(User, uuid.UUID(user_id))
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    # A member of a blocked club (services/registration_blocks) loses a session
+    # that is already open, not only the ability to sign in again. 401, so the
+    # app returns to the sign-in page, where the login refuses with the message.
+    from app.services import registration_blocks
+    if await registration_blocks.user_is_blocked(user.id):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     # Who is acting, for the audit trail's shared writers (see services/player_audit).
     player_audit.set_actor(user)
     return user
@@ -337,6 +343,15 @@ async def login(data: LoginRequest, response: Response, request: Request, db: As
             await _log(False, login_audit.REASON_CLUB_INACTIVE,
                        user_id=user.id, org_id=membership.club_id)
             raise HTTPException(status_code=403, detail="Club is not active")
+
+    # A club on the block list (services/registration_blocks) cannot sign in,
+    # whether or not it is also marked inactive. Checked after the password so
+    # the answer is never given to someone who does not hold the account.
+    from app.services import registration_blocks
+    if membership.role not in ("super_admin", "sales") and await registration_blocks.user_is_blocked(user.id):
+        await _log(False, login_audit.REASON_CLUB_INACTIVE,
+                   user_id=user.id, org_id=membership.club_id)
+        raise HTTPException(status_code=403, detail=registration_blocks.REFUSAL_MESSAGE)
 
     # Success — reset counters, update last login
     user.failed_login_count = 0
