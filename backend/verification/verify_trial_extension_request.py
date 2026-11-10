@@ -137,8 +137,13 @@ async def main() -> int:
     async with Session() as db:
         out = {r["name"]: r for r in await sst.search_clubs(q="cc", db=db)}
     paused = lambda n: out[n].get("already_registered_paused", "MISSING")
-    check("ended trial is registered + paused", out["Ended CC"]["already_registered"] and paused("Ended CC") is True,
-          f"paused={paused('Ended CC')}")
+    # An ended trial that never subscribed is a club with no history with us (see
+    # verify_lapsed_trial_is_new.py): the search no longer flags it registered or
+    # paused, so /trial offers registration, not this modal. The extension
+    # endpoint below still resolves it, so direct requests keep working.
+    check("ended trial reads as unregistered, not paused",
+          not out["Ended CC"]["already_registered"] and paused("Ended CC") is False,
+          f"registered={out['Ended CC'].get('already_registered')} paused={paused('Ended CC')}")
     check("inactive club is paused", paused("Inactive CC") is True, f"paused={paused('Inactive CC')}")
     check("live trial is registered and NOT paused", out["Live CC"]["already_registered"] and paused("Live CC") is False,
           f"paused={paused('Live CC')}")

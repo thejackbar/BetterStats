@@ -12,7 +12,7 @@ from sqlalchemy.orm import selectinload
 from app.models.db import ClubUnpauseRequest, Organisation, Season, Sponsor, get_db
 from app.services import sponsor_tiers, section_names, card_sponsors, player_dashboard
 from app.routers.organisations import _season_sort_key
-from app.auth.modules import org_core_live
+from app.auth.modules import org_core_live, org_trial_lapsed
 from app.services import club_lock, email_service, rate_limit
 from app.services import fonts as font_service
 from app.config.settings import settings
@@ -70,6 +70,12 @@ async def get_club_by_slug(slug: str, request: Request, db: AsyncSession = Depen
     if club_lock.is_locked_for_request(org, request):
         raise HTTPException(status_code=423, detail=club_lock.lock_detail(org))
     if _public_blocked(org):
+        # A club whose free trial ended and never subscribed looks like a club with
+        # no history with us: 404, so the visitor gets the "not on BetterCricket yet"
+        # page and the way to register, not "paused". Everything else that is
+        # blocked (staff paused it, cancelled, off by the master switch) stays 403.
+        if org_trial_lapsed(org):
+            raise HTTPException(status_code=404, detail="Club not found")
         raise HTTPException(status_code=403, detail=INACTIVE_DETAIL)
     return {
         "id": str(org.id),

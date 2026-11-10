@@ -90,16 +90,31 @@ def _duplicate_club_message(name: str, admin_label: str | None, slug: str | None
     )
 
 
-async def _reclaimable_existing(db: AsyncSession, existing):
+async def _reclaimable_existing(db: AsyncSession, existing, *, lapsed_is_new: bool = True):
     """``existing`` when a registered club must still be treated as taken, else
     None. A club a Super Admin has Reset (BetterStats never trialled, nothing
     paid) with nobody administering it and no Stripe subscription is open to
     be registered again, so its public page is not the answer. Anything with an
     admin, a paid module or a subscription stays protected: registering onto
-    that row would hand a stranger somebody else's club."""
+    that row would hand a stranger somebody else's club.
+
+    The one exception is a club whose free trial ran out and that never
+    subscribed (``auth.modules.trial_lapsed``): with ``lapsed_is_new`` (the
+    default) it counts as a club with no history with us, the same as its public
+    page shows. The trial-extension request alone passes ``lapsed_is_new=False``,
+    because it is about exactly that registered club."""
     if existing is None:
         return None
-    from app.auth.modules import MODULE_CORE, PAID_STATUSES, expand_billing_module
+    from app.auth.modules import MODULE_CORE, PAID_STATUSES, expand_billing_module, trial_lapsed
+    rows = (await db.execute(
+        select(OrgModuleSubscription).where(OrgModuleSubscription.organisation_id == existing.id)
+    )).scalars().all()
+    # A club whose free trial ran out and never subscribed is registered like a
+    # club we have never seen: its public page says "not on BetterCricket yet",
+    # so this must not answer "already registered" either. Its row (players,
+    # games, anything typed in) is reused, and the old admins keep their access.
+    if lapsed_is_new and trial_lapsed(existing, rows):
+        return None
     if existing.stripe_subscription_id:
         return existing
     has_admin = (await db.execute(
@@ -109,9 +124,6 @@ async def _reclaimable_existing(db: AsyncSession, existing):
     )).first()
     if has_admin:
         return existing
-    rows = (await db.execute(
-        select(OrgModuleSubscription).where(OrgModuleSubscription.organisation_id == existing.id)
-    )).scalars().all()
     core_keys = set(expand_billing_module(MODULE_CORE))
     if any(r.status in PAID_STATUSES for r in rows):
         return existing
