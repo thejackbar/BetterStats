@@ -149,7 +149,7 @@ for (const id of ['batting', 'bowling', 'records', 'fielding', 'kpi-pl']) await 
   await tile(page, id).first().click()
   await page.waitForTimeout(300)
   const s = await textOf(sheet(page))
-  ck(`tapping ${id} opens the claim sheet naming the club`, /Flemington Cricket Club's season/.test(s), s.slice(0, 80))
+  ck(`tapping ${id} opens the claim sheet naming the club`, /This is Flemington Cricket Club's site on BetterCricket\. Claim it\./.test(s) && !/Make it yours/.test(s), s.slice(0, 80))
   ck(`${id}: the tap is reported, then claim_open`, events.some((e) => e.kind === 'claim_open'), JSON.stringify(events))
   await ctx.close()
 })
@@ -165,8 +165,9 @@ for (const [key, re] of Object.entries(SECTION_TITLES)) await section(`nav ${key
   await page.locator(`[data-nav="${key}"]:visible`).first().click()
   await page.waitForTimeout(250)
   const s = await textOf(sheet(page))
-  ck(`${key}: opens a card that says what that section is, with the claim button`, re.test(s) && /Free trial, no card/.test(s) && /Claim Flemington Cricket Club free/.test(s), s.slice(0, 160))
+  ck(`${key}: opens a card that says what that section is, with the claim button`, re.test(s) && /Free trial, no card/.test(s) && /Claim Flemington Cricket Club on BetterCricket/.test(s) && !/Claim Flemington Cricket Club free/.test(s), s.slice(0, 160))
   ck(`${key}: the press is reported with that section`, events.some((e) => e.kind === 'tile' && e.section === key), JSON.stringify(events))
+  if (key === 'season') ck('season: the line under the title says "see the stats which apply"', /Pick any season and grade, and see the stats which apply\./.test(s) && !/figures for just that/.test(s), s)
   await ctx.close()
 })
 await section('block 2', async () => {
@@ -182,7 +183,10 @@ await section('block 2', async () => {
   ck('and puts the focus back on the tile that opened it', await page.evaluate(() => document.activeElement?.getAttribute('data-tile')) === 'batting')
   await page.locator('[data-testid="teaser-bar-cta"]').click()
   await page.waitForTimeout(200)
-  ck('the bottom button reads "Claim <club> free" and opens the same sheet', /Claim Flemington Cricket Club free/.test(await textOf(page.locator('[data-testid="teaser-bar-cta"]'))) && await sheet(page).count() === 1)
+  ck('the bottom button reads "Claim <club> on BetterCricket" and opens the same sheet', /^Claim Flemington Cricket Club on BetterCricket$/.test((await textOf(page.locator('[data-testid="teaser-bar-cta"]'))).trim()) && await sheet(page).count() === 1)
+  ck('the sheet button says the same, and the sheet title is "This is <club>\'s site on BetterCricket. Claim it."',
+     (await textOf(page.locator('[data-testid="teaser-sheet-go"]'))).trim() === 'Claim Flemington Cricket Club on BetterCricket'
+     && (await textOf(page.locator('#teaser-sheet-title'))).trim() === "This is Flemington Cricket Club's site on BetterCricket. Claim it.")
   ck('opened from a button it reports claim_open for the header, not a tile', events.some((e) => e.kind === 'claim_open' && e.section === 'header'))
   await page.locator('[data-testid="teaser-sheet-backdrop"]').click({ position: { x: 5, y: 5 } })
   await page.waitForTimeout(200)

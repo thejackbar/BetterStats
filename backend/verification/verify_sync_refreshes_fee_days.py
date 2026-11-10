@@ -55,6 +55,20 @@ async def main():
             await conn.execute(text(
                 f'ALTER TABLE "{tbl}" ALTER COLUMN "{col}" TYPE jsonb USING "{col}"::text::jsonb'))
         # The effective views the shared played rule reads, as the lifespan applies them.
+        # Raw-SQL lifespan tables `create_all` cannot see (main.py lifespan, copied): the
+        # fee recompute reads them to find the club's own season in another club's rows.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS grade_merge_logs (
+                id SERIAL PRIMARY KEY, merged_at TIMESTAMPTZ DEFAULT NOW(),
+                org_id UUID NOT NULL, canonical_name TEXT NOT NULL,
+                alias_name TEXT NOT NULL, undone_at TIMESTAMPTZ)"""))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS season_aliases (
+                id SERIAL PRIMARY KEY, merged_at TIMESTAMPTZ DEFAULT NOW(),
+                org_id UUID NOT NULL,
+                canonical_season_id UUID NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
+                alias_season_id    UUID NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
+                undone_at TIMESTAMPTZ)"""))
         from app.services import superseded_ddl
         for stmt in superseded_ddl.STATEMENTS:
             await conn.execute(text(stmt))

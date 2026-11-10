@@ -111,6 +111,52 @@ async def main() -> None:
         res = await fantasy_audit.audit_season(s, fs, check_draw=False, today=TODAY)
         probs = fantasy_audit.problems(res)
     V.check("a healthy season reports nothing at all", probs == [], " | ".join(probs))
+
+    # the Sunbury signature: a picked player whose only games are in a grade the season has switched off
+    from app.models.db import FantasyLeague, FantasyManager, FantasyPoolPlayer, FantasySquad, FantasySquadPlayer
+    from app.services.club_grades import club_grade_rows
+    async with V.engine.begin() as conn:   # the grade-scope code reads this table; the shared harness has no copy
+        await conn.execute(text("""CREATE TABLE IF NOT EXISTS grade_merge_logs (
+            id SERIAL PRIMARY KEY, merged_at TIMESTAMPTZ DEFAULT NOW(), org_id UUID NOT NULL,
+            canonical_name TEXT NOT NULL, alias_name TEXT NOT NULL, undone_at TIMESTAMPTZ)"""))
+    OFF_GRADE, OFF_GAME, OFF_PLAYER = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    async with V.Session() as s:
+        await s.execute(text("INSERT INTO grades (id, season_id, name, grassroots_id, category, categories) VALUES (:i,:s,'08. Off XI',:g,'senior',ARRAY['senior'])"),
+                        {"i": OFF_GRADE, "s": SEASON, "g": str(OFF_GRADE)})
+        await s.execute(text("INSERT INTO players (id, organisation_id, name, grassroots_id, status) VALUES (:i,:o,'Aman Offgrade',:g,'active')"),
+                        {"i": OFF_PLAYER, "o": ORG, "g": str(OFF_PLAYER)})
+        await s.execute(text("INSERT INTO games (id, grade_id, played_at, home_team, away_team, home_org_id, status) "
+                             "VALUES (:g,:gr,:d,'Club 5th XI','Them 5th XI',:o,'COMPLETED')"),
+                        {"g": OFF_GAME, "gr": OFF_GRADE, "d": date(2026, 11, 7), "o": ORG})
+        await s.execute(text("INSERT INTO game_appearances (game_id, player_id, team_name) VALUES (:g,:p,'Club 5th XI')"), {"g": OFF_GAME, "p": OFF_PLAYER})
+        await s.execute(text("INSERT INTO batting_innings (game_id, player_id, innings_number, batting_position, runs, balls, fours, sixes, not_out, dismissal_type, did_not_bat) "
+                             "VALUES (:g,:p,1,3,45,40,6,0,true,null,false)"), {"g": OFF_GAME, "p": OFF_PLAYER})
+        await s.commit()
+    async with V.Session() as s:
+        fs = await s.get(FantasySeason, FS)
+        keys = {c.name: c.key for c in await club_grade_rows(s, ORG)}
+        fs.rules = {"excluded_grade_keys": [keys["08. Off XI"]]}
+        s.add(FantasyPoolPlayer(fantasy_season_id=FS, organisation_id=ORG, player_id=OFF_PLAYER, role="batter", base_price=5, current_price=5))
+        mgr = FantasyManager(id=uuid.uuid4(), organisation_id=ORG, display_name="M")
+        s.add(mgr)
+        await s.flush()
+        lg = FantasyLeague(id=uuid.uuid4(), fantasy_season_id=FS, organisation_id=ORG, kind="global_salary_cap", name="Club ladder")
+        s.add(lg)
+        await s.flush()
+        sq = FantasySquad(id=uuid.uuid4(), fantasy_season_id=FS, league_id=lg.id, manager_id=mgr.id, organisation_id=ORG, team_name="T")
+        s.add(sq)
+        await s.flush()
+        s.add(FantasySquadPlayer(squad_id=sq.id, player_id=OFF_PLAYER, role="batter"))
+        await s.commit()
+    async with V.Session() as s:
+        fs = await s.get(FantasySeason, FS)
+        res = await fantasy_audit.audit_season(s, fs, check_draw=False, today=TODAY)
+        probs = fantasy_audit.problems(res)
+    z = next((x for x in res["zero_stat_pool"] if x["name"] == "Aman Offgrade"), {})
+    V.check("a picked player who played only in a switched-off grade is found, with the grade and game count",
+            z.get("off_grade_games") == [{"grade": "08. Off XI", "games": 1}], str(z))
+    V.check("and the sentence says to switch the grade on, not that the player has no games",
+            any("Aman Offgrade" in x and "08. Off XI" in x and "Switch it on under Scoring" in x for x in probs), " | ".join(probs))
     print(f"\n{V.PASS} passed, {V.FAIL} failed")
     sys.exit(1 if V.FAIL else 0)
 

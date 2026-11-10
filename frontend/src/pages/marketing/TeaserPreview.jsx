@@ -53,7 +53,7 @@ const OTHER = {
   dashboard: { title: () => 'A dashboard for every player', line: 'Each player gets their own page: availability, stats, fees and Fantasy.' },
   admin: { title: () => 'Run the club from one place', line: 'Set up the club, add your committee and manage the site.' },
   leaderboard: { title: () => 'The full leaderboard', line: 'Every batter, bowler and fielder, with filters for grade and match type.' },
-  season: { title: () => 'Every season, every grade', line: 'Pick any season and grade, and see the figures for just that.' },
+  season: { title: () => 'Every season, every grade', line: 'Pick any season and grade, and see the stats which apply.' },
 }
 
 function setRobots(content) {
@@ -345,7 +345,7 @@ export default function TeaserPreview({ capture = false }) {
   const { record, ladders_shown: ladders, club } = data
   const place = [club.suburb, club.state].filter(Boolean).join(', ')
   const short = name.replace(/ (Cricket )?Club$/i, '')
-  const ctaLabel = registered ? `Open ${name}'s site` : `Claim ${name} free`
+  const ctaLabel = registered ? `Open ${name}'s site` : `Claim ${name} on BetterCricket`
   const records = data.records || []
   const hasThird = records.length > 0 || fielding.length > 0
   const meta = [
@@ -500,7 +500,7 @@ export default function TeaserPreview({ capture = false }) {
                className="relative w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl border pb-hairline bg-pb-surface p-6 shadow-2xl">
             <h2 id="teaser-sheet-title" className="text-xl font-bold leading-snug">
               {registered ? `${name} is already on BetterCricket`
-                : info ? info.title(name) : `This is ${name}'s season. Make it yours.`}
+                : info ? info.title(name) : `This is ${name}'s site on BetterCricket. Claim it.`}
             </h2>
             {registered ? (
               <p className="mt-2 text-sm text-pb-dim">Open the club's own site to see every player, record and result.</p>

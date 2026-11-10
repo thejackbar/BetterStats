@@ -15,8 +15,9 @@ a different symptom, so this looks for all of them at once and says in words wha
                         member screens treat the FIRST unscored round as the live one, so everything
                         after it is hidden until it is confirmed.
 * ``drift``             players whose stored points differ from what the scorecards give now, per round.
-* ``zero_stat_pool``    pool players picked by teams who have no games this season while a same-name
-                        record does (a hand-added twin).
+* ``zero_stat_pool``    pool players picked by teams who have no counted games this season. Says whether
+                        they played in a grade the season has switched off (``off_grade_games``) or have
+                        a same-name record with games (a hand-added twin).
 
 Read only: nothing is written. ``check_draw=False`` skips the Cricket Australia calls (the draw
 comparison). One call per grade is made otherwise, through the client's own 30 minute cache.
@@ -111,6 +112,25 @@ async def audit_season(db: AsyncSession, fs, check_draw: bool = True, today: dat
                                  "names": [f"{d['name']} {d['stored']:g} -> {d['now']:g}" for d in drift[:DRIFT_NAMES]]})
     out["zero_stat_pool"] = [z for z in await fantasy_pool_check.zero_stat_pool_players(db, fs.organisation_id)
                              if z["picked_by"] or z["twins"]]
+    # The Sunbury signature: a player with no counted games who DID play this season, in a grade the season
+    # has switched off (or never switched on). Told apart from someone who simply has not played yet.
+    if grades is not None:
+        for z in out["zero_stat_pool"]:
+            rows = (await db.execute(text(f"""
+                SELECT gr.name, COUNT(DISTINCT g.id) AS n
+                FROM v_effective_games g
+                JOIN grades gr ON gr.id = g.grade_id
+                JOIN seasons s ON s.id = gr.season_id
+                WHERE {club_game_sql("g", "org")} AND s.year = :year
+                  AND NOT (g.grade_id = ANY(CAST(:grades AS uuid[])))
+                  AND g.id IN (
+                      SELECT game_id FROM game_appearances WHERE player_id = CAST(:p AS UUID)
+                      UNION SELECT game_id FROM v_effective_batting_innings WHERE player_id = CAST(:p AS UUID)
+                      UNION SELECT game_id FROM v_effective_bowling_spells WHERE player_id = CAST(:p AS UUID)
+                      UNION SELECT game_id FROM v_effective_fielding_stats WHERE player_id = CAST(:p AS UUID))
+                GROUP BY gr.name ORDER BY gr.name"""),
+                {"org": str(fs.organisation_id), "year": fs.season_year, "grades": grades, "p": z["player_id"]})).all()
+            z["off_grade_games"] = [{"grade": r[0], "games": int(r[1])} for r in rows]
     return out
 
 
@@ -142,7 +162,13 @@ def problems(res: dict) -> list[str]:
         p.append(f"Round {d['round']} ({what}): {d['players']} player(s) differ from their scorecards: {'; '.join(d['names'])}.")
     for z in res["zero_stat_pool"]:
         tw = f", twin has {z['twins'][0]['games']} game(s)" if z["twins"] else ""
-        p.append(f"{z['name']} is in the pool, picked by {z['picked_by']}, with no games{tw}.")
+        off = z.get("off_grade_games") or []
+        if off:
+            where = ", ".join(f"{g['games']} in {g['grade']}" for g in off)
+            p.append(f"{z['name']} (picked by {z['picked_by']}) has played this season but scores nothing: {where}. "
+                     f"That grade is switched off for scoring. Switch it on under Scoring.")
+        else:
+            p.append(f"{z['name']} is in the pool, picked by {z['picked_by']}, with no games{tw}.")
     if res.get("draw_error"):
         p.append(f"Could not read the draw: {res['draw_error']}")
     return p

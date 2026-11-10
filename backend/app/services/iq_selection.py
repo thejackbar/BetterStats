@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db import Fixture
 from app.services.grade_labels import strip_sponsor_suffix
 from app.services.iq import resolve_opponent
-from app.services.iq_filters import grade_base, grade_canonical_label, grade_match_clause, season_member_clause
+from app.services.iq_filters import grade_base, grade_canonical_label, grade_match_clause, season_member_clause, season_member_clause_cross_club
 from app.services.selection_pool import assemble_selection
 
 THIN_ATTACK = 5            # fewer front-line bowling options than this → warn
@@ -270,7 +270,7 @@ async def _season_load(db: AsyncSession, grade_id: str | None, org_id: str | Non
             JOIN players p ON p.id = ga.player_id AND p.organisation_id = CAST(:org AS UUID)
             JOIN v_effective_games g ON g.id = ga.game_id
             JOIN grades gr ON gr.id = g.grade_id
-            WHERE TRUE {season_member_clause('gr.season_id', g["season_id"])}
+            WHERE TRUE {season_member_clause_cross_club('gr.season_id', g["season_id"])}
               AND {grade_match_clause(grade_canonical_label('gr', 'org'))}
             GROUP BY ga.player_id
             """

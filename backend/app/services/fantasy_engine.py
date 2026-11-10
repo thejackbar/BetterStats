@@ -306,7 +306,8 @@ async def _live_calendar_spans(
     return spans, len(guids), starts
 
 
-def _group_rounds(spans: list[tuple[date, date]]) -> list[tuple[date, date]]:
+def _group_rounds(spans: list[tuple[date, date]],
+                  frozen: list[tuple[date, date]] | None = None) -> list[tuple[date, date]]:
     """Turn match spans into fantasy rounds: ``[(first_day, last_day)]`` in order.
 
     A round is a club weekend (one ISO week). A match that runs across weeks (a
@@ -319,7 +320,12 @@ def _group_rounds(spans: list[tuple[date, date]]) -> list[tuple[date, date]]:
 
     Joining is transitive, so a club whose two day games start on alternate weekends chains every
     week of the season into one group. A group that stretches past ``MAX_ROUND_SPAN_DAYS`` is not a
-    round, so ``_split_chain`` cuts it back into one round per club weekend."""
+    round, so ``_split_chain`` cuts it back into one round per club weekend.
+
+    ``frozen`` is the stored window of every round already SCORED. A scored round is never re-dated,
+    so a long group that runs through one keeps everything up to that round's end as ONE round (exactly
+    what it was scored as) and only what starts after it is cut. Without this the unscored round after
+    it would be given dates inside the scored one, and those games would count twice."""
     def monday(d: date) -> date:
         return d - timedelta(days=d.weekday())
 
@@ -355,7 +361,15 @@ def _group_rounds(spans: list[tuple[date, date]]) -> list[tuple[date, date]]:
     for root, days in days_by_root.items():
         lo, hi = min(days), max(days)
         if (hi - lo).days > MAX_ROUND_SPAN_DAYS:
-            rounds.extend(_split_chain(spans_by_root[root]))
+            over = [f for f in (frozen or []) if f[0] <= hi and lo <= f[1]]
+            if over:
+                cut = max(f[1] for f in over)
+                rounds.append((lo, max(d for d in days if d <= cut) if any(d <= cut for d in days) else lo))
+                rest = [sp for sp in spans_by_root[root] if sp[0] > cut]
+                if rest:
+                    rounds.extend(_split_chain(rest))
+            else:
+                rounds.extend(_split_chain(spans_by_root[root]))
         else:
             rounds.append((lo, hi))
     rounds.sort()
@@ -412,7 +426,12 @@ async def draw_windows(session: AsyncSession, fs, refresh: bool = False):
         logger.exception("fantasy: live calendar read failed for season %s", fs.id)
         cal_spans, grades_checked, cal_starts = [], 0, {}
     cal_days = {d for a, b in cal_spans for d in (a, b)}
-    windows = _group_rounds(cal_spans + [(d, d) for d in game_dates])
+    frozen = [(r[0], r[1]) for r in (await session.execute(
+        text("""SELECT start_date, end_date FROM fantasy_rounds
+                WHERE fantasy_season_id = CAST(:fs AS UUID) AND status = 'scored'
+                  AND start_date IS NOT NULL AND end_date IS NOT NULL"""),
+        {"fs": str(fs.id)})).all()]
+    windows = _group_rounds(cal_spans + [(d, d) for d in game_dates], frozen)
     return windows, game_dates, cal_days, grades_checked, cal_starts
 
 

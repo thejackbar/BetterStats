@@ -635,16 +635,23 @@ async def get_org_lineups(
     async def _played(off: int, lim: int) -> list[str]:
         """Synced games, newest first. Only 'api' games have a Grassroots match
         behind them — a manually-uploaded scorecard has no upstream team list."""
-        where = ["g.organisation_id = :org", "g.source = 'api'", "g.played_at IS NOT NULL"]
+        # A game belongs to no club: a fixture another synced club created first sits under
+        # THAT club's season and grade rows, so "ours" is owner OR home/away side (the same
+        # predicate the Games list below uses), and season and grade match across clubs.
+        where = ["(g.organisation_id = :org OR g.home_org_id = :org OR g.away_org_id = :org)",
+                 "g.source = 'api'", "g.played_at IS NOT NULL"]
         params: dict = {"org": org.id, "lim": lim, "off": off}
         if season_id:
             # Expand to the season's aliases so a merged-away season id still
-            # matches its canonical games.
-            season_ids = await resolve_season_filter(db, org.id, season_id)
+            # matches its canonical games, and to the other clubs' rows of the same season.
+            season_ids = await resolve_season_filter(db, org.id, season_id, include_shared=True)
             where.append("g.season_id = ANY(:season_ids)")
             params["season_ids"] = [uuid.UUID(s) for s in (season_ids or [season_id])]
         if grade_id:
-            where.append("g.grade_id = :grade_id")
+            where.append(
+                "g.grade_id IN (SELECT gx.id FROM grades gx WHERE gx.id = :grade_id"
+                " OR (gx.grassroots_id IS NOT NULL AND gx.grassroots_id ="
+                " (SELECT gy.grassroots_id FROM grades gy WHERE gy.id = :grade_id)))")
             params["grade_id"] = uuid.UUID(grade_id)
         if category_grade_ids is not None:
             where.append("g.grade_id = ANY(:category_grade_ids)")

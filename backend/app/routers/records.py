@@ -2201,7 +2201,11 @@ async def get_club_records(
     scope_clause = scope.clause("g.grade_id") if scope_active else ""
 
     from app.services.season_aliases import resolve_season_filter
-    season_ids = await resolve_season_filter(db, org_id, season_id)
+    # include_shared: a game two synced clubs played is one row under whichever club's
+    # season synced it first, so the club's own season list alone drops its half of every
+    # such fixture once a season is picked. The read is guarded by the club-game predicate
+    # in club_records._GAMES_SQL (owner or home/away side), which is what makes it safe.
+    season_ids = await resolve_season_filter(db, org_id, season_id, include_shared=True)
 
     params: dict = {}
     if scope_active:

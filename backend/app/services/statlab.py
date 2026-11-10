@@ -39,6 +39,7 @@ from app.services.game_status import appearance_counts_as_match
 from app.services import rate_coverage as rc
 from app.services import statlab_rows
 from app.services.dismissal import not_out_sql
+from app.services.season_kind import season_kind_sql
 
 # The two retirements that are not dismissals, as a SQL predicate on a
 # stored dismissal_type. One definition, shared with the sync and the
@@ -59,6 +60,10 @@ _NOT_OUT_NAMES_SQL = not_out_sql('bi.dismissal_type')
 # own whitelists, and none of them start with an underscore — so a browser
 # can't hand us a scope of its own choosing.
 _SCOPE_KEY = "_scope"
+# Hidden context key: the picked season widened to the other clubs' rows of the same season
+# (`with_season_scope`, defined beside `_build_context_filters`). Never read from the URL.
+_SEASON_SCOPE_KEY = "_season_scope"
+_SEASON_PICK_KEYS = ("season_id", "season_ids")
 
 
 def _ctx_scope(ctx: dict):
@@ -458,7 +463,7 @@ _MATCH_PLAYER_CLAUSE = (
 # or a competition: the grid answers those) and at most one season. Any other filter is a
 # question about particular games (a result, an opposition, a date range, a dismissal, a
 # grade, finals) and the figure then legitimately counts only those, so it is left alone.
-_GRID_SAFE_CONTEXT_KEYS = {_SCOPE_KEY, "player_id", "season_id"}
+_GRID_SAFE_CONTEXT_KEYS = {_SCOPE_KEY, "player_id", "season_id", _SEASON_SCOPE_KEY}
 # The grid loader's cost grows with the players asked about. A club past this many
 # players with no single-player filter is left on its own count (see
 # aggregations.BOARD_GRID_MAX_ROWS for the same reasoning).
@@ -1164,6 +1169,47 @@ def _build_innings_list_filters(ctx: dict) -> tuple[list[str], dict]:
     return ["(" + " OR ".join(ors) + ")"], params
 
 
+# The real-world seasons a picked Season means, resolved once per request by
+# `with_season_scope` (hidden key, never read from the URL). A game belongs to no club: one two
+# synced clubs played is a single row under whichever club's season synced it first, so the
+# season the user picked has to match the other clubs' rows of the same season too, or the
+# club's half of every such fixture drops out of its own StatLab the moment a season is chosen.
+# The universe is already guarded by `p.organisation_id` on every per-player read, which is what
+# makes the wider season list safe (guide rule 15).
+
+
+def _picked_seasons(ctx: dict) -> list[str]:
+    """The season ids the context asks for. The multi-select wins over the legacy single id
+    (the picker writes one and clears the other), as `_pss_season_filter` reads it."""
+    raw = ctx.get("season_ids")
+    if isinstance(raw, str):
+        raw = [x.strip() for x in raw.split(",") if x.strip()]
+    ids = [v for v in (_coerce_value("uuid", x) for x in (raw or [])) if v]
+    if ids:
+        return ids
+    one = _coerce_value("uuid", ctx.get("season_id"))
+    return [one] if one else []
+
+
+async def with_season_scope(session: AsyncSession, org_id: str, context: dict | None) -> dict:
+    """`context` plus the expanded season list under `_SEASON_SCOPE_KEY` when a season is picked.
+
+    Returns a copy; the caller's dict is untouched. Both entry points (`run_query`,
+    `run_derived`) call this, so the StatLab routes, saved reports and the Club Room slide all
+    see the same seasons."""
+    from app.services.season_aliases import resolve_season_filter
+    ctx = dict(context or {})
+    ctx.pop(_SEASON_SCOPE_KEY, None)  # never trust one handed in from outside
+    picked = _picked_seasons(ctx)
+    if picked:
+        ids: set[str] = set()
+        for sid in picked:
+            ids.update(str(x) for x in (await resolve_season_filter(
+                session, org_id, sid, include_shared=True) or [sid]))
+        ctx[_SEASON_SCOPE_KEY] = sorted(ids)
+    return ctx
+
+
 def _build_context_filters(ctx: dict) -> tuple[list[str], dict, list[str], dict, list[str], dict, bool]:
     """Returns (match_clauses, match_params, innings_clauses, innings_params,
     player_clauses, player_params, any_match_used).
@@ -1171,12 +1217,21 @@ def _build_context_filters(ctx: dict) -> tuple[list[str], dict, list[str], dict,
     batting_innings joins; the player block attaches to (game_universe × player)
     via a gap LEFT JOIN that callers must provide.
     """
+    season_scope = ctx.get(_SEASON_SCOPE_KEY)
+    if season_scope:
+        # The expanded list replaces the raw pick (it contains it, and its aliases), so the
+        # two season filters below must not also fire on the club's own row alone.
+        ctx = {k: v for k, v in ctx.items() if k not in _SEASON_PICK_KEYS}
     mc, mp, mu = _build_filter_block(ctx, MATCH_CONTEXT_FILTERS)
     # Merge in multi-select MATCH filters (season_ids, grade_ids, grade_names).
     list_clauses, list_params = _build_match_list_filters(ctx)
     if list_clauses:
         mc = mc + list_clauses
         mp = {**mp, **list_params}
+        mu = True
+    if season_scope:
+        mc = mc + ["s.id = ANY(CAST(:ctx_season_scope AS uuid[]))"]
+        mp = {**mp, "ctx_season_scope": season_scope}
         mu = True
     # Grade type / match type. `kind='game'` (the default) is right for
     # game_universe: it reads the CATEGORY exclusion off the game's grade_id and
@@ -1208,6 +1263,12 @@ def _build_context_filters(ctx: dict) -> tuple[list[str], dict, list[str], dict,
 # game_universe: builds a CTE of every (game, club_team_name, canonical_grade_name)
 # tuple this org cares about, with optional context filters applied. Downstream
 # queries join their per-innings/per-spell/etc. tables against this universe.
+
+# Season kind (winter / spring / autumn / summer) of the club's own row and of the game's row, for the
+# year-and-kind step of the season fold in `_game_universe_sql`.
+_KIND_OWN_SEASON = season_kind_sql("own.name")
+_KIND_GAME_SEASON = season_kind_sql("s.name")
+
 
 def _game_universe_sql(ctx_clauses: list[str]) -> str:
     """Build the per-game universe CTE.
@@ -1242,9 +1303,9 @@ def _game_universe_sql(ctx_clauses: list[str]) -> str:
                 COALESCE(am.canonical_name, gr.name)          AS canonical_grade_name,
                 COALESCE(gdn.display_name_override,
                          COALESCE(am.canonical_name, gr.name)) AS display_grade_name,
-                s.id                                          AS season_id,
-                s.name                                        AS season_name,
-                COALESCE(s.year, 0)                           AS season_year,
+                COALESCE(fs.id, s.id)                         AS season_id,
+                COALESCE(fs.name, s.name)                     AS season_name,
+                COALESCE(fs.year, s.year, 0)                  AS season_year,
                 g.is_final                                    AS is_final,
                 g.home_team                                   AS home_team,
                 g.away_team                                   AS away_team,
@@ -1252,6 +1313,25 @@ def _game_universe_sql(ctx_clauses: list[str]) -> str:
             FROM v_effective_games g
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s  ON s.id  = gr.season_id
+            -- A game belongs to no club. One two synced clubs played hangs off whichever
+            -- club's season row synced it first, so filed under that season it would draw as
+            -- a second "2026/27" row beside the club's own. Fold a season row that is NOT the
+            -- club's onto the club's own row of the same real-world season (same CA season
+            -- GUID, else the same name, else the same year and kind), best match first and
+            -- one row only. A row the club has no season for stays as it was.
+            LEFT JOIN LATERAL (
+                SELECT own.id, own.name, own.year
+                  FROM seasons own
+                 WHERE s.organisation_id IS DISTINCT FROM CAST(:org_id AS UUID)
+                   AND own.organisation_id = CAST(:org_id AS UUID)
+                   AND ((own.grassroots_id IS NOT NULL AND own.grassroots_id = s.grassroots_id)
+                        OR LOWER(own.name) = LOWER(s.name)
+                        OR (own.year IS NOT NULL AND own.year = s.year
+                            AND {_KIND_OWN_SEASON} = {_KIND_GAME_SEASON}))
+                 ORDER BY (own.grassroots_id IS NOT NULL AND own.grassroots_id = s.grassroots_id) DESC,
+                          (LOWER(own.name) = LOWER(s.name)) DESC, own.id
+                 LIMIT 1
+            ) fs ON TRUE
             LEFT JOIN LATERAL (
                 -- One row per distinct team our club fielded in this game.
                 -- For a typical game this returns exactly one team_name; if
@@ -5798,6 +5878,7 @@ async def run_query(
     page = max(1, page)
     offset = (page - 1) * limit
     fn = TARGET_DISPATCH[target]
+    context = await with_season_scope(session, org_id, context)
     rows = await fn(
         session,
         org_id=org_id,
@@ -5820,6 +5901,7 @@ async def run_derived(
     page = max(1, page)
     offset = (page - 1) * limit
     fn = DERIVED_QUERIES[name]["fn"]
+    context = await with_season_scope(session, org_id, context)
     rows = await fn(session, org_id=org_id, limit=limit, offset=offset, context=context)
     return {"rows": rows, "has_more": len(rows) == limit, "page": page}
 

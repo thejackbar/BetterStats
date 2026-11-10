@@ -364,6 +364,148 @@ def fee_settled_before(now: datetime | None = None) -> date:
     return now.astimezone(FEE_TZ).date()
 
 
+async def _season_games(session, org_id, sid, grades: dict) -> tuple[list, dict]:
+    """Every game in one fee season, and the club's own grade for each grade row it
+    does not hold.
+
+    A game belongs to NO club. ``games.grade_id`` happens to point at the grade row
+    of whichever club's sync created the row first, so the season that row hangs off
+    says nothing about who played. Reading "games under this club's season" lost
+    every fixture another BetterCricket club had synced first: Angus Castley
+    (Applecross, Oct 2026) played two One Day Grade 4 games, the 17 Oct one under
+    Applecross's season row and the 24 Oct one under North Perth's, and Fees showed
+    one match day while his profile held both.
+
+    So a game is in this fee season when it sits under a season row that IS this
+    season (the club's own row, read exactly as before) or under ANOTHER club's row
+    of the same real-world season (`_foreign_rows_of`), and, for those other rows,
+    when one of this club's players has a row in it. Nothing reads
+    `games.organisation_id` or `home_org_id`/`away_org_id`: those say which clubs
+    synced the game, not who took part, and they are only filled once a club's own
+    sync has touched the row. Whose players are charged is decided by
+    `Player.organisation_id` in the caller.
+
+    The second value is ``{foreign grade id: this club's own Grade, or None}``. A
+    `fee_format` is the club's decision about its own grades ("Exclude" Juniors, the
+    women's rate), so a grade row of another club never supplies one: the club's own
+    grade of the same name does (`grade_key`, through the club's grade merges), and
+    with none the game falls back to its match format.
+    """
+    from app.services.grade_labels import grade_alias_map, grade_key
+
+    own = (await session.execute(
+        select(Game).join(Grade, Game.grade_id == Grade.id).where(Grade.season_id == sid)
+    )).scalars().all()
+
+    foreign_season_ids = await _foreign_rows_of(session, org_id, sid)
+    if not foreign_season_ids:
+        return list(own), {}
+
+    seen = {g.id for g in own}
+    extra_ids = [
+        r[0] for r in (await session.execute(
+            text("""
+                SELECT DISTINCT g.id FROM games g
+                  JOIN grades gr ON gr.id = g.grade_id
+                 WHERE gr.season_id = ANY(CAST(:sids AS uuid[]))
+                   AND (
+                     EXISTS (SELECT 1 FROM game_appearances x
+                               JOIN players p ON p.id = x.player_id
+                              WHERE x.game_id = g.id AND p.organisation_id = CAST(:org AS UUID))
+                     OR EXISTS (SELECT 1 FROM batting_innings x
+                               JOIN players p ON p.id = x.player_id
+                              WHERE x.game_id = g.id AND p.organisation_id = CAST(:org AS UUID))
+                     OR EXISTS (SELECT 1 FROM bowling_spells x
+                               JOIN players p ON p.id = x.player_id
+                              WHERE x.game_id = g.id AND p.organisation_id = CAST(:org AS UUID))
+                     OR EXISTS (SELECT 1 FROM fielding_stats x
+                               JOIN players p ON p.id = x.player_id
+                              WHERE x.game_id = g.id AND p.organisation_id = CAST(:org AS UUID))
+                   )
+            """),
+            {"sids": foreign_season_ids, "org": str(org_id)},
+        )).all()
+    ]
+    extra_ids = [i for i in extra_ids if i not in seen]
+    if not extra_ids:
+        return list(own), {}
+    extra = (await session.execute(select(Game).where(Game.id.in_(extra_ids)))).scalars().all()
+
+    aliases = await grade_alias_map(session, org_id)
+
+    def key(name) -> str:
+        k = grade_key(name)
+        return aliases.get(k, k)
+
+    own_by_key: dict = {}
+    for g in grades.values():
+        own_by_key.setdefault(key(g.name), g)
+    foreign_grades = (await session.execute(
+        select(Grade).where(Grade.id.in_({g.grade_id for g in extra}))
+    )).scalars().all()
+    return list(own) + list(extra), {g.id: own_by_key.get(key(g.name)) for g in foreign_grades}
+
+
+async def _foreign_rows_of(session, org_id, sid) -> list:
+    """Season rows of OTHER clubs that are this club's fee season `sid`, each in exactly one.
+
+    Same real-world season, in three steps of falling confidence (the same keys
+    `season_aliases.resolve_season_filter(include_shared=True)` uses): the same CA
+    season GUID, which is global and exact; else the same name; else the same year
+    and kind (kind off for a club that amalgamates its seasons).
+
+    Each row is given to ONE of the club's seasons, the first step that finds any,
+    because a club can hold two seasons in one year (a masters competition under its
+    own CA season) and a game handed to both would be charged twice, once under
+    each fee season. A row the best step still cannot tell apart is given to none:
+    a missing match day shows on the member page, a double charge is money.
+    """
+    from app.services.season_kind import season_kind
+
+    mine = (await session.execute(
+        text("SELECT id, name, year, grassroots_id FROM seasons"
+             " WHERE organisation_id = CAST(:org AS UUID)"),
+        {"org": str(org_id)},
+    )).all()
+    me = next((r for r in mine if r[0] == sid), None)
+    if me is None:
+        return []
+    amalgamate = bool((await session.execute(
+        text("SELECT amalgamate_seasons FROM organisations WHERE id = CAST(:org AS UUID)"),
+        {"org": str(org_id)},
+    )).scalar())
+
+    def kind(name) -> str:
+        return "" if amalgamate else season_kind(name)
+
+    others = (await session.execute(
+        text("SELECT id, name, year, grassroots_id FROM seasons"
+             " WHERE organisation_id IS DISTINCT FROM CAST(:org AS UUID)"
+             "   AND ((grassroots_id IS NOT NULL AND grassroots_id = ANY(:guids))"
+             "     OR LOWER(name) = ANY(:names)"
+             "     OR (CAST(:year AS INT) IS NOT NULL AND year = CAST(:year AS INT)))"),
+        {"org": str(org_id),
+         "guids": [r[3] for r in mine if r[3]],
+         "names": [(r[1] or "").lower() for r in mine if r[1]],
+         "year": me[2]},
+    )).all()
+
+    out = []
+    for fid, fname, fyear, fguid in others:
+        steps = (
+            [r for r in mine if fguid and r[3] == fguid],
+            [r for r in mine if fname and (r[1] or "").lower() == fname.lower()],
+            [r for r in mine if fyear is not None and r[2] == fyear and kind(r[1]) == kind(fname)],
+        )
+        owners = next((c for c in steps if c), [])
+        if len(owners) == 1 and owners[0][0] == sid:
+            out.append(fid)
+        elif len(owners) > 1:
+            logger.info("Fee season %s: another club's season %s fits %d of the club's seasons, "
+                        "left out rather than charged twice", sid, fid, len(owners))
+    return out
+
+
 async def recompute_fee_match_days(organisation_id: str, season_id: str | None = None,
                                    dry_run: bool = False) -> dict:
     """Rebuild auto-derived match-day rows for one season.
@@ -399,17 +541,15 @@ async def recompute_fee_match_days(organisation_id: str, season_id: str | None =
                 await session.execute(select(Grade).where(Grade.season_id == sid))
             ).scalars().all()
         }
-        games = (
-            await session.execute(
-                select(Game).join(Grade, Game.grade_id == Grade.id).where(Grade.season_id == sid)
-            )
-        ).scalars().all()
+        games, foreign_own_grade = await _season_games(session, org_id, sid, grades)
 
         game_meta: dict = {}  # game_id -> (fee_format, default_days, played_at)
         settled_before = fee_settled_before()
         for g in games:
             grade = grades.get(g.grade_id)
-            ff, days = derive_fee_format(grade.fee_format if grade else None, g.match_format)
+            mapped = grade or foreign_own_grade.get(g.grade_id)
+            override = mapped.fee_format if mapped else None
+            ff, days = derive_fee_format(override, g.match_format)
             if ff is None:
                 continue  # excluded grade
             if g.played_at is not None and g.played_at >= settled_before:
