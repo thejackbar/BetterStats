@@ -141,6 +141,14 @@ or by `content_category` instead.
 
 ### 4b. BC_AU_Trial_CBO_Sep2026: the fresh start of 10 November 2026
 
+**Renamed in Meta on 10 Nov 2026 to "November 2026 Trial Campaign".** Same campaign
+id (120251284365570121), same budget, same ads; only the display name changed, so
+the Meta Ads HQ dropdown now shows the new name. The tags are deliberately NOT
+renamed: the live ad's URL parameters still say `utm_campaign=BC_AU_Trial_CBO_Sep2026`
+and the registry keys off the id and the `utm_content`, so the tag and the Meta name
+no longer match, which is cosmetic. The rule above ("utm_campaign should match the
+campaign name") describes the older campaigns.
+
 The campaign started again on 10 Nov 2026 at A$15/day for 30 days (A$450). Its
 ads carry their own tags, so signups from the restart are counted on their own
 and the Sep tags stay with the earlier run.
