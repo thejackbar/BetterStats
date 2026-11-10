@@ -86,6 +86,11 @@
 55. Dwell is a `page_exit` event (`usePageView.js`: `sendBeacon` on `pagehide`, `visibilitychange` hidden, route change) writing `usage_events.time_on_page_ms` via `POST /usage/event/exit`, clamped 24 h. Sessions are computed on read (`page_view`s on a gap of 30 min or more); duration is first to last PLUS the final page's dwell (else bounces read 0).
 56. `GET /club-admin/usage/journey?visitor_id=` is the only per-visitor view. `comms._apply_utm` checks each UTM key independently; `usePageView` sends the CURRENT URL's UTM (`visitor.getCurrentUtm()`) over first-touch.
 
+**HQ headline strip (v9.142.5)**
+57. The strip is `computeKpis` in `pages/admin/metaAdsKpi.js`. Revenue is PAID CLUBS (`converted_to_paid` rows of `/ad-signups`) times the trial stream's `unit_value_aud`; ROAS is that over the TRIAL stream's spend. Never read `stream.roas` for it: the service's figure is signups times 399, which counts every unpaid trial as revenue.
+58. When any attributed signup pre-dates `counting_since`, cost per trial and ROAS are withheld with the reason (spend is narrowed by the cutoff, the registration count never is, so the quotient would read too good). Converted is "unknown", not 0, until `/ad-signups` loads.
+59. A new ad needs its `utm_content` in `AD_DESTINATIONS`. Without it its spend files under "(untagged)" in `get_creative_performance` and its signups file under the tag in its URL, so per-ad Converted and ROAS cannot be read; the creative table names such ads. A new campaign reusing an old campaign's tags (`trial_evergreen_sep2026`, `spreadsheet_hero`) is excluded from the new campaign by `_attribution_matches_campaign` until its id is added to `CAMPAIGN_UTM_CAMPAIGNS`.
+
 ## Traps and failure signatures
 
 - Wrong webinar state on a bad-clock device: server `is_past` wins. Recording advertised pre-event: hardcoded title/`og:title` (crawlers skip `usePageMeta`).
@@ -96,7 +101,7 @@
 ## How to verify a change here
 
 - Backend (real Postgres, shipped route bodies): `backend/verification/verify_meta_ads_streams.py` (control with feature absent REPORTS missing parts; neutered window and guards: since-spend reads lifetime, partial window prints a cost), `verify_webinar.py` (DDL three times, mirror agreement, resubmission and bot guards, reminder edges, name halves), `verify_streamyard_skip_reporting.py`.
-- Browser: `frontend/verification/verify_meta_ads_streams_browser.mjs`, `verify_webinar_browser.mjs`, `verify_club_cta_browser.mjs`. Meta Events Manager Test Events is NOT covered.
+- Browser: `frontend/verification/verify_meta_ads_kpi_browser.mjs` (the strip, Converted and ROAS, Paid? badge, tabs; 55 checks, the control on the previous page fails 46 with no crash), `frontend/verification/verify_meta_ads_streams_browser.mjs`, `verify_webinar_browser.mjs`, `verify_club_cta_browser.mjs`. Meta Events Manager Test Events is NOT covered.
 - Never call live StreamYard in a suite (no public DELETE); stub `push_registration`. Earlier probes left four test registrations (`bc-it-a@` and similar) to delete by hand.
 - Control runs must REPORT, not crash: `.get`, presence-safe helpers (`textOf()`, `seen()`, `reachedSuccess()`), gate whole blocks. Diff PASS lists of run and control (`comm -12`) to find checks that cannot fail.
 

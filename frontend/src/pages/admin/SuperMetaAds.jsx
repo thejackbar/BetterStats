@@ -5,6 +5,7 @@ import {
 } from 'recharts'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
+import { computeKpis, convertedByCreative, unmappedAds, creativeKey, NO_TAG } from './metaAdsKpi'
 
 const DEFAULT_BUDGET = 900
 const DEFAULT_LENGTH_DAYS = 30
@@ -204,31 +205,230 @@ function Stat({ label, value, hint }) {
   )
 }
 
-// One Meta token's health, as a small header chip. Green while it has comfortable
-// runway (or never expires), amber inside the warn window, red once expired or
-// invalid. A deliberately-unset token reads as a muted "off" — it's a state, not
-// an alarm. This is the CAPI token's ONLY surface: its failure is otherwise
-// silent (server-side conversions just stop).
-function TokenChip({ label, t, warnWithin = 14 }) {
-  if (!t) return null
-  let tone = 'text-pb-faint border-pb-hairline'
-  let text = 'checking…'
-  if (!t.configured) { tone = 'text-pb-faintest border-pb-hairline'; text = 'off (not set)' }
-  else if (!t.checked) { text = 'status unknown' }
-  else if (t.valid === false) { tone = 'text-red-300 border-red-500/40 bg-red-500/10'; text = 'EXPIRED / invalid' }
-  else if (t.never) { tone = 'text-pb-dim border-pb-hairline'; text = 'valid · never expires' }
-  else if (t.days_left == null) { tone = 'text-pb-dim border-pb-hairline'; text = 'valid' }
-  else if (t.days_left <= warnWithin) {
-    tone = 'text-amber-300 border-amber-500/40 bg-amber-500/10'
-    text = `expires in ${t.days_left} day${t.days_left === 1 ? '' : 's'}`
-  } else { tone = 'text-emerald-300/90 border-emerald-500/30'; text = `expires in ${t.days_left} days` }
+// One Meta token's state in words, and how loud it should be. 'bad' is expired
+// or invalid, 'warn' is inside the warn window, 'off' is a deliberately-unset
+// token (a state, not an alarm), 'ok' is everything else.
+function tokenStatus(t, warnWithin = 14) {
+  if (!t) return { level: 'off', text: 'checking…' }
+  if (!t.configured) return { level: 'off', text: 'off (not set)' }
+  if (!t.checked) return { level: 'off', text: 'status unknown' }
+  if (t.valid === false) return { level: 'bad', text: 'EXPIRED / invalid' }
+  if (t.never) return { level: 'ok', text: 'valid, never expires' }
+  if (t.days_left == null) return { level: 'ok', text: 'valid' }
+  if (t.days_left <= warnWithin) {
+    return { level: 'warn', text: `expires in ${t.days_left} day${t.days_left === 1 ? '' : 's'}` }
+  }
+  return { level: 'ok', text: `expires in ${t.days_left} days` }
+}
+
+// Token health as ONE small pill in the header, not a section. The CAPI token
+// is still covered: its failure is otherwise silent (server-side conversions
+// just stop), so either token going bad turns the pill red and the detail for
+// both is in the tooltip.
+const TOKEN_PILL_TONE = {
+  bad: 'text-red-300 border-red-500/40 bg-red-500/10',
+  warn: 'text-amber-300 border-amber-500/40 bg-amber-500/10',
+  ok: 'text-emerald-300/90 border-emerald-500/30',
+  off: 'text-pb-faint border-pb-hairline',
+}
+function TokenPill({ health }) {
+  if (!health) return null
+  const warnWithin = health.warn_within_days
+  const parts = [['Ads token', health.ads], ['CAPI token', health.capi]]
+    .map(([label, t]) => ({ label, t, ...tokenStatus(t, warnWithin) }))
+  const levels = parts.map((p) => p.level)
+  const level = levels.includes('bad') ? 'bad' : levels.includes('warn') ? 'warn'
+    : levels.includes('ok') ? 'ok' : 'off'
+  const headline = { bad: 'Token problem', warn: 'Token expiring', ok: 'Tokens OK', off: 'Tokens unknown' }[level]
+  const detail = parts
+    .map((p) => `${p.label}: ${p.text}${p.t && p.t.error ? ` (${p.t.error})` : ''}`)
+    .join('. ')
   return (
     <span
-      title={t.error || (t.expires_at ? `Expires ${t.expires_at}` : '')}
-      className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wide2 ${tone}`}
+      data-testid="token-pill"
+      title={detail}
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[9px] uppercase tracking-wide2 ${TOKEN_PILL_TONE[level]}`}
     >
-      <span className="text-pb-faintest">{label}</span> {text}
+      {headline}
     </span>
+  )
+}
+
+// One tile of the headline strip: a big number, what it is, which side of the
+// Meta / our-database line it comes from, and the caveat as a tooltip. The
+// source tag is on every tile because the two are never to be confused.
+function KpiTile({ id, label, value, source, hint, caveat, compact = false }) {
+  return (
+    <div data-testid={`kpi-${id}`} title={caveat} className="pb-card px-3 py-2.5 min-w-0">
+      <div className="flex items-baseline justify-between gap-1">
+        <div className="font-mono text-[9px] uppercase tracking-wide text-pb-faint">{label}</div>
+        <span data-testid={`kpi-${id}-source`} className="font-mono text-[8px] uppercase tracking-wide text-pb-faintest shrink-0">
+          {source}
+        </span>
+      </div>
+      <div data-testid={`kpi-${id}-value`} className={`font-display ${compact ? 'text-lg' : 'text-2xl'} text-pb-text mt-0.5 truncate`}>
+        {value}
+      </div>
+      {hint && <div data-testid={`kpi-${id}-hint`} className="font-mono text-[9px] text-pb-faintest mt-0.5 leading-snug">{hint}</div>}
+    </div>
+  )
+}
+
+const SRC_META = 'Meta-reported'
+const SRC_OURS = 'Our tracking'
+
+// The whole ask in six tiles: what we spent, how many trials it drove, what
+// each cost, how many became paying clubs, what that earned, and the return.
+// Everything else on the page is supporting detail for these.
+function KpiStrip({ kpis, signupsLoaded }) {
+  const k = kpis
+  const dash = <span className="text-pb-faintest">&ndash;</span>
+  const pending = <span className="text-pb-faintest">&hellip;</span>
+  return (
+    <div data-testid="kpi-strip" className="mb-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+        <KpiTile
+          id="spend" label="Spend" source={SRC_META}
+          value={fmtMoney(k.campaignSpend)}
+          hint={k.webinarSpend > 0 ? `${fmtMoney(k.trialSpend)} trial ads, ${fmtMoney(k.webinarSpend)} webinar ads` : undefined}
+          caveat="What Meta says the campaign has spent, from the stored snapshot. Respects the counting-since window. Cost per trial and ROAS below use the trial ads' spend only."
+        />
+        <KpiTile
+          id="trials" label="Trial signups" source={SRC_OURS}
+          value={k.trials == null ? dash : fmtNum(k.trials)}
+          caveat="Our own database's count of real completed registrations attributed to this campaign, plus any manual adjustment. Not Meta's Lead count, and never narrowed by counting-since."
+        />
+        <KpiTile
+          id="cost" label="Cost / trial" source="Spend / signups"
+          value={k.costPerTrial != null ? fmtMoney(k.costPerTrial) : dash}
+          hint={k.costPerTrial == null ? k.costWhy : 'trial-ad spend / trial signups'}
+          caveat="Trial ads' own spend divided by trial signups, all time. The webinar's spend is never charged to the trial."
+        />
+        <KpiTile
+          id="converted" label="Converted to paid" source={SRC_OURS}
+          value={k.converted == null ? (signupsLoaded ? dash : pending) : fmtNum(k.converted)}
+          hint={k.trackedSignups != null ? `of ${fmtNum(k.trackedSignups)} tracked signups` : undefined}
+          caveat="Attributed clubs that now hold a paid module, from the signups table below."
+        />
+        <KpiTile
+          id="revenue" label="Revenue (est.)" source="Converted x value"
+          value={k.revenue == null ? (signupsLoaded ? dash : pending) : fmtMoney(k.revenue)}
+          hint={k.converted != null ? `${fmtNum(k.converted)} x A$${k.unit}` : undefined}
+          caveat={`An estimate, not Stripe takings: paid clubs x A$${k.unit}, the trial stream's value. Webinar registrations are never valued.`}
+        />
+        <KpiTile
+          id="roas" label="ROAS" source="Revenue / spend"
+          value={k.roas != null ? `${k.roas.toFixed(2)}x` : dash}
+          hint={k.roas == null ? k.roasWhy : 'revenue / trial-ad spend'}
+          caveat="Estimated revenue over the trial ads' own spend. Moves as trials convert: a trial that has not paid yet counts as nothing."
+        />
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mt-2">
+        <KpiTile
+          id="rate" label="Trial to paid" source={SRC_OURS} compact
+          value={k.rate != null ? fmtPct(k.rate * 100) : dash}
+          hint={k.rate != null ? `${fmtNum(k.converted)} of ${fmtNum(k.trackedSignups)}` : 'no tracked signups yet'}
+          caveat="Paid clubs over the tracked signups they came from. The number the whole plan hinges on."
+        />
+        {k.showWebinar && (
+          <KpiTile
+            id="webinar" label="Webinar regs" source={SRC_OURS} compact
+            value={fmtNum(k.webinarRegs)}
+            hint="kept separate, carries no value"
+            caveat="Webinar registrations attributed to this campaign. A different result from a trial signup, so never added to it and never valued in revenue or ROAS."
+          />
+        )}
+      </div>
+      {k.windowMismatch && (
+        <p data-testid="kpi-window-note" className="font-mono text-[9px] text-amber-300/80 mt-1.5 leading-relaxed">
+          Cost per trial and ROAS are withheld: {k.mismatchReason}, so dividing one by the other would read
+          better than the truth. Clear &ldquo;counting since&rdquo; to read them.
+        </p>
+      )}
+    </div>
+  )
+}
+
+// The counting-since seed, shown beside the KPI strip so the active window is
+// obvious. It narrows the funnel numbers and Meta's own insights (and so the
+// Spend tile). It NEVER narrows real completed registrations.
+function CountingSince({ countingSince, editing, input, setInput, saving, onOpen, onApply, onCancel, onClear }) {
+  return (
+    <div data-testid="counting-since" className="flex flex-wrap items-center gap-x-2 gap-y-1 mb-3">
+      {editing ? (
+        <>
+          <input
+            type="datetime-local"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            disabled={saving}
+            className="bg-pb-surface2 border border-pb-hairline rounded px-2 py-1 font-mono text-[10px] text-pb-text disabled:opacity-50"
+          />
+          <button
+            onClick={onApply}
+            disabled={saving || !input}
+            className="font-mono text-[9px] uppercase tracking-wide2 text-pb-accent hover:underline disabled:opacity-50"
+          >
+            Apply
+          </button>
+          <button
+            onClick={onCancel}
+            disabled={saving}
+            className="font-mono text-[9px] uppercase tracking-wide2 text-pb-faint hover:underline disabled:opacity-50"
+          >
+            Cancel
+          </button>
+        </>
+      ) : (
+        <>
+          <span className="font-mono text-[10px] text-pb-dim">
+            {countingSince
+              ? <>Counting since <span data-testid="counting-since-value" className="text-pb-text">{fmtTime(countingSince)}</span></>
+              : 'Counting since launch (no reset)'}
+          </span>
+          <button
+            onClick={onOpen}
+            disabled={saving}
+            className="font-mono text-[9px] uppercase tracking-wide2 text-pb-faint hover:text-pb-text hover:underline disabled:opacity-50"
+          >
+            Reset from&hellip;
+          </button>
+          {countingSince && (
+            <button
+              onClick={onClear}
+              disabled={saving}
+              className="font-mono text-[9px] uppercase tracking-wide2 text-pb-faint hover:text-red-300 hover:underline disabled:opacity-50"
+            >
+              Clear
+            </button>
+          )}
+        </>
+      )}
+      <span className="font-mono text-[9px] text-pb-faintest">
+        Spend and Meta&rsquo;s figures start here. Trial signups always count every real registration.
+      </span>
+    </div>
+  )
+}
+
+function TabBar({ tabs, value, onChange }) {
+  return (
+    <div role="tablist" className="inline-flex flex-wrap rounded border border-pb-hairline overflow-hidden">
+      {tabs.map((t) => (
+        <button
+          key={t.key}
+          role="tab"
+          aria-selected={value === t.key}
+          data-testid={`demand-tab-${t.key}`}
+          onClick={() => onChange(t.key)}
+          className={`px-2.5 py-1 font-mono text-[10px] uppercase tracking-wide2 ${
+            value === t.key ? 'bg-pb-accent text-white' : 'text-pb-dim hover:bg-pb-surface2'
+          }`}
+        >
+          {t.label}{t.count != null && <span className="opacity-70"> {t.count}</span>}
+        </button>
+      ))}
+    </div>
   )
 }
 
@@ -741,12 +941,20 @@ function StreamCard({ stream, children }) {
   )
 }
 
-// Per-creative results keyed on utm_content — the identifier that outlives the
+// Per-creative results keyed on utm_content, the identifier that outlives the
 // ad it was built on, so a creative can be compared across a rebuild in Ads
 // Manager and across campaigns. Each row keeps its two result counts apart.
-function CreativeTable({ creatives }) {
+//
+// Converted and ROAS are joined in from the signups report by the same tag, so
+// the table says which creative produces PAYING clubs, not just sign-ups. ROAS
+// is paid clubs x the trial's value over the creative's own spend, so a
+// creative that has not converted anyone yet reads 0.00x, not a dash.
+function CreativeTable({ creatives, ads, signupRows, unit }) {
   const rows = (creatives || []).filter((c) => c.spend > 0 || c.results > 0)
   if (!rows.length) return null
+  const convertedMap = Array.isArray(signupRows) ? convertedByCreative(signupRows) : null
+  const unmapped = unmappedAds(ads)
+  const unmappedSpend = unmapped.reduce((n, a) => n + (a.spend || 0), 0)
   return (
     <div data-testid="creative-table" className="pb-card p-4 mb-4">
       <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint mb-3">
@@ -758,16 +966,20 @@ function CreativeTable({ creatives }) {
             <tr className="text-left font-mono text-[10px] tracking-wide2 uppercase text-pb-faint border-b pb-hairline">
               <th className="px-2 py-2">Creative</th>
               <th className="px-2 py-2">Sells</th>
-              <th className="px-2 py-2 text-right">Spend</th>
-              <th className="px-2 py-2 text-right">LPVs</th>
-              <th className="px-2 py-2 text-right">Trial signups</th>
-              <th className="px-2 py-2 text-right">Webinar regs</th>
-              <th className="px-2 py-2 text-right">Cost / result</th>
+              <th className="px-2 py-2 text-right" title="Meta-reported">Spend</th>
+              <th className="px-2 py-2 text-right" title="Meta-reported">LPVs</th>
+              <th className="px-2 py-2 text-right" title="Our tracking">Trial signups</th>
+              <th className="px-2 py-2 text-right" title="Our tracking">Webinar regs</th>
+              <th className="px-2 py-2 text-right" title="Spend divided by this creative's own results">Cost / result</th>
+              <th className="px-2 py-2 text-right" title="Our tracking: attributed clubs that now hold a paid module">Converted</th>
+              <th className="px-2 py-2 text-right" title={`Converted x A$${unit} over this creative's own spend`}>ROAS</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((c) => {
               const style = streamStyle(c.stream)
+              const converted = convertedMap ? (convertedMap[creativeKey(c.utm_content)] || 0) : null
+              const roas = converted != null && c.spend > 0 ? (converted * unit) / c.spend : null
               return (
                 <tr data-testid="creative-row" key={c.utm_content} className="border-b pb-hairline last:border-0 hover:bg-pb-surface2/40">
                   <td className="px-2 py-2 text-pb-text font-medium whitespace-nowrap">
@@ -786,18 +998,33 @@ function CreativeTable({ creatives }) {
                   <td className="px-2 py-2 text-right font-mono text-pb-text whitespace-nowrap">
                     {c.cost_per_result != null ? fmtMoney(c.cost_per_result) : '–'}
                   </td>
+                  <td data-testid="creative-converted" className="px-2 py-2 text-right font-mono text-pb-text">
+                    {converted == null ? '–' : converted > 0 ? <span className="text-emerald-400">{converted}</span> : 0}
+                  </td>
+                  <td data-testid="creative-roas" className="px-2 py-2 text-right font-mono text-pb-text whitespace-nowrap">
+                    {roas == null ? '–' : `${roas.toFixed(2)}x`}
+                  </td>
                 </tr>
               )
             })}
           </tbody>
         </table>
       </div>
+      {unmapped.length > 0 && (
+        <p data-testid="unmapped-ads" className="font-mono text-[9px] text-amber-300/80 mt-3 leading-relaxed">
+          {unmapped.length} ad{unmapped.length === 1 ? '' : 's'} ({fmtMoney(unmappedSpend)} spent) ha{unmapped.length === 1 ? 's' : 've'} no
+          utm_content on record: {unmapped.map((a) => a.name).join(', ')}. Their spend sits in the
+          &ldquo;{NO_TAG}&rdquo; row, and their signups file under whatever tag the ad&rsquo;s URL carries,
+          so neither Converted nor ROAS can be read per ad until each ad&rsquo;s tag is added to AD_DESTINATIONS.
+        </p>
+      )}
       <p className="font-mono text-[9px] text-pb-faintest mt-3">
-        Spend is Meta&rsquo;s, per ad, mapped to the creative tag on its destination URL. The two result
-        columns are ours, counted from the tag on the registration itself &mdash; kept apart because a
+        Spend and LPVs are Meta-reported, per ad, mapped to the creative tag on its destination URL. The result
+        columns are our tracking, counted from the tag on the registration itself, and kept apart because a
         trial signup and a webinar registration are not the same result. &ldquo;Cost / result&rdquo; divides
-        a creative&rsquo;s own spend by its own results; a creative selling both is rare and reads as the
-        blend of the two, so compare within a stream rather than across.
+        a creative&rsquo;s own spend by its own results, so compare within a stream rather than across.
+        Converted counts clubs that now hold a paid module, and ROAS values each at A${unit} (the trial&rsquo;s
+        value; webinar registrations are never valued).
       </p>
     </div>
   )
@@ -831,6 +1058,8 @@ export default function SuperMetaAds() {
   const [trendDays, setTrendDays] = useState(14)
   const [selectedAdId, setSelectedAdId] = useState(null)
   const [showAllInsights, setShowAllInsights] = useState(false)
+  const [demandTab, setDemandTab] = useState('funnel')
+  const [showCharts, setShowCharts] = useState(false)
 
   const [campaigns, setCampaigns] = useState([])
   const [activeCampaignId, setActiveCampaignId] = useState('')
@@ -1032,68 +1261,9 @@ export default function SuperMetaAds() {
           <span className="text-sm text-pb-dim">&middot; ~{lengthDays} days from launch</span>
           {switchingCampaign && <span className="font-mono text-[10px] text-pb-faint">switching&hellip;</span>}
         </div>
-        <div className="flex flex-wrap items-center gap-2 mt-1.5">
-          {editingSince ? (
-            <>
-              <input
-                type="datetime-local"
-                value={sinceInput}
-                onChange={(e) => setSinceInput(e.target.value)}
-                disabled={savingSince}
-                className="bg-pb-surface2 border border-pb-hairline rounded px-2 py-1 font-mono text-[10px] text-pb-text disabled:opacity-50"
-              />
-              <button
-                onClick={applySince}
-                disabled={savingSince || !sinceInput}
-                className="font-mono text-[9px] uppercase tracking-wide2 text-pb-accent hover:underline disabled:opacity-50"
-              >
-                Apply
-              </button>
-              <button
-                onClick={() => setEditingSince(false)}
-                disabled={savingSince}
-                className="font-mono text-[9px] uppercase tracking-wide2 text-pb-faint hover:underline disabled:opacity-50"
-              >
-                Cancel
-              </button>
-            </>
-          ) : (
-            <>
-              <span
-                className="font-mono text-[10px] text-pb-faint"
-                title="Excludes earlier data from the funnel/table numbers and Meta's own insights — never from Free trial registrations, which always counts every real completed registration."
-              >
-                {summary?.counting_since
-                  ? <>Counting since {fmtTime(summary.counting_since)}</>
-                  : 'Counting since launch (no reset)'}
-              </span>
-              <button
-                onClick={openSinceEditor}
-                disabled={savingSince}
-                className="font-mono text-[9px] uppercase tracking-wide2 text-pb-faint hover:text-pb-text hover:underline disabled:opacity-50"
-              >
-                Reset from&hellip;
-              </button>
-              {summary?.counting_since && (
-                <button
-                  onClick={clearSince}
-                  disabled={savingSince}
-                  className="font-mono text-[9px] uppercase tracking-wide2 text-pb-faint hover:text-red-300 hover:underline disabled:opacity-50"
-                >
-                  Clear
-                </button>
-              )}
-            </>
-          )}
-        </div>
-        {tokenHealth && (
-          <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-            <TokenChip label="Ads token" t={tokenHealth.ads} warnWithin={tokenHealth.warn_within_days} />
-            <TokenChip label="CAPI token" t={tokenHealth.capi} warnWithin={tokenHealth.warn_within_days} />
-          </div>
-        )}
       </div>
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <TokenPill health={tokenHealth} />
         <span className="font-mono text-[10px] text-pb-faint">
           Last updated {fmtTime(summary?.last_updated)}
         </span>
@@ -1133,6 +1303,21 @@ export default function SuperMetaAds() {
   // a date the chart may not hold.
   const provisionalFrom = history.find((d) => d.provisional)?.date || null
   const trialStream = streams.find((s) => s.stream === 'trial')
+  const webinarStream = streams.find((s) => s.stream === 'webinar')
+  const signupRows = adSignups ? adSignups.rows : null
+  const kpis = computeKpis({
+    trialStream, webinarStream, campaign, signupRows, countingSince: summary?.counting_since,
+  })
+  const hasFunnel = !!registrationFunnel?.some((st) => st.value > 0)
+  const hasSelected = !!selectedClubs && (selectedClubs.clubs.length > 0 || selectedClubs.anonymous > 0
+    || (selectedClubs.hidden_count || 0) > 0)
+  const hasSearched = !!searchedClubs && (searchedClubs.clubs.length > 0 || (searchedClubs.hidden_count || 0) > 0)
+  const demandTabs = [
+    { key: 'funnel', label: 'Wizard funnel' },
+    { key: 'searched', label: 'Clubs searched', count: searchedClubs ? searchedClubs.identified : null },
+    { key: 'selected', label: 'Clubs selected', count: selectedClubs ? selectedClubs.identified : null },
+    { key: 'traffic', label: 'Where Meta clicks land', count: null },
+  ]
   const maxCostPerLpv = ads.reduce((m, a) => (a.cost_per_lpv != null && a.cost_per_lpv > m ? a.cost_per_lpv : m), 0)
 
   return (
@@ -1143,6 +1328,18 @@ export default function SuperMetaAds() {
         {error && (
           <p className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3 mb-4">{error}</p>
         )}
+
+        <CountingSince
+          countingSince={summary?.counting_since}
+          editing={editingSince}
+          input={sinceInput}
+          setInput={setSinceInput}
+          saving={savingSince}
+          onOpen={openSinceEditor}
+          onApply={applySince}
+          onCancel={() => setEditingSince(false)}
+          onClear={clearSince}
+        />
 
         {!tokenConfigured ? (
           <div className="pb-card p-8 text-center">
@@ -1164,6 +1361,8 @@ export default function SuperMetaAds() {
           </div>
         ) : (
           <>
+            <KpiStrip kpis={kpis} signupsLoaded={!!adSignups} />
+
             {/* Headlines — short, worst-first, only fires on something worth
                 a glance. Capped so this stays a quick scan, not a report. */}
             {insights.length > 0 && (
@@ -1187,21 +1386,23 @@ export default function SuperMetaAds() {
               </div>
             )}
 
-            {/* Campaign-wide delivery. These three are genuinely whole-campaign
-                figures — money out, and how far it reached — so they carry no
-                stream split. Every RESULT figure does, in the row below. */}
+            {/* Campaign-wide delivery, all Meta-reported. Whole-campaign figures
+                (money out, and how far it reached), so no stream split. Spend
+                itself is the first tile of the strip above; this keeps the
+                plan it is measured against. Every RESULT figure is split by
+                stream, in the cards below. */}
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-2">
               <Stat
-                label="Spend (both products)"
-                value={fmtMoney(campaign.spend)}
-                hint={`of ${fmtMoney(budget)} · ${Math.min(100, Math.round((campaign.spend / budget) * 100))}%`}
+                label="Budget used (Meta-reported)"
+                value={`${Math.min(100, Math.round((campaign.spend / budget) * 100))}%`}
+                hint={`${fmtMoney(campaign.spend)} of ${fmtMoney(budget)} plan`}
               />
               <Stat
-                label="Cost per LPV (both)"
+                label="Cost per LPV (Meta-reported, both)"
                 value={campaign.cost_per_lpv != null ? fmtMoney(campaign.cost_per_lpv) : '–'}
               />
               <Stat
-                label="Landing page views"
+                label="Landing page views (Meta-reported)"
                 value={fmtNum(campaign.landing_page_views)}
                 hint={`${fmtNum(campaign.link_clicks)} link clicks`}
               />
@@ -1326,9 +1527,20 @@ export default function SuperMetaAds() {
               </div>
             )}
 
+            {/* WHERE IT'S COMING FROM. The demand side, one block: where
+                visitors drop off in the wizard, which clubs they searched and
+                selected, and where Meta's clicks land. These used to compete
+                with the money figures at the top level of the page. */}
+            <div data-testid="demand-section" className="mt-6 mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint">
+                Where it&rsquo;s coming from
+              </div>
+              <TabBar tabs={demandTabs} value={demandTab} onChange={setDemandTab} />
+            </div>
+
             {/* Registration-wizard step breakdown — fills in the gap between
                 Meta's own Lead and CompleteRegistration events. */}
-            {registrationFunnel?.some((s) => s.value > 0) && (
+            {demandTab === 'funnel' && hasFunnel && (
               <div className="mb-4">
                 <FunnelChart
                   stages={registrationFunnel}
@@ -1340,8 +1552,7 @@ export default function SuperMetaAds() {
             {/* Which clubs are behind the "Club selected" count — named wherever
                 we can identify them (beacon metadata, Terms-step name, or a
                 completed registration). */}
-            {selectedClubs && (selectedClubs.clubs.length > 0 || selectedClubs.anonymous > 0
-                || (selectedClubs.hidden_count || 0) > 0) && (
+            {demandTab === 'selected' && hasSelected && (
               <div className="pb-card p-4 mb-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
                   <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint">
@@ -1429,8 +1640,7 @@ export default function SuperMetaAds() {
             {/* Clubs typed into the search box (results loaded) even when no
                 club was clicked — the interest signal one step before a
                 selection. "Searched only" = searched but never selected. */}
-            {searchedClubs && (searchedClubs.clubs.length > 0
-                || (searchedClubs.hidden_count || 0) > 0) && (
+            {demandTab === 'searched' && hasSearched && (
               <div className="pb-card p-4 mb-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
                   <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint">
@@ -1508,54 +1718,11 @@ export default function SuperMetaAds() {
               </div>
             )}
 
-            {/* Per-ad comparison, with click-to-drill-down trend */}
-            <div className="mb-4">
-              <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint mb-2">
-                Ad-by-ad performance
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {ads.map((ad) => (
-                  <AdCard
-                    key={ad.ad_id}
-                    ad={ad}
-                    maxCostPerLpv={maxCostPerLpv}
-                    selected={selectedAdId === ad.ad_id}
-                    onSelect={() => setSelectedAdId((cur) => (cur === ad.ad_id ? null : ad.ad_id))}
-                    trendDays={trendDays}
-                    annotations={annotations}
-                  />
-                ))}
-              </div>
-            </div>
-
-            {/* Trend charts — true daily figures (not cumulative-to-date), each on its own axis */}
-            <div className="mb-4">
-              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint">
-                  Trend {historyLoading && <span className="text-pb-faintest normal-case">loading&hellip;</span>}
-                </div>
-                <RangePicker value={trendDays} onChange={setTrendDays} />
-              </div>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                <TrendChart title="Spend per day" data={history} dataKey="spend" kind="bar" color="var(--pb-accent)" money={new Set(['spend'])} annotations={annotations} provisionalFrom={provisionalFrom} />
-                <TrendChart title="Link CTR per day" data={history} dataKey="link_ctr" kind="line" color="#3b82f6" annotations={annotations} provisionalFrom={provisionalFrom} />
-                <TrendChart title="Cost per LPV per day" data={history} dataKey="cost_per_lpv" kind="line" color="#f59e0b" money={new Set(['cost_per_lpv'])} annotations={annotations} provisionalFrom={provisionalFrom} />
-                <TrendChart title="Leads per day (Meta-reported)" data={history} dataKey="leads" kind="bar" color="#a78bfa" annotations={annotations} provisionalFrom={provisionalFrom} />
-              </div>
-              <ChartLegend
-                annotations={annotations}
-                days={history.map((d) => d.date)}
-                provisionalDays={provisionalDays}
-              />
-            </div>
-
-            <CreativeTable creatives={summary?.creatives} />
-
             {/* On-site attribution & conversion, from our own visit tracking rather than Meta's numbers */}
-            {attribution && (
+            {demandTab === 'traffic' && attribution && (
               <div className="pb-card p-4 mb-4">
                 <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint mb-3">
-                  On-site attribution, last {attribution.days} days
+                  On-site attribution, our own visit tracking, last {attribution.days} days
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 mb-4">
                   <Stat label="Meta visitors" value={fmtNum(attribution.meta.visitors)} hint="site-tracked, not Meta's own count" />
@@ -1614,13 +1781,76 @@ export default function SuperMetaAds() {
               </div>
             )}
 
+            {((demandTab === 'funnel' && !hasFunnel) || (demandTab === 'selected' && !hasSelected)
+              || (demandTab === 'searched' && !hasSearched) || (demandTab === 'traffic' && !attribution)) && (
+              <p data-testid="demand-empty" className="text-xs text-pb-faint mb-4">
+                Nothing recorded here yet for this campaign.
+              </p>
+            )}
+
+            {/* The ads: the table says which creative produces paying clubs, the
+                cards beneath carry each ad's Winner / Laggard status and the
+                click-to-drill-down trend. */}
+            <CreativeTable creatives={summary?.creatives} ads={ads} signupRows={signupRows} unit={kpis.unit} />
+
+            <div className="mb-4">
+              <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint mb-2">
+                Ad-by-ad performance
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {ads.map((ad) => (
+                  <AdCard
+                    key={ad.ad_id}
+                    ad={ad}
+                    maxCostPerLpv={maxCostPerLpv}
+                    selected={selectedAdId === ad.ad_id}
+                    onSelect={() => setSelectedAdId((cur) => (cur === ad.ad_id ? null : ad.ad_id))}
+                    trendDays={trendDays}
+                    annotations={annotations}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Trend charts — true daily figures (not cumulative-to-date), each on its own axis */}
+            <div className="mb-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint">
+                  Daily trends {showCharts && historyLoading && <span className="text-pb-faintest normal-case">loading&hellip;</span>}
+                </div>
+                <div className="flex items-center gap-2">
+                  {showCharts && <RangePicker value={trendDays} onChange={setTrendDays} />}
+                  <button
+                    data-testid="toggle-charts"
+                    onClick={() => setShowCharts((v) => !v)}
+                    className="px-2.5 py-1 rounded border border-pb-hairline font-mono text-[10px] uppercase tracking-wide2 text-pb-dim hover:bg-pb-surface2"
+                  >
+                    {showCharts ? 'Hide daily charts' : 'Show daily charts'}
+                  </button>
+                </div>
+              </div>
+              {showCharts && (<>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                <TrendChart title="Spend per day" data={history} dataKey="spend" kind="bar" color="var(--pb-accent)" money={new Set(['spend'])} annotations={annotations} provisionalFrom={provisionalFrom} />
+                <TrendChart title="Link CTR per day" data={history} dataKey="link_ctr" kind="line" color="#3b82f6" annotations={annotations} provisionalFrom={provisionalFrom} />
+                <TrendChart title="Cost per LPV per day" data={history} dataKey="cost_per_lpv" kind="line" color="#f59e0b" money={new Set(['cost_per_lpv'])} annotations={annotations} provisionalFrom={provisionalFrom} />
+                <TrendChart title="Leads per day (Meta-reported)" data={history} dataKey="leads" kind="bar" color="#a78bfa" annotations={annotations} provisionalFrom={provisionalFrom} />
+              </div>
+              <ChartLegend
+                annotations={annotations}
+                days={history.map((d) => d.date)}
+                provisionalDays={provisionalDays}
+              />
+              </>)}
+            </div>
+
             {/* Ad-driven self-serve signups joined to their engagement
                 score — which ads produced clubs that actually use the thing. */}
             {adSignups && (
               <div className="pb-card p-4 mb-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
                   <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint">
-                    Self-serve trial signups &rarr; lead score
+                    Signups: the attributable-revenue record (our tracking)
                   </div>
                   {/* Divided by the TRIAL stream's own spend, not the campaign's.
                       Using campaign spend here charged every trial signup with
@@ -1662,6 +1892,7 @@ export default function SuperMetaAds() {
                             <th className="px-2 py-2">Source</th>
                             <th className="px-2 py-2">Campaign / creative</th>
                             <th className="px-2 py-2">Modules</th>
+                            <th className="px-2 py-2">Paid?</th>
                             <th className="px-2 py-2 text-right">Lead score</th>
                           </tr>
                         </thead>
@@ -1688,6 +1919,22 @@ export default function SuperMetaAds() {
                                 {r.converted_to_paid
                                   ? <span className="text-emerald-400">{r.paid_modules.length} paid</span>
                                   : `${r.trial_modules.length} on trial`}
+                              </td>
+                              <td data-testid="signup-paid" className="px-2 py-2">
+                                {r.converted_to_paid ? (
+                                  <>
+                                    <span className="inline-block px-1.5 py-0.5 rounded-full border border-emerald-500/40 bg-emerald-500/15 text-emerald-300 font-mono text-[9px] uppercase">
+                                      Paid
+                                    </span>
+                                    {r.paid_modules.length > 0 && (
+                                      <div className="font-mono text-[9px] text-pb-faintest mt-0.5">{r.paid_modules.join(', ')}</div>
+                                    )}
+                                  </>
+                                ) : (
+                                  <span className="inline-block px-1.5 py-0.5 rounded-full border border-pb-hairline text-pb-faint font-mono text-[9px] uppercase">
+                                    Trial
+                                  </span>
+                                )}
                               </td>
                               <td className="px-2 py-2 text-right">
                                 {r.engagement_score == null ? (
