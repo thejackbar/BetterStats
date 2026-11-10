@@ -56,6 +56,7 @@ from app.services import email_service, meta_capi
 from app.services import module_subscriptions as mod_subs
 from app.services import platform_settings as ps
 from app.services import rate_limit
+from app.services import returning_club_followup
 from app.services.login_audit import client_ip
 from app.services.usage_tracker import record_event_bg
 
@@ -150,7 +151,7 @@ class TrackStepRequest(BaseModel):
 # when it finds itself on /trial. The page offers this request instead. It is
 # stored as a club_onboarding_requests row (so a failed email never loses it)
 # and emailed to these two people.
-TRIAL_EXTENSION_NOTIFY = ("jack@bettersports.com.au", "elton@bettersports.com.au")
+TRIAL_EXTENSION_NOTIFY = returning_club_followup.STAFF_NOTIFY   # one list for both
 # A paused club that asks gets this many days straight away, ONCE per club. The
 # row is saved with source 'trial_extension_granted' (a later ask is saved as a
 # plain 'trial_extension_request' and left for staff), which is also how "once"

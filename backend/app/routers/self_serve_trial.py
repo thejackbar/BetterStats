@@ -32,6 +32,7 @@ from app.services import password_policy
 from app.services import platform_settings as ps
 from app.services import playhq_client
 from app.services import rate_limit
+from app.services import returning_club_followup
 from app.services import self_serve_verification as verification
 from app.services.login_audit import client_ip
 from app.services.memberships import ensure_primary_admin
@@ -635,8 +636,8 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
     org_id = _parse_uuid(data.org_id)
     if not org_id:
         raise HTTPException(status_code=422, detail="Invalid club id — pick a club from the search results")
-    dup = await _reclaimable_existing(
-        db, await find_matching_organisation(db, org_id, data.name, include_archived=False))
+    matched = await find_matching_organisation(db, org_id, data.name, include_archived=False)
+    dup = await _reclaimable_existing(db, matched)
     if dup:
         admin_label = await _primary_admin_label(db, dup.id)
         raise HTTPException(status_code=409, detail={
@@ -668,6 +669,16 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
     password_errors = password_policy.password_errors(data.password, data.confirm_password)
     if password_errors:
         raise HTTPException(status_code=422, detail={"errors": password_errors})
+
+    # A club whose trial ended is being registered again. Read what it looked like (earlier
+    # admins, dates, modules) NOW: once the registration runs, the new admin is on the club and
+    # its trial rows are overwritten. None for an ordinary registration. Never blocks one.
+    try:
+        returning = await returning_club_followup.capture_before(db, matched)
+    except Exception:
+        logger.exception("self-serve registration: could not read the returning club's history")
+        await db.rollback()
+        returning = None
 
     # Every check passed. Create the account first (flush only, not committed
     # yet — see the atomicity caveat above): if this races against a
@@ -832,6 +843,18 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
             org_id=org.id, org_name=name, contact_name=user.display_name,
             email=email, phone=user.mobile_number or None, attribution=data.attribution,
         )
+        # Queued after the CRM sync above, which background tasks run in order, so the deal is
+        # there when this runs. Every returning club is flagged for a personal follow-up.
+        if returning is not None:
+            background_tasks.add_task(
+                returning_club_followup.run,
+                snapshot=returning,
+                registrant={"name": user.display_name or f"{user.first_name} {user.last_name}".strip(),
+                            "email": email, "phone": user.mobile_number or None},
+                visitor_id=getattr(data, "visitorId", None),
+                attribution=data.attribution,
+                registered_at=datetime.now(timezone.utc),
+            )
     except Exception:
         logger.error(
             "self-serve registration: club %s / user %s were created but "
