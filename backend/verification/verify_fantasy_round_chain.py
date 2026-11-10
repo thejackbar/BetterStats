@@ -181,5 +181,24 @@ check("each round is one week long", all((b - a).days <= 7 for a, b in rs[:-1]),
 check("the last round reaches the final second day", rs[-1][1] == chain[-1][1], str(rs[-1]))
 check("the first round starts on the first match day", rs[0][0] == d("2026-11-07"), str(rs[0]))
 
+print("\n-- 4. A round already scored is never re-cut (Gisborne, Nov 2026) --")
+# Gisborne's round 3 was scored as 13 to 31 Oct (18 days, a chain of bridged weeks). Cutting it now would give
+# the unscored round after it dates inside the scored one and score those games twice.
+gis = [(d("2026-10-13"), d("2026-10-13")), (d("2026-10-17"), d("2026-10-24")), (d("2026-10-24"), d("2026-10-31")),
+       (d("2026-10-31"), d("2026-10-31")), (d("2026-11-06"), d("2026-11-14")), (d("2026-11-14"), d("2026-11-21"))]
+frozen = [(d("2026-10-13"), d("2026-10-31"))]
+got = fe._group_rounds(gis, frozen)
+check("a scored 18 day round stays exactly as scored", got[0] == (d("2026-10-13"), d("2026-10-31")), str(got))
+check("no round after it starts inside it",
+      all(a > d("2026-10-31") for a, _b in got[1:]), str(got))
+check("without the frozen window the same draw is cut (so the protection is what holds it)",
+      fe._group_rounds(gis)[0] != (d("2026-10-13"), d("2026-10-31")), str(fe._group_rounds(gis)))
+chain2 = [(d("2026-11-07") + timedelta(days=7 * i), d("2026-11-14") + timedelta(days=7 * i)) for i in range(6)]
+got2 = fe._group_rounds(chain2, [(d("2026-11-07"), d("2026-11-14"))])
+check("a short scored round at the head of a long chain keeps its window and the rest is still cut weekly",
+      got2[0] == (d("2026-11-07"), d("2026-11-14")) and len(got2) >= 5 and all((b - a).days <= 7 for a, b in got2[1:-1]), str(got2))
+check("a scored round elsewhere does not stop a long chain being cut",
+      len(fe._group_rounds(chain2, [(d("2026-09-01"), d("2026-09-02"))])) == 6)
+
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)
