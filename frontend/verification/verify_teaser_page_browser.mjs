@@ -167,6 +167,7 @@ for (const [key, re] of Object.entries(SECTION_TITLES)) await section(`nav ${key
   const s = await textOf(sheet(page))
   ck(`${key}: opens a card that says what that section is, with the claim button`, re.test(s) && /Free trial, no card/.test(s) && /Claim Flemington Cricket Club on BetterCricket/.test(s) && !/Claim Flemington Cricket Club free/.test(s), s.slice(0, 160))
   ck(`${key}: the press is reported with that section`, events.some((e) => e.kind === 'tile' && e.section === key), JSON.stringify(events))
+  if (key === 'season') ck('season: the line under the title says "see the stats which apply"', /Pick any season and grade, and see the stats which apply\./.test(s) && !/figures for just that/.test(s), s)
   await ctx.close()
 })
 await section('block 2', async () => {
