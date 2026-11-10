@@ -1,23 +1,28 @@
-"""A fixture between two synced clubs is on BOTH clubs' fee lists.
+"""A game belongs to no club, so a fixture two synced clubs played is on BOTH fee lists.
 
-A game between two clubs that both sync BetterCricket is ONE ``games`` row owned
-by whichever club synced it first, so its grade, and the grade's season, are the
-other club's rows. ``recompute_fee_match_days`` read only games under the club's
-own season, so a club's half of every such fixture was left off its fee list.
-Reported case: Angus Castley (Applecross) played two games in Summer 2026/27,
-the 17 Oct one owned by Applecross and the 24 Oct one owned by North Perth, and
-the member page showed one match day while his profile held both.
+``games.grade_id`` points at the grade row of whichever club's sync created the
+game first, so the season that row hangs off says nothing about who played.
+``recompute_fee_match_days`` used to read only games under the club's own season
+row, so a club's half of every fixture another BetterCricket club had synced first
+was left off its fee list. Reported case: Angus Castley (Applecross) played two
+games in Summer 2026/27, 17 Oct under Applecross's season row and 24 Oct under
+North Perth's, and the member page showed one match day while his profile held both.
 
 Checks, against a real Postgres through ``recompute_fee_match_days``:
 
   * our own fixture is charged (unchanged),
-  * the other club's fixture that we played in is charged to our player,
-  * the opposition's player in a shared fixture is NOT enrolled in our club,
-  * a fixture we are not a side to is not charged even with our player named,
+  * a fixture under the other club's season row is charged to our player, with
+    NO ``home_org_id``/``away_org_id`` set on it (a game is not read through who synced it),
+  * the opposition's player in that fixture is NOT enrolled in our club,
+  * a game none of our players is in is not read at all,
   * another club's season of a different year is not read,
+  * a game lands in exactly ONE of the club's fee seasons: with two seasons in one
+    year, the CA season GUID decides; a season that fits both is left out, never
+    charged twice,
   * the club's own ``fee_format`` decides a foreign grade by name: our "Exclude"
     holds, and the other club's "Exclude" does not apply to us,
-  * a rerun adds nothing, and the OTHER club's own fee list is built the same way.
+  * a rerun adds and removes nothing, a paid row survives, and the other club's own
+    fee list is built the same way and never enrols our player.
 
 The control run (``--control``) puts the old own-season-only read back, so the
 checks that describe the fix must fail while the unchanged-behaviour checks pass.
@@ -101,61 +106,75 @@ async def main():
     d = lambda n: today - timedelta(days=n)  # noqa: E731
 
     ids = {k: uuid.uuid4() for k in (
-        "a", "b", "c", "sa", "sb", "sb_old", "sc",
-        "ga4", "gb4", "ga_jun", "gb_jun", "gb_wom", "gb_sen", "gb_old", "gc",
-        "own", "shared", "stranger_game", "jun", "wom", "sen", "old",
-        "p_a", "p_b", "p_a_stranger")}
+        "a", "b",
+        "sa", "sa_m", "sb", "sb_m", "sb_x", "sb_old",
+        "ga4", "ga_jun", "ga_m", "gb4", "gb_jun", "gb_wom", "gb_sen", "gb_m", "gb_x", "gb_old",
+        "own", "shared", "jun", "wom", "sen", "old", "masters", "ambiguous", "unrelated",
+        "p_a", "p_b")}
     async with async_session_maker() as db:
         db.add_all([
             Organisation(id=ids["a"], name="Applecross", slug="apple-sf", is_active=True),
             Organisation(id=ids["b"], name="North Perth", slug="np-sf", is_active=True),
-            Organisation(id=ids["c"], name="Somewhere Else", slug="else-sf", is_active=True),
         ])
         await db.flush()
         db.add_all([
-            Season(id=ids["sa"], organisation_id=ids["a"], name="Summer 2026/27", year=2026),
-            Season(id=ids["sb"], organisation_id=ids["b"], name="Summer 2026/27", year=2026),
-            Season(id=ids["sb_old"], organisation_id=ids["b"], name="Summer 2025/26", year=2025),
-            Season(id=ids["sc"], organisation_id=ids["c"], name="Summer 2026/27", year=2026),
+            # Applecross holds TWO seasons in 2026: the main one and a masters competition.
+            Season(id=ids["sa"], organisation_id=ids["a"], name="Summer 2026/27", year=2026,
+                   grassroots_id="CA-MAIN"),
+            Season(id=ids["sa_m"], organisation_id=ids["a"], name="Over 60s 2026", year=2026,
+                   grassroots_id="CA-MASTERS"),
+            # North Perth's rows of the same real-world seasons (its own per-club ids).
+            Season(id=ids["sb"], organisation_id=ids["b"], name="Summer 2026/27", year=2026,
+                   grassroots_id="CA-MAIN"),
+            Season(id=ids["sb_m"], organisation_id=ids["b"], name="Masters Summer", year=2026,
+                   grassroots_id="CA-MASTERS"),
+            # Matches neither by GUID nor name; only the year, which fits BOTH of ours.
+            Season(id=ids["sb_x"], organisation_id=ids["b"], name="Club Cup", year=2026,
+                   grassroots_id="CA-OTHER"),
+            Season(id=ids["sb_old"], organisation_id=ids["b"], name="Summer 2025/26", year=2025,
+                   grassroots_id="CA-OLD"),
         ])
         await db.flush()
         db.add_all([
-            # Applecross's own grades: Juniors is set to Exclude.
             Grade(id=ids["ga4"], season_id=ids["sa"], name="One Day Grade 4"),
             Grade(id=ids["ga_jun"], season_id=ids["sa"], name="Juniors", fee_format="exclude"),
-            # North Perth's rows of the same real-world season.
+            Grade(id=ids["ga_m"], season_id=ids["sa_m"], name="Over 60s"),
             Grade(id=ids["gb4"], season_id=ids["sb"], name="One Day Grade 4"),
             Grade(id=ids["gb_jun"], season_id=ids["sb"], name="Juniors"),
             Grade(id=ids["gb_wom"], season_id=ids["sb"], name="Womens"),
             # North Perth excludes this one; Applecross has no grade of that name.
             Grade(id=ids["gb_sen"], season_id=ids["sb"], name="Seniors B", fee_format="exclude"),
+            Grade(id=ids["gb_m"], season_id=ids["sb_m"], name="Over 60s"),
+            Grade(id=ids["gb_x"], season_id=ids["sb_x"], name="Cup"),
             Grade(id=ids["gb_old"], season_id=ids["sb_old"], name="One Day Grade 4"),
-            Grade(id=ids["gc"], season_id=ids["sc"], name="One Day Grade 4"),
             Player(id=ids["p_a"], organisation_id=ids["a"], name="Castley, Angus"),
             Player(id=ids["p_b"], organisation_id=ids["b"], name="Opposition, Olly"),
-            Player(id=ids["p_a_stranger"], organisation_id=ids["a"], name="Misfiled, Max"),
         ])
         await db.flush()
 
-        def game(key, grade, home, away, when):
+        def game(key, grade, when, sides=True):
+            # `sides=False` leaves home_org_id/away_org_id unset, as a row is until a club's
+            # own sync has touched it: the fee read must not depend on them.
             db.add(Game(id=ids[key], grade_id=ids[grade], played_at=when, home_team="H",
                         away_team="A", status="COMPLETED",
-                        home_org_id=ids[home], away_org_id=ids[away]))
+                        home_org_id=ids["b"] if sides else None,
+                        away_org_id=ids["a"] if sides else None))
 
-        game("own", "ga4", "a", "b", d(14))             # ours, we synced first
-        game("shared", "gb4", "b", "a", d(7))           # North Perth synced first
-        game("jun", "gb_jun", "b", "a", d(6))           # our own grade of that name is Exclude
-        game("wom", "gb_wom", "b", "a", d(5))           # no grade of ours: match format default
-        game("sen", "gb_sen", "b", "a", d(4))           # THEIR Exclude is not ours
-        game("old", "gb_old", "b", "a", d(400))         # a different year
-        game("stranger_game", "gc", "c", "b", d(3))     # we are not a side
+        game("own", "ga4", d(14))                       # under our season row
+        game("shared", "gb4", d(7), sides=False)        # under North Perth's row, no side ids
+        game("jun", "gb_jun", d(6))                     # our own grade of that name is Exclude
+        game("wom", "gb_wom", d(5))                     # no grade of ours: match format default
+        game("sen", "gb_sen", d(4))                     # THEIR Exclude is not ours
+        game("old", "gb_old", d(400))                   # a different year
+        game("masters", "gb_m", d(3))                   # the masters season, by CA GUID
+        game("ambiguous", "gb_x", d(2))                 # fits both of our 2026 seasons
+        game("unrelated", "gb4", d(8))                  # none of our players is in it
         await db.flush()
         await db.execute(text("UPDATE games SET innings_totals = CAST(:t AS JSONB)"), {"t": PLAYED})
-        for g in ("own", "shared", "jun", "wom", "sen", "old"):
+        for g in ("own", "shared", "jun", "wom", "sen", "old", "masters", "ambiguous"):
             db.add(GameAppearance(game_id=ids[g], player_id=ids["p_a"]))
             db.add(GameAppearance(game_id=ids[g], player_id=ids["p_b"]))
-        # Our player named in a game our club was not part of (bad data): never charged to us.
-        db.add(GameAppearance(game_id=ids["stranger_game"], player_id=ids["p_a_stranger"]))
+        db.add(GameAppearance(game_id=ids["unrelated"], player_id=ids["p_b"]))
         await db.commit()
 
     async def charged(org, season):
@@ -169,22 +188,54 @@ async def main():
         return {(r[0], r[1]) for r in rows}
 
     await recompute_fee_match_days(str(ids["a"]), str(ids["sa"]))
+    await recompute_fee_match_days(str(ids["a"]), str(ids["sa_m"]))
     got = await charged(ids["a"], ids["sa"])
-    games_for_angus = {g for g, p in got if p == ids["p_a"]}
-    check("our own fixture is charged", ids["own"] in games_for_angus)
-    check("the fixture North Perth owns is charged to our player", ids["shared"] in games_for_angus)
+    got_m = await charged(ids["a"], ids["sa_m"])
+    angus = {g for g, p in got if p == ids["p_a"]}
+    angus_m = {g for g, p in got_m if p == ids["p_a"]}
+
+    check("our own fixture is charged", ids["own"] in angus)
+    check("a fixture under the other club's season row is charged to our player, no side ids set",
+          ids["shared"] in angus)
     check("a foreign grade that OUR grade of that name excludes is not charged",
-          ids["jun"] in games_for_angus, False)
-    check("a foreign grade with no grade of ours falls back to the match format",
-          ids["wom"] in games_for_angus)
-    check("the other club's Exclude does not apply to us", ids["sen"] in games_for_angus)
-    check("another club's season of a different year is not read", ids["old"] in games_for_angus, False)
-    check("a fixture we are not a side to is not charged",
-          any(g == ids["stranger_game"] for g, p in got), False)
+          ids["jun"] in angus, False)
+    check("a foreign grade with no grade of ours falls back to the match format", ids["wom"] in angus)
+    check("the other club's Exclude does not apply to us", ids["sen"] in angus)
+    check("another club's season of a different year is not read", ids["old"] in angus, False)
     check("the opposition's player is not enrolled in our club",
-          any(p == ids["p_b"] for g, p in got), False)
-    check("our fee list holds exactly Angus's four charged games (not Juniors, not 2025)",
-          len(games_for_angus), 4)
+          any(p == ids["p_b"] for g, p in got | got_m), False)
+    check("our main season holds exactly Angus's four charged games", len(angus), 4)
+
+    # One game, one fee season.
+    check("the masters fixture is charged under the masters season", ids["masters"] in angus_m)
+    check("the masters fixture is NOT also charged under the main season", ids["masters"] in angus, False)
+    check("the main fixture is NOT also charged under the masters season",
+          bool({ids["shared"], ids["own"]} & angus_m), False)
+    check("a season that fits both of ours is charged under neither, never twice",
+          ids["ambiguous"] in angus or ids["ambiguous"] in angus_m, False)
+
+    # What the read returns: a game none of our players is in is not read at all.
+    async with async_session_maker() as db:
+        from app.models.db import Grade as G
+        grades = {g.id: g for g in (await db.execute(
+            select(G).where(G.season_id == ids["sa"]))).scalars().all()}
+        games, _ = await fees._season_games(db, ids["a"], ids["sa"], grades)
+    read = {g.id for g in games}
+    check("a game none of our players is in is not read", ids["unrelated"] in read, False)
+    check("(and the read does return the games we are in)", ids["own"] in read)
+
+    # The grade settings screen counts the same games the charge reads.
+    async with async_session_maker() as db:
+        from app.routers.fees import list_grades
+        club = await db.get(Organisation, ids["a"])
+        listed = await list_grades(season_id=str(ids["sa"]), _=None, club=club, db=db)
+    g4 = next(g for g in listed if g["name"] == "One Day Grade 4")
+    check("the grade screen counts our game and the one under the other club's row",
+          g4["games"], 2 if not CONTROL else 1)
+    # Shown under our own grades only: our game, the shared game and the Juniors game (our Juniors
+    # grade). Womens and Seniors B have no grade of ours to sit under; the unrelated game is not read.
+    check("(and it is exactly those: not the game none of ours is in)",
+          sum(g["games"] for g in listed), 3 if not CONTROL else 1)
 
     # A rerun adds nothing and removes nothing.
     again = await recompute_fee_match_days(str(ids["a"]), str(ids["sa"]))
@@ -205,15 +256,15 @@ async def main():
                          {"pid": paid_id, "g": ids["shared"]})
         await db.commit()
     await recompute_fee_match_days(str(ids["a"]), str(ids["sa"]))
-    check("a paid shared-game row survives a rebuild", ids["shared"] in
-          {g for g, p in await charged(ids["a"], ids["sa"]) if p == ids["p_a"]})
+    check("a paid shared-game row survives a rebuild",
+          ids["shared"] in {g for g, p in await charged(ids["a"], ids["sa"]) if p == ids["p_a"]})
 
-    # The same fixture, from the owner's side: North Perth charges ITS player, not ours.
+    # The other club, from its own side: charges ITS player, never ours.
     await recompute_fee_match_days(str(ids["b"]), str(ids["sb"]))
     gotb = await charged(ids["b"], ids["sb"])
-    check("the owner still charges its own player for the shared game",
+    check("the other club charges its own player for the same game",
           (ids["shared"], ids["p_b"]) in gotb)
-    check("the owner never enrolls our player", any(p == ids["p_a"] for g, p in gotb), False)
+    check("the other club never enrols our player", any(p == ids["p_a"] for g, p in gotb), False)
 
     print(f"\n{PASS} passed, {FAIL} failed" + (" (control run)" if CONTROL else ""))
     sys.exit(0 if (FAIL == 0 or CONTROL) else 1)

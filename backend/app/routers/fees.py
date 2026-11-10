@@ -286,14 +286,21 @@ async def list_grades(
     )
     # Per-grade format breakdown so the admin can see what each grade is before
     # tagging it (e.g. spotting which "One Day" grades are actually women's).
-    breakdown = (await db.execute(
-        select(Game.grade_id, Game.match_format, func.count(Game.id))
-        .join(Grade, Game.grade_id == Grade.id)
-        .where(Grade.season_id == season.id)
-        .group_by(Game.grade_id, Game.match_format)
-    )).all()
+    # The same games the charge reads (fee_service._season_games), so this screen
+    # cannot say a grade has fewer games than the member pages charge: a fixture
+    # another club synced first sits under that club's grade row and counts here
+    # under our own grade of the same name.
+    own_grades = {g.id: g for g in grades}
+    season_games, foreign_own_grade = await fee_service._season_games(db, club.id, season.id, own_grades)
+    counts: dict = {}
+    for game in season_games:
+        target = own_grades.get(game.grade_id) or foreign_own_grade.get(game.grade_id)
+        if target is None:
+            continue  # a foreign grade with no grade of ours to tag: nothing to show it under
+        k = (target.id, game.match_format)
+        counts[k] = counts.get(k, 0) + 1
     by_grade: dict = {}
-    for gid, mf, cnt in breakdown:
+    for (gid, mf), cnt in counts.items():
         by_grade.setdefault(gid, []).append({"match_format": mf or "Unknown", "games": cnt})
     return [
         {
