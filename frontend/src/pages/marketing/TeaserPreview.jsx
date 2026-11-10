@@ -345,7 +345,7 @@ export default function TeaserPreview({ capture = false }) {
   const { record, ladders_shown: ladders, club } = data
   const place = [club.suburb, club.state].filter(Boolean).join(', ')
   const short = name.replace(/ (Cricket )?Club$/i, '')
-  const ctaLabel = registered ? `Open ${name}'s site` : `Claim ${name} free`
+  const ctaLabel = registered ? `Open ${name}'s site` : `Claim ${name} on BetterCricket`
   const records = data.records || []
   const hasThird = records.length > 0 || fielding.length > 0
   const meta = [
@@ -500,7 +500,7 @@ export default function TeaserPreview({ capture = false }) {
                className="relative w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl border pb-hairline bg-pb-surface p-6 shadow-2xl">
             <h2 id="teaser-sheet-title" className="text-xl font-bold leading-snug">
               {registered ? `${name} is already on BetterCricket`
-                : info ? info.title(name) : `This is ${name}'s season. Make it yours.`}
+                : info ? info.title(name) : `This is ${name}'s site on BetterCricket. Claim it.`}
             </h2>
             {registered ? (
               <p className="mt-2 text-sm text-pb-dim">Open the club's own site to see every player, record and result.</p>
