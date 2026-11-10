@@ -31,6 +31,7 @@
 **B. A fixture belongs to both clubs**
 
 9. A CA match between two clubs that both sync is ONE `games` row. Its `grade_id`, so `season_id`, points at whichever club synced first. That club does not own it. Both clubs' scorecards hang off it and both clubs' stats must count and classify it.
+9a. Fees read it too: `services/fees._season_games` adds the club's half of a shared fixture to the fee season (see the fees guide, rule 19f). Reading only `Grade.season_id == own season` left a player's second game off their member page.
 10. Never decide "is this game ours" with `seasons.organisation_id`. Use `services/club_grades.club_game_sql`: `v_effective_games.organisation_id` is us OR we are `home_org_id`/`away_org_id` (migration 167, indexed). `aggregations._OURS_GAMES` and `records._OURS_GAMES` are that string; `aggregations._club_game_clause` is the player-scoped sibling (mirrors `iq_trends._ours_clause`). Use the shared string, not a hand-rolled OR (measured slower).
 11. Never classify a grade from a `grades` row your own club owns. `club_grade_rows` enumerates the club's grades PLUS every grade its games sit in, resolved to the club's answer by NAME through `grade_merge_logs`.
 12. A category filter is an exclusion, only as good as its enumeration: widen the enumeration, never relax the exclusion.

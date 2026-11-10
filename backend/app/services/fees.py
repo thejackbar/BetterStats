@@ -364,6 +364,90 @@ def fee_settled_before(now: datetime | None = None) -> date:
     return now.astimezone(FEE_TZ).date()
 
 
+async def _season_games(session, org_id, sid, grades: dict) -> tuple[list, dict]:
+    """Every game this club played in one fee season, and the fee override of any
+    grade row that is not the club's own.
+
+    A fixture between two clubs that BOTH sync BetterCricket is ONE ``games`` row,
+    owned by whichever club synced it first, so its grade (and the grade's season)
+    is the OTHER club's row. Reading only games under this club's own season rows
+    left the club's half of every such fixture off the fee list: Angus Castley
+    (Applecross, Oct 2026) played two One Day Grade 4 games, the 17 Oct one
+    under Applecross's own season and the 24 Oct one under North Perth's, and Fees
+    showed one match day. His 69* was on his profile all along.
+
+    So the games are: those under the club's own grades, plus games sitting under
+    another club's row of the SAME real-world season (``resolve_season_filter``,
+    the rule every season-scoped figure uses) that are this club's fixture
+    (it names the club as its home or away side, ``home_org_id``/``away_org_id``:
+    the owner arm of ``club_game_sql`` is the club's own season, read first).
+    ``games`` has no ``organisation_id`` column; that one is the view's. Whose
+    players are charged is still decided by the player's own organisation in the
+    caller, never by the game.
+
+    The club's own seasons are left exactly as they were (no alias or sibling
+    expansion), so nothing the club already has is added or lost.
+
+    The second value is ``{foreign grade id: fee_format}``. A ``fee_format`` is the
+    club's decision about its own grades ("Exclude" Juniors, women's rate), so a
+    foreign grade row never supplies one. The club's own grade of the same name
+    does (``grade_key``, folded through the club's grade merges, as
+    ``club_grade_rows`` does), and with no such grade the game falls back to its
+    match format.
+    """
+    from app.services.grade_labels import grade_alias_map, grade_key
+    from app.services.season_aliases import resolve_season_filter
+
+    own = (await session.execute(
+        select(Game).join(Grade, Game.grade_id == Grade.id).where(Grade.season_id == sid)
+    )).scalars().all()
+
+    shared_ids = await resolve_season_filter(session, org_id, str(sid), include_shared=True) or []
+    # Seasons the club does not own: its own rows were read above, unchanged.
+    foreign_season_ids = [
+        r[0] for r in (await session.execute(
+            text("SELECT id FROM seasons WHERE id = ANY(CAST(:ids AS uuid[]))"
+                 " AND organisation_id IS DISTINCT FROM CAST(:org AS UUID)"),
+            {"ids": shared_ids, "org": str(org_id)},
+        )).all()
+    ] if shared_ids else []
+    if not foreign_season_ids:
+        return list(own), {}
+
+    seen = {g.id for g in own}
+    extra_ids = [
+        r[0] for r in (await session.execute(
+            text("""
+                SELECT g.id FROM games g
+                  JOIN grades gr ON gr.id = g.grade_id
+                 WHERE gr.season_id = ANY(CAST(:sids AS uuid[]))
+                   AND (g.home_org_id = CAST(:org AS UUID) OR g.away_org_id = CAST(:org AS UUID))
+            """),
+            {"sids": foreign_season_ids, "org": str(org_id)},
+        )).all()
+    ]
+    extra_ids = [i for i in extra_ids if i not in seen]
+    if not extra_ids:
+        return list(own), {}
+    extra = (await session.execute(select(Game).where(Game.id.in_(extra_ids)))).scalars().all()
+
+    aliases = await grade_alias_map(session, org_id)
+
+    def key(name) -> str:
+        k = grade_key(name)
+        return aliases.get(k, k)
+
+    own_fee_by_key: dict = {}
+    for g in grades.values():
+        if (g.fee_format or "").strip():
+            own_fee_by_key.setdefault(key(g.name), g.fee_format)
+    foreign_grades = (await session.execute(
+        select(Grade).where(Grade.id.in_({g.grade_id for g in extra}))
+    )).scalars().all()
+    foreign_fee = {g.id: own_fee_by_key.get(key(g.name)) for g in foreign_grades}
+    return list(own) + list(extra), foreign_fee
+
+
 async def recompute_fee_match_days(organisation_id: str, season_id: str | None = None,
                                    dry_run: bool = False) -> dict:
     """Rebuild auto-derived match-day rows for one season.
@@ -399,17 +483,14 @@ async def recompute_fee_match_days(organisation_id: str, season_id: str | None =
                 await session.execute(select(Grade).where(Grade.season_id == sid))
             ).scalars().all()
         }
-        games = (
-            await session.execute(
-                select(Game).join(Grade, Game.grade_id == Grade.id).where(Grade.season_id == sid)
-            )
-        ).scalars().all()
+        games, foreign_fee_format = await _season_games(session, org_id, sid, grades)
 
         game_meta: dict = {}  # game_id -> (fee_format, default_days, played_at)
         settled_before = fee_settled_before()
         for g in games:
             grade = grades.get(g.grade_id)
-            ff, days = derive_fee_format(grade.fee_format if grade else None, g.match_format)
+            override = grade.fee_format if grade else foreign_fee_format.get(g.grade_id)
+            ff, days = derive_fee_format(override, g.match_format)
             if ff is None:
                 continue  # excluded grade
             if g.played_at is not None and g.played_at >= settled_before:
