@@ -225,6 +225,10 @@ async function open({ summary = SUMMARY, history = HISTORY, width = 1500 } = {})
   await page.locator('[data-testid="stream-card-trial"]')
     .waitFor({ state: 'visible', timeout: 15000 }).catch(() => {})
   await page.waitForTimeout(1200)
+  // The daily charts sit behind one toggle since the HQ cleanup. Open it so the
+  // chart markers below are measured; absent on the older page, so guarded.
+  const toggle = page.locator('[data-testid="toggle-charts"]')
+  if (await toggle.count()) { await toggle.first().click(); await page.waitForTimeout(800) }
   return { page, ctx, errors }
 }
 
