@@ -53,7 +53,7 @@ const OTHER = {
   dashboard: { title: () => 'A dashboard for every player', line: 'Each player gets their own page: availability, stats, fees and Fantasy.' },
   admin: { title: () => 'Run the club from one place', line: 'Set up the club, add your committee and manage the site.' },
   leaderboard: { title: () => 'The full leaderboard', line: 'Every batter, bowler and fielder, with filters for grade and match type.' },
-  season: { title: () => 'Every season, every grade', line: 'Pick any season and grade, and see the figures for just that.' },
+  season: { title: () => 'Every season, every grade', line: 'Pick any season and grade, and see the stats which apply.' },
 }
 
 function setRobots(content) {
