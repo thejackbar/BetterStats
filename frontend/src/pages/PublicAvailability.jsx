@@ -21,6 +21,7 @@ import CardsSummary from './playerhome/CardsSummary'
 import PlayerCardsApp from './playercards/PlayerCardsApp'
 import FantasyCard, { fmtLockShort, nextDeadline, ordinal } from './playerhome/FantasyCard'
 import PlayerHero from './playerhome/PlayerHero'
+import NetsToday, { netsSummary } from './playerhome/NetsToday'
 import SeasonDashboard from './playerhome/SeasonDashboard'
 import { Muted, Section, fmtShort, money } from './playerhome/ui'
 
@@ -404,7 +405,7 @@ const GREEN = 'var(--pb-positive)'
 
 // One line per section, from data the page already holds, shown even when the
 // section is closed. Left empty rather than made up when there is nothing true to say.
-function summaryFor(id, { me, data, ladder, cardsReady }) {
+function summaryFor(id, { me, data, ladder, cardsReady, nets }) {
   if (id === 'availability') {
     const n = unansweredNextWeek(me)
     if (n > 0) return { text: `${n} to answer`, tone: AMBER }
@@ -419,6 +420,9 @@ function summaryFor(id, { me, data, ladder, cardsReady }) {
   }
   if (!data) return {}
   if (id === 'selection') {
+    // Tonight's nets come first: it is the thing that is time sensitive.
+    const tonight = netsSummary(nets ?? data.nets)
+    if (tonight.text) return tonight
     const side = (data.selected || [])[0]
     if (side) return { text: `Selected ${fmtShort(side.date)} ${side.home_away === 'AWAY' ? 'at' : 'vs'} ${side.opponent_name || side.label || 'TBC'}`, tone: GREEN }
     return (data.modules || []).includes('selected') ? { text: 'Not selected yet' } : {}
@@ -465,6 +469,7 @@ function MyPage({ token, me, club, availability, onSwitch, prefetch }) {
   const [notice, setNotice] = useState(null) // {text, tone} after a save
   const [ranks, setRanks] = useState(null) // club ranks for the season shown; read once, when Stats opens
   const [cardsReady, setCardsReady] = useState(null) // packs to open, kept current as the player opens them
+  const [netsLive, setNetsLive] = useState(null) // tonight's nets, kept current by the nets card so the Selection header can say where you bat
   useEffect(() => {
     let alive = true
     // The first read is the one the page started with its other two; later reads are fresh.
@@ -562,12 +567,13 @@ function MyPage({ token, me, club, availability, onSwitch, prefetch }) {
       {/* items-start: opening one section never stretches the closed one beside it. */}
       <div className="grid gap-3 md:grid-cols-2 items-start" data-groups>
         {shown.map((g) => {
-          const { text, tone } = summaryFor(g.id, { me, data, ladder, cardsReady })
+          const { text, tone } = summaryFor(g.id, { me, data, ladder, cardsReady, nets: netsLive })
           return (
             <Group key={g.id} id={g.id} hideTitle={g.hideTitle}
               title={g.id === 'fantasy' && data?.fantasy?.name ? data.fantasy.name : g.title}
               summary={text} tone={tone} open={sections.isOpen(g.id)} onToggle={sections.toggle}>
               {g.id === 'availability' && availability({ selected: data?.selected || [] })}
+              {g.id === 'selection' && data && modules.includes('training') && <NetsToday token={token} initial={data.nets} onSessions={setNetsLive} />}
               {g.id === 'selection' && data && g.mods.some((m) => GLANCE.includes(m)) && <SelectionGlance data={data} modules={modules} />}
               {g.mods.filter((m) => !GLANCE.includes(m)).map(render)}
             </Group>

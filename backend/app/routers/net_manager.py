@@ -34,6 +34,14 @@ both on one screen is what a club reported back. `check_in_person` here is the
 one write behind both, and `public_net_checkin.py` puts it on a per-club link
 for the QR code on the fence so players check themselves in.
 
+TIME-SLOT (AUTO) SESSIONS. A session's `mode` is `manual` (the queue above) or
+`auto`: a grid of nets by time slots, planned in `slot_plan` and placed by
+`services/net_slots.py`. Each check-in is given a net (by squad) and the first
+slot that has not started; the coach can drag people between cells. The
+placement is stored (`net_key`, `slot_index`, `slot_manual`); every clock time,
+second-go cell and "does not fit" is derived on read. Same rule as the queue:
+every change is a small write that bumps `version`.
+
 All endpoints are scoped to the caller's club via get_current_club and gated by
 the MANAGE_SELECTIONS capability (same as the rest of BetterSelect), except the
 reads, which any club admin may open. The whole router sits behind
@@ -51,7 +59,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -72,6 +80,7 @@ from app.routers.availability import (
     DEFAULT_DORMANCY_MONTHS, active_self_service_players, club_player_roster,
     dormant_player_ids, phone_last4,
 )
+from app.services import net_slots
 
 router = APIRouter(prefix="/nets", tags=["net-manager"])
 
@@ -236,6 +245,9 @@ class SessionCreate(BaseModel):
     settings: Optional[dict] = None
     # The squads the session is for; omitted or empty = everyone.
     squad_team_ids: Optional[list[str]] = None
+    # 'manual' (default) or 'auto' (a grid of nets by time slots) and its plan.
+    mode: Optional[str] = None
+    slot_plan: Optional[dict] = None
 
 
 class SessionUpdate(BaseModel):
@@ -247,6 +259,31 @@ class SessionUpdate(BaseModel):
     # Sent to change it: an explicit null or empty list clears it (everyone),
     # while leaving it out leaves the session's squads alone.
     squad_team_ids: Optional[list[str]] = None
+    # Sent to switch how people are assigned to nets: 'manual' or 'auto'.
+    mode: Optional[str] = None
+
+
+class SlotPlanBody(BaseModel):
+    # Only what is sent changes (an explicit null clears finish_time).
+    first_time: Optional[str] = None
+    slot_minutes: Optional[int] = None
+    slot_overrides: Optional[dict] = None
+    finish_time: Optional[str] = None
+    second_go: Optional[bool] = None
+    pad_up_seconds: Optional[int] = None
+    tz_offset_minutes: Optional[int] = None
+    nets: Optional[list[dict]] = None
+
+
+class SlotTime(BaseModel):
+    slot_index: int
+    time: str
+
+
+class SlotMove(BaseModel):
+    attendee_id: str
+    net_id: str
+    slot_index: int
 
 
 class AttendeeAdd(BaseModel):
@@ -390,13 +427,31 @@ async def _live_payload(db: AsyncSession, s: NetSession) -> dict:
             # just tapped. Rows written before migration 272 read 'admin',
             # which is what they were.
             "source": r.source or "admin",
+            # Where they sit on an auto session's grid (null on a manual one).
+            "net_key": r.net_key,
+            "slot_index": r.slot_index,
+            "slot_manual": bool(r.slot_manual),
         })
 
     settings = _clean_settings(s.settings)
+    mode = s.mode or "manual"
+    plan = grid = None
+    if mode == "auto":
+        plan = _plan_of(s)
+        grid = net_slots.build_grid(
+            plan, s.session_date,
+            [{"id": str(r.id), "net_key": r.net_key, "slot_index": r.slot_index, "bats": bool(r.bats)}
+             for r in _creation_order(rows)],
+            _utcnow(),
+        )
     return {
         "id": str(s.id),
         "version": int(s.version or 0),
         "server_time": datetime.now(timezone.utc).isoformat(),
+        # 'manual' (queue and timer) or 'auto' (a grid of nets by time slots).
+        "mode": mode,
+        "slot_plan": plan,
+        "grid": grid,
         "session_date": s.session_date.isoformat() if s.session_date else None,
         "label": s.label,
         "notes": s.notes,
@@ -414,6 +469,68 @@ async def _live_payload(db: AsyncSession, s: NetSession) -> dict:
         "checkin_path": f"/nets-checkin/{s.checkin_token}" if s.checkin_token else None,
         "created_at": s.created_at.isoformat() if s.created_at else None,
     }
+
+
+def session_started(s: NetSession) -> bool:
+    """A time-slot session whose first slot has begun. Self check-in from a
+    player's own page is for BEFORE the nets start (it fills the grid ahead of
+    time); after that the coach and the QR code at the fence take late arrivals
+    into the next free slot. A queue session has no start time and never closes."""
+    return _is_auto(s) and net_slots.has_started(_plan_of(s), s.session_date, _utcnow())
+
+
+async def player_net_view(db: AsyncSession, s: NetSession, player_id) -> Optional[dict]:
+    """Where one player sits in a session, for their own page. None when they
+    are not checked in.
+
+    Time-slot session: their net, their slot's clock time (the club's wall
+    clock, as planned) and the absolute moment it starts, so their phone can say
+    "in 12 minutes" in its own timezone; plus any second-go times. Queue
+    session: how many are ahead of them and whether they are in the nets right
+    now. Nothing here leaks anyone else: the others only ever appear as counts.
+    """
+    rows = await _attendee_rows(db, s.id)
+    mine = next((r for r in rows if r.player_id == player_id), None)
+    if mine is None:
+        return None
+    out: dict = {"mode": s.mode or "manual", "bats": bool(mine.bats), "batted": bool(mine.batted)}
+    if _is_auto(s):
+        plan = _plan_of(s)
+        out.update({
+            "configured": net_slots.is_configured(plan), "net": None, "time": None, "start_at": None,
+            "slot_minutes": plan["slot_minutes"], "also": [], "fits": True,
+        })
+        net = next((n for n in plan["nets"] if n["id"] == mine.net_key), None)
+        first = net_slots.parse_hhmm(plan.get("first_time"))
+        if net and mine.bats and first is not None:
+            out["net"] = {"id": net["id"], "name": net["name"]}
+            if mine.slot_index is None:
+                out["fits"] = False
+            else:
+                out["time"] = net_slots.fmt_hhmm(net_slots.slot_starts(plan, mine.slot_index + 1)[mine.slot_index])
+                at = net_slots.slot_start_at(plan, s.session_date, mine.slot_index)
+                if at is not None:
+                    out["start_at"] = at.isoformat()
+                grid = net_slots.build_grid(
+                    plan, s.session_date,
+                    [{"id": str(r.id), "net_key": r.net_key, "slot_index": r.slot_index, "bats": bool(r.bats)}
+                     for r in _creation_order(rows)],
+                    _utcnow(),
+                )
+                gnet = next((n for n in grid["nets"] if n["id"] == net["id"]), None)
+                if gnet:
+                    out["also"] = [grid["times"][c["slot"]] for c in gnet["cells"]
+                                   if c["repeat"] and c["attendee_id"] == str(mine.id)]
+        return out
+    waiting = _waiting(rows)
+    pos = next((i for i, r in enumerate(waiting) if r.id == mine.id), None)
+    nets = _clean_settings(s.settings)["nets"]
+    out.update({
+        "position": (pos + 1) if pos is not None else None,
+        "ahead": pos, "waiting": len(waiting), "nets": nets,
+        "in_nets_now": pos is not None and pos < nets,
+    })
+    return out
 
 
 async def _club_squad_ids(db: AsyncSession, club_id, raw) -> Optional[list[uuid.UUID]]:
@@ -467,6 +584,152 @@ async def live_sessions(db: AsyncSession, club_id) -> list[NetSession]:
         .order_by(NetSession.session_date.asc(), NetSession.created_at.asc())
     )
     return list(res.scalars().all())
+
+
+def _utcnow() -> datetime:
+    """The clock for slot placement. One place, so a check can pin the time."""
+    return datetime.now(timezone.utc)
+
+
+def _is_auto(s: NetSession) -> bool:
+    return (s.mode or "manual") == "auto"
+
+
+def _plan_of(s: NetSession) -> dict:
+    return net_slots.clean_plan(s.slot_plan)
+
+
+async def _club_team_ids(db: AsyncSession, club_id) -> set[str]:
+    res = await db.execute(text("SELECT id FROM teams WHERE organisation_id = :org"), {"org": club_id})
+    return {str(r[0]) for r in res.fetchall()}
+
+
+async def _player_squads(db: AsyncSession, club_id, player_ids) -> dict:
+    """player id -> [(team id, sequence)] for the squads each is in."""
+    ids = [p for p in player_ids if p]
+    out: dict = {}
+    if not ids:
+        return out
+    res = await db.execute(
+        text(
+            "SELECT tm.player_id, tm.team_id, t.sequence FROM team_members tm "
+            "JOIN teams t ON t.id = tm.team_id "
+            "WHERE tm.organisation_id = :org AND tm.player_id = ANY(CAST(:ids AS uuid[]))"
+        ),
+        {"org": club_id, "ids": ids},
+    )
+    for pid, tid, seq in res.fetchall():
+        out.setdefault(pid, []).append((str(tid), seq))
+    return out
+
+
+def _creation_order(rows: list[NetAttendance]) -> list[NetAttendance]:
+    floor = datetime.min.replace(tzinfo=timezone.utc)
+    return sorted(rows, key=lambda r: (r.created_at or floor, r.position if r.position is not None else 0, str(r.id)))
+
+
+async def _replan(db: AsyncSession, s: NetSession, club_id) -> None:
+    """Make every batting attendee's place on the grid true to the plan, and
+    flush. Called after the plan changes, someone leaves or goes in or out of
+    the rotation.
+
+    It keeps what is still valid and moves only what is not: a person already
+    in a good cell stays in it (whether or not their slot has gone), someone a
+    coach dragged keeps their net while it exists, and anyone left with no cell
+    (a net removed, a squad moved to another net, a slot cut off by a new finish
+    time, or an empty cell opened by somebody leaving while they did not fit) is
+    placed again in check-in order, in a slot that has not started.
+    """
+    plan = _plan_of(s)
+    if not net_slots.is_configured(plan):
+        return
+    rows = _creation_order(await _attendee_rows(db, s.id))
+    squads = await _player_squads(db, club_id, [r.player_id for r in rows])
+    total = net_slots.slot_total(plan)
+    net_ids = {n["id"] for n in plan["nets"]}
+    occupied: dict[str, set[int]] = {nid: set() for nid in net_ids}
+
+    todo: list[tuple[NetAttendance, Optional[str]]] = []
+    for r in rows:
+        if not r.bats:
+            if r.net_key is not None or r.slot_index is not None or r.slot_manual:
+                r.net_key, r.slot_index, r.slot_manual = None, None, False
+            continue
+        ok = (
+            r.net_key in net_ids
+            and r.slot_index is not None
+            and (total is None or r.slot_index < total)
+            and r.slot_index not in occupied[r.net_key]
+        )
+        if ok and not r.slot_manual:
+            ok = net_slots.pick_net(plan, squads.get(r.player_id, []), r.player_id is None) == r.net_key
+        if ok:
+            occupied[r.net_key].add(r.slot_index)
+        else:
+            todo.append((r, r.net_key if (r.slot_manual and r.net_key in net_ids) else None))
+
+    # Two phases, so a person moving into a cell somebody else is leaving in the
+    # same flush cannot trip the one-person-per-cell index.
+    for r, _keep in todo:
+        r.net_key, r.slot_index = None, None
+    await db.flush()
+
+    min_idx = net_slots.first_open_slot(plan, s.session_date, _utcnow())
+    for r, keep_net in todo:
+        net = keep_net or net_slots.pick_net(plan, squads.get(r.player_id, []), r.player_id is None)
+        idx = net_slots.first_free(occupied[net], total, min_idx) if net else None
+        if net and idx is not None:
+            occupied[net].add(idx)
+        r.net_key, r.slot_index = net, idx
+        if keep_net is None:
+            r.slot_manual = False
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Someone changed the grid at the same moment. Try again.")
+
+
+async def _place_new(db: AsyncSession, s: NetSession, club_id, row: NetAttendance) -> None:
+    """Give a person who has just checked in to an auto session a net and the
+    first slot that has not started. Runs inside `check_in_person`.
+
+    The cell is written in a SAVEPOINT: two phones checking in at the same
+    moment can pick the same free slot, the unique index refuses the second,
+    and that one looks again rather than being mistaken for a repeat check-in.
+    """
+    plan = _plan_of(s)
+    if not net_slots.is_configured(plan):
+        return
+    row_id, pid, sid = row.id, row.player_id, s.id
+    squads = (await _player_squads(db, club_id, [pid])).get(pid, []) if pid else []
+    net = net_slots.pick_net(plan, squads, pid is None)
+    if net is None:
+        return                                  # no net will have them: shown as "not in a net"
+    total = net_slots.slot_total(plan)
+    min_idx = net_slots.first_open_slot(plan, s.session_date, _utcnow())
+    idx: Optional[int] = None
+    for _attempt in range(4):
+        res = await db.execute(
+            select(NetAttendance.slot_index).where(
+                NetAttendance.session_id == sid,
+                NetAttendance.net_key == net,
+                NetAttendance.slot_index.is_not(None),
+            )
+        )
+        idx = net_slots.first_free({x[0] for x in res.fetchall()}, total, min_idx)
+        try:
+            async with db.begin_nested():
+                await db.execute(
+                    update(NetAttendance).where(NetAttendance.id == row_id).values(net_key=net, slot_index=idx)
+                )
+            break
+        except IntegrityError:
+            idx = None
+            continue
+    else:
+        await db.execute(update(NetAttendance).where(NetAttendance.id == row_id).values(net_key=net, slot_index=None))
+    await db.refresh(row)
 
 
 async def check_in_person(
@@ -532,6 +795,8 @@ async def check_in_person(
         # answer as the check above: they're in, once.
         await db.rollback()
         return None
+    if _is_auto(s) and row.bats:
+        await _place_new(db, s, club_id, row)
     return row
 
 
@@ -656,6 +921,7 @@ async def list_sessions(
             "session_date": s.session_date.isoformat() if s.session_date else None,
             "label": s.label,
             "status": s.status,
+            "mode": s.mode or "manual",
             "attendee_count": total,
             "batted_count": batted,
             "created_at": s.created_at.isoformat() if s.created_at else None,
@@ -673,6 +939,7 @@ async def create_session(
     """Open a new net session. Seeds its timer settings from the club default
     (or the supplied override), so the manager can just hit Start."""
     seed = _clean_settings(body.settings if body.settings is not None else club.net_settings)
+    auto = (body.mode or "manual") == "auto"
     s = NetSession(
         id=uuid.uuid4(),
         organisation_id=club.id,
@@ -687,6 +954,8 @@ async def create_session(
         # people into this session only.
         checkin_token=new_checkin_token(),
         squad_team_ids=await _club_squad_ids(db, club.id, body.squad_team_ids),
+        mode="auto" if auto else "manual",
+        slot_plan=(net_slots.clean_plan(body.slot_plan, await _club_team_ids(db, club.id)) if auto else None),
     )
     db.add(s)
     await db.commit()
@@ -748,6 +1017,13 @@ async def update_session(
         s.notes = body.notes or None
     if "squad_team_ids" in body.model_fields_set:
         s.squad_team_ids = await _club_squad_ids(db, club.id, body.squad_team_ids)
+    if body.mode in ("manual", "auto") and body.mode != (s.mode or "manual"):
+        s.mode = body.mode
+        if body.mode == "auto":
+            if s.slot_plan is None:
+                s.slot_plan = net_slots.default_plan()
+            await db.flush()
+            await _replan(db, s, club.id)
     if body.settings is not None:
         settings = _clean_settings(body.settings)
         s.settings = settings
@@ -877,6 +1153,9 @@ async def remove_attendee(
     await db.delete(r)
     await db.flush()
     await _renumber(db, s.id)
+    if _is_auto(s):
+        # Their cell is free now: anyone who did not fit can have it.
+        await _replan(db, s, club.id)
     return await _commit_live(db, s)
 
 
@@ -941,6 +1220,151 @@ async def patch_attendee(
     if changed:
         await db.flush()
         await _renumber(db, s.id)
+        if _is_auto(s):
+            # In or out of the rotation changes whether they hold a cell.
+            await _replan(db, s, club.id)
+    return await _commit_live(db, s)
+
+
+@router.put("/sessions/{session_id}/plan")
+async def put_slot_plan(
+    session_id: str,
+    body: SlotPlanBody,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_any_cap(SELECT_NETS, MANAGE_SELECTIONS)),
+):
+    """Save the grid's plan: first net time, slot length, finish time, second go
+    and which nets take which squads.
+
+    Only what is sent changes (an explicit null clears the finish time), then
+    everyone already checked in is re-checked against the new plan: valid
+    places stay, the rest are placed again. Nothing is deleted.
+    """
+    club_id = club.id
+    s = await _owned_session(db, session_id, club_id)
+    if not _is_auto(s):
+        raise HTTPException(status_code=409, detail="This session is not set to run in time slots.")
+    merged = _plan_of(s)
+    sent = body.model_fields_set
+    for key in ("first_time", "slot_minutes", "slot_overrides", "finish_time", "second_go", "pad_up_seconds", "tz_offset_minutes", "nets"):
+        if key in sent:
+            merged[key] = getattr(body, key)
+    if "slot_minutes" in sent and "slot_overrides" not in sent and body.slot_minutes != _plan_of(s)["slot_minutes"]:
+        # A new standard slot length starts the night afresh: the slots a coach
+        # had stretched were stretched relative to the old one.
+        merged["slot_overrides"] = {}
+    s.slot_plan = net_slots.clean_plan(merged, await _club_team_ids(db, club_id))
+    await db.flush()
+    await _replan(db, s, club_id)
+    return await _commit_live(db, s)
+
+
+@router.post("/sessions/{session_id}/slot-time")
+async def set_slot_time(
+    session_id: str,
+    body: SlotTime,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_any_cap(SELECT_NETS, MANAGE_SELECTIONS)),
+):
+    """Change the time a slot starts. Every later time moves with it.
+
+    Fewer players than expected? Set the second row's time later and the first
+    slot runs longer; everyone below keeps their place and their time shifts. The
+    first row is the first net time. Anyone pushed past the finish by a later
+    start is flagged, not dropped.
+    """
+    club_id = club.id
+    s = await _owned_session(db, session_id, club_id)
+    if not _is_auto(s):
+        raise HTTPException(status_code=409, detail="This session is not set to run in time slots.")
+    plan = _plan_of(s)
+    if not net_slots.is_configured(plan):
+        raise HTTPException(status_code=409, detail="Set up the nets first.")
+    try:
+        s.slot_plan = net_slots.set_slot_time(plan, body.slot_index, body.time)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    await db.flush()
+    await _replan(db, s, club_id)
+    return await _commit_live(db, s)
+
+
+@router.post("/sessions/{session_id}/slots")
+async def move_slot(
+    session_id: str,
+    body: SlotMove,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_any_cap(SELECT_NETS, MANAGE_SELECTIONS)),
+):
+    """Put one person in a chosen cell of a chosen net.
+
+    An empty cell just takes them. An occupied cell SWAPS: the person there goes
+    to the cell the mover left (or, if the mover had none, to the first free
+    slot in that net). Anyone moved by hand is `slot_manual`, so a later re-plan
+    leaves them where they were put. Dropping a person who was not batting into
+    a cell puts them back in the rotation.
+    """
+    club_id = club.id
+    s = await _owned_session(db, session_id, club_id)
+    if not _is_auto(s):
+        raise HTTPException(status_code=409, detail="This session is not set to run in time slots.")
+    plan = _plan_of(s)
+    if body.net_id not in {n["id"] for n in plan["nets"]}:
+        raise HTTPException(status_code=422, detail="That net is not in this session.")
+    total = net_slots.slot_total(plan)
+    if body.slot_index < 0 or (total is not None and body.slot_index >= total):
+        raise HTTPException(status_code=422, detail="That slot is outside the session.")
+    r = await _owned_attendee(db, s, body.attendee_id)
+    sid, rid = s.id, r.id
+
+    occ_res = await db.execute(
+        select(NetAttendance).where(
+            NetAttendance.session_id == sid,
+            NetAttendance.net_key == body.net_id,
+            NetAttendance.slot_index == body.slot_index,
+        )
+    )
+    occupant = occ_res.scalar_one_or_none()
+    if occupant is not None and occupant.id == rid:
+        return await _live_payload(db, s)            # dropped back where they were
+
+    old_net, old_slot = r.net_key, r.slot_index
+    r.bats = True
+    r.slot_manual = True
+    try:
+        if occupant is None:
+            r.net_key, r.slot_index = body.net_id, body.slot_index
+            await db.flush()
+        else:
+            r.net_key, r.slot_index = None, None
+            await db.flush()
+            if old_net is not None and old_slot is not None:
+                occupant.net_key, occupant.slot_index = old_net, old_slot
+            else:
+                occupant.net_key, occupant.slot_index = body.net_id, None
+                await db.flush()
+                taken = await db.execute(
+                    select(NetAttendance.slot_index).where(
+                        NetAttendance.session_id == sid,
+                        NetAttendance.net_key == body.net_id,
+                        NetAttendance.slot_index.is_not(None),
+                    )
+                )
+                used = {x[0] for x in taken.fetchall()} | {body.slot_index}
+                occupant.slot_index = net_slots.first_free(
+                    used, total, net_slots.first_open_slot(plan, s.session_date, _utcnow())
+                )
+            occupant.slot_manual = True
+            await db.flush()
+            r.net_key, r.slot_index = body.net_id, body.slot_index
+            await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Someone changed the grid at the same moment. Try again.")
+    s = await _owned_session(db, session_id, club_id)
     return await _commit_live(db, s)
 
 

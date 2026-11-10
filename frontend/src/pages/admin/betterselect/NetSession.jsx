@@ -16,13 +16,14 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import SessionLinkModal from './SessionLinkModal'
+import NetGrid from './NetGrid'
 import BetterSelectLayout from '../../../components/admin/BetterSelectLayout'
 import { useAuth } from '../../../contexts/AuthContext'
 import { useToast } from '../../../contexts/ToastContext'
 import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
 import { PbSpinner } from '../../../lib/presskit'
-import { Icon, Btn, Avatar, RoleChips, Search, Empty, NumText, usePref, Chip } from './ui'
+import { Icon, Btn, Avatar, RoleChips, Search, Empty, NumText, usePref, Chip, Segmented } from './ui'
 import { useDragOrder } from './dragOrder'
 
 const POLL_MS = 2500
@@ -395,6 +396,19 @@ export default function NetSession() {
     } finally { setEnding(false) }
   }
 
+  // Switch how this night is run. Nothing is deleted either way: the queue order
+  // and the grid are both kept, so switching back picks up where each left off.
+  const switchMode = async (next) => {
+    if (!live || next === (live.mode || 'manual')) return
+    const n = attendees.length
+    const msg = next === 'auto'
+      ? (n > 0 ? `Switch to time slots? The ${n} ${n === 1 ? 'person' : 'people'} checked in will be placed in nets by squad. The batting queue is kept if you switch back.` : null)
+      : 'Go back to the batting queue? The grid is kept if you switch to time slots again.'
+    if (msg && !window.confirm(msg)) return
+    await act(() => api.nmUpdateSession(id, { mode: next }))
+    toast.success(next === 'auto' ? 'Now running in time slots' : 'Back to the batting queue')
+  }
+
   const reopenSession = async () => {
     setEnding(true)
     try {
@@ -499,6 +513,14 @@ export default function NetSession() {
               </Btn>
             )}
             <Btn variant="ghost" sm icon="download" href={api.nmSessionCsvUrl(id)} title="Download the attendance list for this session">List</Btn>
+            <Btn variant="ghost" sm icon="sheet" href={`/admin/betterselect/nets/${id}/print`} target="_blank" data-print-btn
+              title="Open a one-page sheet to print">Print</Btn>
+            {canEdit && !ended && (
+              <span data-mode-switch title="How people are given nets tonight">
+                <Segmented sm value={live.mode || 'manual'} onChange={switchMode}
+                  options={[{ value: 'manual', label: 'Queue' }, { value: 'auto', label: 'Time slots' }]} />
+              </span>
+            )}
             {canEdit && !ended && (
               <>
                 <Btn variant="primary" icon="plus" onClick={() => { unlockAudio(); setCheckInOpen(true) }}>Check in players</Btn>
@@ -517,6 +539,11 @@ export default function NetSession() {
           </div>
         </div>
 
+        {/* A time-slot session is a grid of nets, not a queue and a timer. */}
+        {live.mode === 'auto' ? (
+          <NetGrid live={live} canEdit={canEdit} ended={ended} squads={squads} act={act} id={id} holdPoll={dragActive} skewRef={skewRef}
+            beep={beep} soundOn={soundOn} onToggleSound={canEdit ? () => { unlockAudio(); patchSettings({ sound: !settings.sound }) } : undefined} />
+        ) : (<>
         {/* Timer hero */}
         <div className="pb-card overflow-hidden" style={{ borderColor: activeTone ? `color-mix(in srgb, ${timerColor} 45%, transparent)` : undefined }}>
           <div className="px-6 py-6 flex flex-col items-center text-center"
@@ -714,6 +741,7 @@ export default function NetSession() {
             )}
           </div>
         </div>
+        </>)}
       </div>
 
       {checkInOpen && (

@@ -405,7 +405,10 @@ async def sync_fixtures(
 
     Upserts on (organisation_id, playhq_id) so re-running is idempotent and two
     clubs that play each other keep separate rows. The Grassroots source already
-    returns only upcoming/live matches dated today-or-later. (``playhq_id`` is the
+    returns upcoming/live matches dated today-or-later, plus the games CA has
+    already completed this season: a club that connects part way through the
+    season has rounds already played that were never "upcoming" to us, and
+    voting reads played fixtures from this table. (``playhq_id`` is the
     upstream match id — now the GR match GUID — kept as the column name for
     backwards compatibility, not a PlayHQ namespace anymore.)
 
@@ -415,7 +418,7 @@ async def sync_fixtures(
     CANCELLED. The match lists are fetched fresh (not from the 30 minute cache)
     so the button reflects the draw as it is when pressed.
     """
-    games, listing = await org_grassroots_fixtures_checked(db, club, force=True)
+    games, listing = await org_grassroots_fixtures_checked(db, club, force=True, include_completed=True)
     today = date.today()
 
     # Teams for name-based auto-attribution (id, name, sequence).
@@ -438,7 +441,9 @@ async def sync_fixtures(
     rec = await reconcile(
         db,
         existing=existing_rows,
-        games=[g for g in games if g.get("id") and g.get("played_at")],
+        # Played games only confirm a row is still listed (incoming_ids). They are
+        # never a candidate to re-key an upcoming row onto, so they stay out of here.
+        games=[g for g in games if g.get("id") and g.get("played_at") and g.get("status") != "COMPLETED"],
         incoming_ids=incoming_ids,
         listing=listing,
         today=today,
@@ -453,6 +458,7 @@ async def sync_fixtures(
             by_gid.setdefault(f.playhq_id, []).append(f)
 
     synced = 0
+    played_added = 0
     teams_assigned = 0
     for g in games:
         gid = g.get("id")
@@ -526,6 +532,8 @@ async def sync_fixtures(
             else:
                 db.add(target)
                 by_gid.setdefault(str(gid), []).append(target)
+                if target.status == "COMPLETED":
+                    played_added += 1
             synced += 1
 
     await db.commit()
@@ -544,11 +552,13 @@ async def sync_fixtures(
 
     if not synced and not rec.changed and not rec.medals_extended:
         return {
-            "synced": 0, "teams_assigned": 0, "rekeyed": 0, "removed": 0, "cancelled": 0,
+            "synced": 0, "played_added": 0, "teams_assigned": 0, "rekeyed": 0, "removed": 0, "cancelled": 0,
             "moved": 0, "medals_extended": [],
-            "detail": "No upcoming Grassroots fixtures found for this club.",
+            "detail": "No Grassroots fixtures found for this club.",
         }
     detail = f"Synced {synced} fixture{'' if synced == 1 else 's'}"
+    if played_added:
+        detail += f" ({played_added} already played, added so they can be voted on)"
     if teams_assigned:
         detail += f", auto-assigned {teams_assigned} to a team"
     elif not teams:
@@ -569,6 +579,7 @@ async def sync_fixtures(
         detail += f". Marked {n} cancelled (you had picked a team or recorded votes, so {'it is' if n == 1 else 'they are'} kept)"
     return {
         "synced": synced,
+        "played_added": played_added,
         "teams_assigned": teams_assigned,
         "rekeyed": len(rec.rekeyed),
         "removed": n_removed,

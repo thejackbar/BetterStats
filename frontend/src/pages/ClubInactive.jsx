@@ -26,6 +26,11 @@ export default function ClubInactive({ variant = 'inactive', slug, clubName }) {
   const isNotFound = variant === 'notfound'
   const name = clubName || prettyName(slug)
   const contactHref = name ? `/contact?club=${encodeURIComponent(name)}` : '/contact'
+  // A club we cannot find (a new one, or one whose trial ended: both look the same here)
+  // goes straight to registration with its name already in the club search. The paused
+  // variant is a club staff switched off, so it still asks the visitor to get in touch.
+  const trialHref = name ? `/trial?club=${encodeURIComponent(name)}` : '/trial'
+  const primaryHref = isNotFound ? trialHref : contactHref
 
   const pill = isNotFound ? `Not on ${BRAND} yet` : 'Club page paused'
   const lead = isNotFound
@@ -56,7 +61,7 @@ export default function ClubInactive({ variant = 'inactive', slug, clubName }) {
           </p>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3 mb-7">
-            <Link to={contactHref} className="cta-primary">
+            <Link to={primaryHref} className="cta-primary">
               {primaryLabel}
               <span aria-hidden>→</span>
             </Link>

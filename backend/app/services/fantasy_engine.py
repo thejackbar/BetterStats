@@ -47,6 +47,11 @@ logger = logging.getLogger(__name__)
 PRICE_WINDOW_YEARS = 3
 # A match longer than this many days between first and last day is treated as bad data.
 MAX_MATCH_SPAN_DAYS = 10
+# A round is a club weekend, or two when a two day game bridges them. Weeks joined by bridging games
+# that stretch past this many days are not one round: every week of a season whose two day games start
+# on alternate Saturdays is bridged to the next (Sunbury, Nov 2026: 30 Oct to 20 Dec read as ONE round,
+# locked for seven weeks and never scored), so such a chain is cut back into one round per club weekend.
+MAX_ROUND_SPAN_DAYS = 14
 # Price band the baseline maps into (defined with the price movement that shares it).
 PRICE_MIN, PRICE_MAX, PRICE_FLOOR, PRICE_K = (
     fantasy_pricing.PRICE_MIN, fantasy_pricing.PRICE_MAX, fantasy_pricing.PRICE_FLOOR, fantasy_pricing.PRICE_K)
@@ -301,7 +306,8 @@ async def _live_calendar_spans(
     return spans, len(guids), starts
 
 
-def _group_rounds(spans: list[tuple[date, date]]) -> list[tuple[date, date]]:
+def _group_rounds(spans: list[tuple[date, date]],
+                  frozen: list[tuple[date, date]] | None = None) -> list[tuple[date, date]]:
     """Turn match spans into fantasy rounds: ``[(first_day, last_day)]`` in order.
 
     A round is a club weekend (one ISO week). A match that runs across weeks (a
@@ -310,7 +316,16 @@ def _group_rounds(spans: list[tuple[date, date]]) -> list[tuple[date, date]]:
     The window runs from the earliest to the latest actual match day in the
     round, which also covers a stored game whose ``played_at`` is either day.
     A span longer than ``MAX_MATCH_SPAN_DAYS`` is bad data, so only its end days
-    count as single days rather than gluing a stretch of the season together."""
+    count as single days rather than gluing a stretch of the season together.
+
+    Joining is transitive, so a club whose two day games start on alternate weekends chains every
+    week of the season into one group. A group that stretches past ``MAX_ROUND_SPAN_DAYS`` is not a
+    round, so ``_split_chain`` cuts it back into one round per club weekend.
+
+    ``frozen`` is the stored window of every round already SCORED. A scored round is never re-dated,
+    so a long group that runs through one keeps everything up to that round's end as ONE round (exactly
+    what it was scored as) and only what starts after it is cut. Without this the unscored round after
+    it would be given dates inside the scored one, and those games would count twice."""
     def monday(d: date) -> date:
         return d - timedelta(days=d.weekday())
 
@@ -338,11 +353,52 @@ def _group_rounds(spans: list[tuple[date, date]]) -> list[tuple[date, date]]:
         while w < last:
             w += timedelta(days=7)
             parent[find(w)] = find(monday(a))
+    spans_by_root: dict[date, list[tuple[date, date]]] = defaultdict(list)
     for a, b in clean:
         days_by_root[find(monday(a))].update((a, b))
-    rounds = [(min(d), max(d)) for d in days_by_root.values()]
+        spans_by_root[find(monday(a))].append((a, b))
+    rounds: list[tuple[date, date]] = []
+    for root, days in days_by_root.items():
+        lo, hi = min(days), max(days)
+        if (hi - lo).days > MAX_ROUND_SPAN_DAYS:
+            over = [f for f in (frozen or []) if f[0] <= hi and lo <= f[1]]
+            if over:
+                cut = max(f[1] for f in over)
+                rounds.append((lo, max(d for d in days if d <= cut) if any(d <= cut for d in days) else lo))
+                rest = [sp for sp in spans_by_root[root] if sp[0] > cut]
+                if rest:
+                    rounds.extend(_split_chain(rest))
+            else:
+                rounds.extend(_split_chain(spans_by_root[root]))
+        else:
+            rounds.append((lo, hi))
     rounds.sort()
     return rounds
+
+
+def _split_chain(spans: list[tuple[date, date]]) -> list[tuple[date, date]]:
+    """Cut one over-long chain of bridged weeks into a round per club weekend.
+
+    A match belongs to the week it STARTS in. A round runs from the first day any match starts that
+    week to the day before the next round starts (the last one to the chain's last day), so the
+    windows tile with no gap: whichever of its two days a game is stored under, its date falls in
+    exactly one round. Scoring reads games by their date, so a two day game's figures land in one
+    round whichever the scorecard lists first, and each round ends when the next one begins, the
+    point ``fantasy_live.round_states`` already treats as the end of a round."""
+    def monday(d: date) -> date:
+        return d - timedelta(days=d.weekday())
+
+    first_days: dict[date, date] = {}
+    for a, _b in spans:
+        w = monday(a)
+        first_days[w] = min(first_days.get(w, a), a)
+    starts = sorted(first_days.values())
+    last_day = max(b for _a, b in spans)
+    out: list[tuple[date, date]] = []
+    for i, start in enumerate(starts):
+        end = starts[i + 1] - timedelta(days=1) if i + 1 < len(starts) else last_day
+        out.append((start, max(end, start)))
+    return out
 
 
 async def draw_windows(session: AsyncSession, fs, refresh: bool = False):
@@ -370,7 +426,12 @@ async def draw_windows(session: AsyncSession, fs, refresh: bool = False):
         logger.exception("fantasy: live calendar read failed for season %s", fs.id)
         cal_spans, grades_checked, cal_starts = [], 0, {}
     cal_days = {d for a, b in cal_spans for d in (a, b)}
-    windows = _group_rounds(cal_spans + [(d, d) for d in game_dates])
+    frozen = [(r[0], r[1]) for r in (await session.execute(
+        text("""SELECT start_date, end_date FROM fantasy_rounds
+                WHERE fantasy_season_id = CAST(:fs AS UUID) AND status = 'scored'
+                  AND start_date IS NOT NULL AND end_date IS NOT NULL"""),
+        {"fs": str(fs.id)})).all()]
+    windows = _group_rounds(cal_spans + [(d, d) for d in game_dates], frozen)
     return windows, game_dates, cal_days, grades_checked, cal_starts
 
 
@@ -687,10 +748,14 @@ async def _round_player_scores(session: AsyncSession, fs, rnd) -> dict[str, dict
             WHERE fs.game_id = ANY(:gids)
         """), gp,
     )
+    # The +4 for taking the field. A 12th man named on the sheet and nowhere on the card, and a late
+    # withdrawal, carry ``is_reserve`` (services/reserve_players.py): they did not play, so the sheet
+    # alone gives them nothing. One with a row of their own (a substitute who took a catch) still gets
+    # a cell from the batting, bowling or fielding read above. NULL (not judged) reads as played.
     appearances = await session.execute(
         text("""SELECT ga.player_id, ga.game_id FROM game_appearances ga
                 JOIN players pl ON pl.id = ga.player_id AND pl.organisation_id = CAST(:org AS UUID)
-                WHERE ga.game_id = ANY(:gids)"""), gp,
+                WHERE ga.game_id = ANY(:gids) AND ga.is_reserve IS NOT TRUE"""), gp,
     )
     roles = await session.execute(
         text("SELECT player_id, role FROM fantasy_pool_players WHERE fantasy_season_id = CAST(:fs AS UUID)"),

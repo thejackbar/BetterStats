@@ -34,6 +34,9 @@ function SessionsTab({ canEdit, onOpen }) {
   const [label, setLabel] = useState('')
   const [sdate, setSdate] = useState(() => new Date().toISOString().slice(0, 10))
   const [busy, setBusy] = useState(false)
+  // How players are given nets: one queue run by hand, or a grid of time slots
+  // placed automatically as people check in.
+  const [mode, setMode] = useState('manual')
 
   const load = useCallback(() => {
     api.nmListSessions().then((r) => setSessions(r.sessions || [])).catch((e) => { toast.error(e.message); setSessions([]) })
@@ -43,7 +46,13 @@ function SessionsTab({ canEdit, onOpen }) {
   const start = async () => {
     setBusy(true)
     try {
-      const s = await api.nmCreateSession({ session_date: sdate, label: label.trim() || null })
+      const s = await api.nmCreateSession({
+        session_date: sdate,
+        label: label.trim() || null,
+        mode,
+        // The grid needs the club's wall clock to know which slots have started.
+        ...(mode === 'auto' ? { slot_plan: { tz_offset_minutes: -new Date().getTimezoneOffset() } } : {}),
+      })
       onOpen(s.id)
     } catch (e) { toast.error(e.message); setBusy(false) }
   }
@@ -69,6 +78,13 @@ function SessionsTab({ canEdit, onOpen }) {
             <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. Tuesday senior nets"
               className="w-full bg-pb-surface2 border border-pb-hairline rounded-lg px-3 h-[38px] text-sm text-pb-text placeholder:text-pb-faint focus:outline-none focus:border-pb-accent" />
           </div>
+          <div>
+            <label className="block font-mono text-[10px] uppercase tracking-wide2 text-pb-faintest mb-1">Nets run as</label>
+            <Segmented value={mode} onChange={setMode} options={[
+              { value: 'manual', label: 'Batting queue' },
+              { value: 'auto', label: 'Time slots' },
+            ]} />
+          </div>
           <Btn variant="primary" icon="play" onClick={start} disabled={busy}>{busy ? 'Starting…' : 'Start a session'}</Btn>
         </div>
       )}
@@ -84,7 +100,10 @@ function SessionsTab({ canEdit, onOpen }) {
               className="w-full flex items-center gap-3 px-4 py-3 text-left cursor-pointer hover:bg-pb-surface2/50 transition-colors">
               <span className="w-9 h-9 rounded-lg bg-pb-accent/12 text-pb-accent flex items-center justify-center shrink-0"><Icon name="nets" size={18} /></span>
               <div className="flex-1 min-w-0">
-                <div className="font-display font-semibold text-[14.5px] truncate">{s.label || 'Net session'}</div>
+                <div className="font-display font-semibold text-[14.5px] truncate">
+                  {s.label || 'Net session'}
+                  {s.mode === 'auto' && <span className="ml-2 font-mono text-[9px] uppercase tracking-wide2 text-pb-accent align-middle">Time slots</span>}
+                </div>
                 <div className="text-[12px] text-pb-faint">{fmtDate(s.session_date)}</div>
               </div>
               <div className="text-right shrink-0">

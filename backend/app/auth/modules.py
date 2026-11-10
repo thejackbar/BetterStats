@@ -251,6 +251,40 @@ def org_core_live(org, now: datetime | None = None) -> bool:
     return sub_is_live(core, now or _now())
 
 
+def trial_lapsed(org, subs, now: datetime | None = None) -> bool:
+    """A club whose free trial ran out and that never became a customer: to the
+    public it is a club with no history with us, so it is shown (and offered
+    registration) like one rather than as "paused".
+
+    Same test as ``club_teaser_link.LAPSED_TRIAL_ORG_SQL`` (keep the two in step):
+    no Stripe subscription, at least one trial row past its end, and no row that
+    is paying (active / past_due) or on a trial still running (open-ended counts
+    as running). On top of that, a club staff paused on purpose is left paused:
+    ``is_active`` off or the org-level master switch paused/cancelled is a
+    decision somebody made, not a lapse. ``subs`` is the club's subscription
+    rows, passed in so a caller that has not loaded them on the ORM object can
+    read them itself."""
+    if org is None or not getattr(org, "is_active", False) or not org_subscription_active(org):
+        return False
+    if getattr(org, "stripe_subscription_id", None):
+        return False
+    rows = list(subs or [])
+    if not rows:
+        return False
+    now = now or _now()
+    if any((r.status or "") in PAID_STATUSES for r in rows):
+        return False
+    if any((r.status or "") == STATUS_TRIAL and not sub_is_trial_expired(r, now) for r in rows):
+        return False
+    return any(sub_is_trial_expired(r, now) for r in rows)
+
+
+def org_trial_lapsed(org, now: datetime | None = None) -> bool:
+    """``trial_lapsed`` for a club loaded with its ``module_subscriptions``.
+    False when they are not loaded (never guess from nothing)."""
+    return trial_lapsed(org, _loaded_subscriptions(org), now)
+
+
 def _module_details(org, now: datetime | None = None) -> list[dict]:
     """Per-module subscription detail for the frontend, when the rows are loaded."""
     subs = _loaded_subscriptions(org)

@@ -235,7 +235,8 @@ async def _grant_extension(db: AsyncSession, *, club: str, client_org_id: Option
 
     existing = await sst._reclaimable_existing(
         db, await find_matching_organisation(
-            db, _parse_uuid(client_org_id or ""), club, include_archived=False))
+            db, _parse_uuid(client_org_id or ""), club, include_archived=False),
+        lapsed_is_new=False)   # this request is about the registered club whose trial ran out
     if existing is None:
         return None, False, "Club not found among registered clubs, nothing extended.", None
     org = await sst._paused_org(db, existing)

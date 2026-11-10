@@ -54,7 +54,7 @@ function ConditionalNavbar() {
   // mobile page — it renders its own minimal header, no club nav. The BetterPosts
   // editor is a full-viewport takeover with its own header, so suppress the club
   // nav there too.
-  const isStandalone = pathname.startsWith('/avail/') || pathname.startsWith('/playerdash/') || pathname.startsWith('/vote/') || pathname.startsWith('/room/') || pathname.startsWith('/fantasy/') || pathname.startsWith('/events/') || pathname.startsWith('/portal/') || pathname.startsWith('/shop/') || pathname.startsWith('/nets-checkin/') || pathname.startsWith('/rotation/') || (pathname.startsWith('/admin/betterselect/rotation/') && pathname.includes('/print/')) || pathname.startsWith('/admin/social-post') || pathname.startsWith('/betterscout')
+  const isStandalone = pathname.startsWith('/avail/') || pathname.startsWith('/playerdash/') || pathname.startsWith('/vote/') || pathname.startsWith('/room/') || pathname.startsWith('/fantasy/') || pathname.startsWith('/events/') || pathname.startsWith('/portal/') || pathname.startsWith('/shop/') || pathname.startsWith('/nets-checkin/') || pathname.startsWith('/rotation/') || (pathname.startsWith('/admin/betterselect/rotation/') && pathname.includes('/print/')) || (pathname.startsWith('/admin/betterselect/nets/') && pathname.endsWith('/print')) || pathname.startsWith('/admin/social-post') || pathname.startsWith('/betterscout')
   return (isMarketing || isStandalone) ? null : <Navbar />
 }
 
@@ -223,6 +223,7 @@ const BsNetSession = lazy(() => import('./pages/admin/betterselect/NetSession'))
 const BsRotation = lazy(() => import('./pages/admin/betterselect/Rotation'))
 const BsRotationGroup = lazy(() => import('./pages/admin/betterselect/RotationGroup'))
 const BsRotationPrint = lazy(() => import('./pages/admin/betterselect/rotation/RotationPrint'))
+const BsNetPrint = lazy(() => import('./pages/admin/betterselect/NetPrint'))
 const BsVotes = lazy(() => import('./pages/admin/betterselect/AdminVotes'))
 const BsRules = lazy(() => import('./pages/admin/betterselect/AdminSelectionRules'))
 const BsSettings = lazy(() => import('./pages/admin/betterselect/AdminSelectSettings'))
@@ -639,6 +640,7 @@ export default function App() {
           <Route path="/admin/betterselect/select/:fixtureId" element={<ProtectedRoute requireModule="select"><BsSelection /></ProtectedRoute>} />
           <Route path="/admin/betterselect/nets" element={<ProtectedRoute requireModule="select"><BsNets /></ProtectedRoute>} />
           <Route path="/admin/betterselect/nets/:id" element={<ProtectedRoute requireModule="select"><BsNetSession /></ProtectedRoute>} />
+          <Route path="/admin/betterselect/nets/:id/print" element={<ProtectedRoute requireModule="select"><BsNetPrint /></ProtectedRoute>} />
           <Route path="/admin/betterselect/rotation" element={<ProtectedRoute requireModule="select"><BsRotation /></ProtectedRoute>} />
           <Route path="/admin/betterselect/rotation/:groupId" element={<ProtectedRoute requireModule="select"><BsRotationGroup /></ProtectedRoute>} />
           <Route path="/admin/betterselect/rotation/:groupId/print/:roundId" element={<ProtectedRoute requireModule="select"><BsRotationPrint /></ProtectedRoute>} />

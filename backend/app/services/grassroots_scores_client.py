@@ -449,8 +449,17 @@ def cached_grade_matches(grade_id: str) -> Optional[list[dict]]:
     return None
 
 
-async def get_grade_fixtures(grade_id: str, *, include_live: bool = True, force: bool = False) -> list[dict]:
+async def get_grade_fixtures(
+    grade_id: str, *, include_live: bool = True, force: bool = False, include_completed: bool = False,
+) -> list[dict]:
     """Upcoming (and optionally live) fixtures for one grade, normalised.
+
+    ``include_completed`` also returns games CA calls COMPLETED (status
+    ``"COMPLETED"``, any date). Only the BetterSelect fixtures sync asks for it:
+    a club that connects mid-season has played rounds our table never held as
+    upcoming, and voting reads played fixtures from that table. Every other
+    caller (public Fixtures page, BetterPosts, BetterIQ) wants the draw ahead
+    only, so it stays off by default.
 
     Reuses ``get_grade_matches`` (same in-process cache). Returns a list of
     ``{id, home_team, away_team, played_at, time, status, round, venue, grade_id,
@@ -469,6 +478,8 @@ async def get_grade_fixtures(grade_id: str, *, include_live: bool = True, force:
     keep = {_FIXTURE_STATUS_UPCOMING}
     if include_live:
         keep.add(_FIXTURE_STATUS_LIVE)
+    if include_completed:
+        keep.add(_FIXTURE_STATUS_COMPLETED)
     out: list[dict] = []
     for m in matches:
         try:
@@ -485,7 +496,7 @@ async def get_grade_fixtures(grade_id: str, *, include_live: bool = True, force:
             continue
         day, last_day = days[0][0], days[-1][0]
         dt = days[0][1]
-        if last_day < today:
+        if sid != _FIXTURE_STATUS_COMPLETED and last_day < today:
             continue
         teams = m.get("teams") or []
         home_t = next((t for t in teams if t.get("isHome")), None)
@@ -499,7 +510,8 @@ async def get_grade_fixtures(grade_id: str, *, include_live: bool = True, force:
             "played_at": day,
             "end_at": last_day if last_day != day else None,
             "time": dt[11:16] if len(dt) >= 16 else None,
-            "status": "LIVE" if sid == _FIXTURE_STATUS_LIVE else "UPCOMING",
+            "status": ("LIVE" if sid == _FIXTURE_STATUS_LIVE
+                       else "COMPLETED" if sid == _FIXTURE_STATUS_COMPLETED else "UPCOMING"),
             "round": (m.get("round") or {}).get("name"),
             "venue": (m.get("venue") or {}).get("name"),
             "grade_id": grade_id,
@@ -521,6 +533,7 @@ async def get_grades_fixtures(
     club=None,
     include_live: bool = True,
     force: bool = False,
+    include_completed: bool = False,
 ) -> list[dict]:
     """Aggregate ``get_grade_fixtures`` across grades, de-duplicated and sorted.
 
@@ -536,7 +549,8 @@ async def get_grades_fixtures(
     calls cheap.
     """
     results = await asyncio.gather(
-        *[get_grade_fixtures(g, include_live=include_live, force=force) for g in grade_ids],
+        *[get_grade_fixtures(g, include_live=include_live, force=force, include_completed=include_completed)
+          for g in grade_ids],
         return_exceptions=True,
     )
     out: list[dict] = []
