@@ -160,6 +160,18 @@ AD_DESTINATIONS = {
     # the ad's own destination URL for get_registration_count() to tie a real
     # signup back to this campaign.
     "120250150859240121": {"campaign_id": "120250149119070121", "name": "Ad_ClubHistory_Trial_Hero_v3", "destination": "betterat.cricket/trial", "utm_content": "club_history_hero", "stream": STREAM_TRIAL},
+    # ── BC_AU_Trial_CBO_Sep2026 (current), a fresh start from 10 Nov 2026 ─────
+    # Every ad lands on /trial and carries utm_source=meta, utm_medium=paid_social,
+    # utm_campaign=BC_AU_Trial_CBO_Sep2026 (the campaign's own name, so the spend
+    # figures and the signup grouping line up) and the utm_content below. The
+    # contents are deliberately NOT the old ones (`spreadsheet_hero` belongs to
+    # the Aug campaign's ad above), or a creative's row would blend two runs.
+    # The three video ads are left out on purpose: their reels were removed, so
+    # they cannot deliver, and they are not part of this restart.
+    "120251342626760121": {"campaign_id": "120251284365570121", "name": "Ad_CheckOutYourClub_v2_Relaunch", "destination": "betterat.cricket/trial", "utm_content": "check_out_your_club_v2", "utm_campaign": "BC_AU_Trial_CBO_Sep2026", "stream": STREAM_TRIAL},
+    "120251550833470121": {"campaign_id": "120251284365570121", "name": "Ad_ClubSearch_Static_Sep2026", "destination": "betterat.cricket/trial", "utm_content": "club_search_static", "utm_campaign": "BC_AU_Trial_CBO_Sep2026", "stream": STREAM_TRIAL},
+    "120251301631290121": {"campaign_id": "120251284365570121", "name": "Ad_Trial_Spreadsheet_Sep2026_v3", "destination": "betterat.cricket/trial", "utm_content": "spreadsheet_hero_v3", "utm_campaign": "BC_AU_Trial_CBO_Sep2026", "stream": STREAM_TRIAL},
+    "120251284367910121": {"campaign_id": "120251284365570121", "name": "Ad_Trial_Spreadsheet_Sep2026", "destination": "betterat.cricket/trial", "utm_content": "spreadsheet_hero_v1", "utm_campaign": "BC_AU_Trial_CBO_Sep2026", "stream": STREAM_TRIAL},
     # BC_AU_SelfServe_Aug2026 — every ad lands on /trial; utm_content is the
     # same tag the ad-signups report groups by (see routers/meta_ads.py).
     "120249908493850121": {"campaign_id": "120249890918010121", "name": "Ad1_SelfServe_StaticShowcase", "destination": "betterat.cricket/trial", "utm_content": "static_showcase_full"},
@@ -193,6 +205,7 @@ CAMPAIGN_UTM_CAMPAIGNS: dict[str, set[str]] = {
         "webinar_21sep2026",
         "trial_evergreen_sep2026",
     },
+    "120251284365570121": {"BC_AU_Trial_CBO_Sep2026"},   # fresh start 10 Nov 2026
     "120249890918010121": {"BC_AU_SelfServe_Aug2026"},
     "120249237210710121": {"BC_AU_Traffic_ClubHistory_Jul2026"},
 }
@@ -203,6 +216,7 @@ CAMPAIGN_UTM_CAMPAIGNS: dict[str, set[str]] = {
 STREAM_BY_UTM_CAMPAIGN = {
     "webinar_21sep2026": STREAM_WEBINAR,
     "trial_evergreen_sep2026": STREAM_TRIAL,
+    "bc_au_trial_cbo_sep2026": STREAM_TRIAL,
 }
 
 
@@ -281,6 +295,10 @@ CAMPAIGN_LENGTH_DAYS = 30
 # resolves the active campaign's own plan via _campaign_plan() so those
 # notes only ever describe the campaign actually on screen.
 CAMPAIGN_PLANS: dict[str, tuple[float, int]] = {
+    # BC_AU_Trial_CBO_Sep2026 — started again on 10 Nov 2026 at A$15/day CBO.
+    # 15 x 30 = 450. The A$1,700 it had spent before the restart is not part of
+    # this plan (see the 10 Nov marker in CAMPAIGN_ANNOTATIONS).
+    "120251284365570121": (450.0, 30),
     # BC_AU_Trials_CBO_Aug2026 — A$30/day CBO since the 8 Sep restructure (was
     # A$50/day). 30 x 30 = 900 over the pacing window. Pacing is measured from
     # the most recent change (see build_insights), not across it, so this is
@@ -299,6 +317,17 @@ CAMPAIGN_PLANS: dict[str, tuple[float, int]] = {
 # worse than saying nothing. There WILL be more of these — add a row rather
 # than reasoning about the discontinuity somewhere else.
 CAMPAIGN_ANNOTATIONS: dict[str, list[dict]] = {
+    "120251284365570121": [
+        {
+            "date": "2026-11-10",
+            "label": "Fresh start",
+            "detail": (
+                "Started again at A$15/day over 30 days (A$450). The ads now carry their own "
+                "utm_campaign and utm_content tags. Spend and signups before this line belong to "
+                "the earlier run, so figures either side describe two different runs."
+            ),
+        },
+    ],
     "120250149119070121": [
         {
             "date": "2026-09-08",

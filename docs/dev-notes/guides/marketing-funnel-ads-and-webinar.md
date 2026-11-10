@@ -89,7 +89,7 @@
 **HQ headline strip (v9.142.5)**
 57. The strip is `computeKpis` in `pages/admin/metaAdsKpi.js`. Revenue is PAID CLUBS (`converted_to_paid` rows of `/ad-signups`) times the trial stream's `unit_value_aud`; ROAS is that over the TRIAL stream's spend. Never read `stream.roas` for it: the service's figure is signups times 399, which counts every unpaid trial as revenue.
 58. When any attributed signup pre-dates `counting_since`, cost per trial and ROAS are withheld with the reason (spend is narrowed by the cutoff, the registration count never is, so the quotient would read too good). Converted is "unknown", not 0, until `/ad-signups` loads.
-59. A new ad needs its `utm_content` in `AD_DESTINATIONS`. Without it its spend files under "(untagged)" in `get_creative_performance` and its signups file under the tag in its URL, so per-ad Converted and ROAS cannot be read; the creative table names such ads. A new campaign reusing an old campaign's tags (`trial_evergreen_sep2026`, `spreadsheet_hero`) is excluded from the new campaign by `_attribution_matches_campaign` until its id is added to `CAMPAIGN_UTM_CAMPAIGNS`.
+59. A new ad needs its `utm_content` in `AD_DESTINATIONS` (BC_AU_Trial_CBO_Sep2026 has its own, listed in `docs/meta-ad-campaign-self-serve.md` 4b; its tag is the campaign name, never the old Sep tags, so a restart counts from zero). Without one its spend files under "(untagged)" in `get_creative_performance` and its signups under the tag in its URL, so per-ad Converted and ROAS cannot be read; the creative table names such ads. A campaign that reuses another's tags is excluded by `_attribution_matches_campaign` until its id is in `CAMPAIGN_UTM_CAMPAIGNS`.
 
 ## Traps and failure signatures
 
@@ -100,7 +100,7 @@
 
 ## How to verify a change here
 
-- Backend (real Postgres, shipped route bodies): `backend/verification/verify_meta_ads_streams.py` (control with feature absent REPORTS missing parts; neutered window and guards: since-spend reads lifetime, partial window prints a cost), `verify_webinar.py` (DDL three times, mirror agreement, resubmission and bot guards, reminder edges, name halves), `verify_streamyard_skip_reporting.py`.
+- Backend: `backend/verification/verify_meta_ads_new_campaign.py` (pure functions, no database; tags, plan and the 10 Nov marker for the new campaign). Real Postgres, shipped route bodies: `backend/verification/verify_meta_ads_streams.py` (control with feature absent REPORTS missing parts; neutered window and guards: since-spend reads lifetime, partial window prints a cost), `verify_webinar.py` (DDL three times, mirror agreement, resubmission and bot guards, reminder edges, name halves), `verify_streamyard_skip_reporting.py`.
 - Browser: `frontend/verification/verify_meta_ads_kpi_browser.mjs` (the strip, Converted and ROAS, Paid? badge, tabs; 55 checks, the control on the previous page fails 46 with no crash), `frontend/verification/verify_meta_ads_streams_browser.mjs`, `verify_webinar_browser.mjs`, `verify_club_cta_browser.mjs`. Meta Events Manager Test Events is NOT covered.
 - Never call live StreamYard in a suite (no public DELETE); stub `push_registration`. Earlier probes left four test registrations (`bc-it-a@` and similar) to delete by hand.
 - Control runs must REPORT, not crash: `.get`, presence-safe helpers (`textOf()`, `seen()`, `reachedSuccess()`), gate whole blocks. Diff PASS lists of run and control (`comm -12`) to find checks that cannot fail.

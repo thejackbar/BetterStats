@@ -139,6 +139,32 @@ Audience off) nor optimising for landing page views (it optimises for
 in the reporting code derives anything from ad set names — classify by ad name
 or by `content_category` instead.
 
+### 4b. BC_AU_Trial_CBO_Sep2026: the fresh start of 10 November 2026
+
+The campaign started again on 10 Nov 2026 at A$15/day for 30 days (A$450). Its
+ads carry their own tags, so signups from the restart are counted on their own
+and the Sep tags stay with the earlier run.
+
+Every ad's URL parameters (Ads Manager, the ad's Tracking section, "URL
+parameters"; do not touch the destination URL itself):
+
+```
+utm_source=meta&utm_medium=paid_social&utm_campaign=BC_AU_Trial_CBO_Sep2026&utm_content=<content>
+```
+
+| Ad (id) | `utm_content` |
+|---|---|
+| `Ad_CheckOutYourClub_v2_Relaunch` (120251342626760121), the one delivering | `check_out_your_club_v2` |
+| `Ad_ClubSearch_Static_Sep2026` (120251550833470121), paused | `club_search_static` |
+| `Ad_Trial_Spreadsheet_Sep2026_v3` (120251301631290121), paused | `spreadsheet_hero_v3` |
+| `Ad_Trial_Spreadsheet_Sep2026` (120251284367910121), paused | `spreadsheet_hero_v1` |
+
+These are mapped in `meta_ads.AD_DESTINATIONS` and `CAMPAIGN_UTM_CAMPAIGNS`. The
+three video ads are not mapped: their reels were removed, so they cannot
+deliver. A new ad gets a new `utm_content` here and in `AD_DESTINATIONS`.
+After deploying, on Meta Ads HQ: press Refresh now, then "Reset from..." with
+10 Nov 2026 so Meta's spend starts from the restart.
+
 ## 5. Creative brief (three concepts per ad set)
 
 All creative can be produced from real product screens; nothing mocked up.

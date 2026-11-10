@@ -1533,3 +1533,15 @@ The page had grown to 1,700 lines with the figures that matter (paid clubs, reve
 - Demand sections are one block, Where it's coming from, with four tabs. Counting-since sits above the strip, token health is one pill, the four daily charts are behind a toggle (the older streams suite now opens it first). Signups table gained a Paid? column with `paid_modules`.
 - Found, not fixed: none of the seven live ads are in `AD_DESTINATIONS`, and the Meta tools available here do not expose destination URLs or `url_tags`, so their `utm_content` values could not be read. See rule 59. `CAMPAIGN_PLANS` has no entry for the new campaign, so its budget bar uses the A$750 / 30 day fallback against A$1,700 spent.
 - Proof: `verify_meta_ads_kpi_browser.mjs` against the real page with the API stubbed (55 checks, 390px overflow checked, screenshots read); control run on the previous page fails 46 and reports the rest without crashing; `verify_meta_ads_streams_browser.mjs` still 57 of 57.
+
+
+## v9.142.6.1: BC_AU_Trial_CBO_Sep2026 gets its tags, its plan and a fresh start
+
+After the Meta Ads HQ headline strip (v9.142.5). The campaign was restarting at A$15/day, so its A$1,700 of earlier spend and signups under the Sep tags had to stop counting.
+
+- `AD_DESTINATIONS` maps four of the campaign's ads to new `utm_content` values and `CAMPAIGN_UTM_CAMPAIGNS` gives the campaign its own `utm_campaign`, `BC_AU_Trial_CBO_Sep2026`. Without it the campaign matched nothing but the loosest fallback, and any ad that reused an old tag was excluded outright. The new tag is a known tag of this campaign, so it is also refused by the OLD campaign's count instead of leaking into it.
+- `CAMPAIGN_PLANS` is A$450 over 30 days (15 x 30). `CAMPAIGN_ANNOTATIONS` carries a 10 Nov 2026 "Fresh start" marker, which is what makes pacing and the since-the-change figures start at the restart.
+- Counting-since is a platform setting and was not set in code. It still has to be reset by hand on the page (Reset from 10 Nov 2026), or Meta's spend keeps reading from the old start. Registrations are never narrowed by it; the new tag is what restarts that count.
+- The Ads Manager side (editing the live ad's URL parameters) is not code. The Meta tools available cannot edit a published ad's tags, only replace the ad, so it was handed to a session with screen control. The exact parameters are in `docs/meta-ad-campaign-self-serve.md` 4b.
+- Found: the three video ads (V1, V3, V5) show WITH_ISSUES because their reels were removed ("the reel you selected for your ad is not available"). They cannot deliver until the videos are re-uploaded. Left unmapped and untouched.
+- Proof: `backend/verification/verify_meta_ads_new_campaign.py` (16 checks; the control on the previous code fails 10 with no crash). `verify_meta_ads_streams.py` could not finish in the sandbox: it crashes at the same seed step on the previous code too (zero trial results at line 375), so it gave no signal either way.
