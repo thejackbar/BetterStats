@@ -31,6 +31,9 @@ router = APIRouter(prefix="/club-admin/meta-ads", tags=["meta-ads"])
 # insights endpoints' `le=90`, which bound a genuine reporting window.
 TABLE_DAYS_DEFAULT = 365
 TABLE_DAYS_MAX = 730
+# 'campaign' (the default) shows only the selected campaign's traffic and starts at its
+# restart date; 'all' is every source. Anything unrecognised is the narrower view.
+SCOPE_PATTERN = "^(campaign|all)$"
 
 
 class LeadAdjustmentIn(BaseModel):
@@ -204,6 +207,7 @@ async def leads_adjustments(db: AsyncSession = Depends(get_db), _: User = Depend
 @router.get("/registration-funnel")
 async def registration_funnel(
     days: int = Query(meta_ads.CAMPAIGN_LENGTH_DAYS, ge=1, le=90),
+    scope: str = Query("campaign", pattern=SCOPE_PATTERN),
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_super_admin),
 ):
@@ -211,12 +215,30 @@ async def registration_funnel(
     selected → admin details → email verified → acknowledgements → submit →
     completed), filling in the gap between Meta's own Lead and
     CompleteRegistration events."""
-    return {"funnel": await meta_ads.get_registration_step_funnel(db, days)}
+    return {"funnel": await meta_ads.get_registration_step_funnel(db, days, scope), "scope": scope}
+
+
+@router.get("/onsite")
+async def onsite(
+    days: int = Query(meta_ads.CAMPAIGN_LENGTH_DAYS, ge=1, le=365),
+    scope: str = Query("campaign", pattern=SCOPE_PATTERN),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_super_admin),
+):
+    """The on-site traffic card (visitors, creatives, landing pages, reached
+    pricing or contact) for the SELECTED campaign. The Usage page's own card is
+    all traffic; see meta_ads.get_onsite_traffic."""
+    from app.routers.usage import _page_label
+    data = await meta_ads.get_onsite_traffic(db, days, scope)
+    for row in data["landing"]:
+        row["label"] = _page_label(row["page"])
+    return data
 
 
 @router.get("/selected-clubs")
 async def selected_clubs(
     days: int = Query(TABLE_DAYS_DEFAULT, ge=1, le=TABLE_DAYS_MAX),
+    scope: str = Query("campaign", pattern=SCOPE_PATTERN),
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_super_admin),
 ):
@@ -225,7 +247,7 @@ async def selected_clubs(
     give. Merges the club captured on the selection beacon with the Terms-step
     acknowledgements and completed registrations, reporting the furthest step
     each club reached. See meta_ads.get_selected_clubs."""
-    return await meta_ads.get_selected_clubs(db, days)
+    return await meta_ads.get_selected_clubs(db, days, scope)
 
 
 class HideSelectionIn(BaseModel):
@@ -236,6 +258,7 @@ class HideSelectionIn(BaseModel):
 async def hide_selected_club(
     body: HideSelectionIn,
     days: int = Query(TABLE_DAYS_DEFAULT, ge=1, le=TABLE_DAYS_MAX),
+    scope: str = Query("campaign", pattern=SCOPE_PATTERN),
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_super_admin),
 ):
@@ -249,13 +272,14 @@ async def hide_selected_club(
         await platform_settings.hide_meta_selection(db, body.name)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    return await meta_ads.get_selected_clubs(db, days)
+    return await meta_ads.get_selected_clubs(db, days, scope)
 
 
 @router.post("/selected-clubs/unhide")
 async def unhide_selected_club(
     body: HideSelectionIn,
     days: int = Query(TABLE_DAYS_DEFAULT, ge=1, le=TABLE_DAYS_MAX),
+    scope: str = Query("campaign", pattern=SCOPE_PATTERN),
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_super_admin),
 ):
@@ -263,12 +287,13 @@ async def unhide_selected_club(
     selected-clubs payload."""
     from app.services import platform_settings
     await platform_settings.unhide_meta_selection(db, body.name)
-    return await meta_ads.get_selected_clubs(db, days)
+    return await meta_ads.get_selected_clubs(db, days, scope)
 
 
 @router.get("/searched-clubs")
 async def searched_clubs(
     days: int = Query(TABLE_DAYS_DEFAULT, ge=1, le=TABLE_DAYS_MAX),
+    scope: str = Query("campaign", pattern=SCOPE_PATTERN),
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_super_admin),
 ):
@@ -277,7 +302,7 @@ async def searched_clubs(
     interest the "Clubs selected" table misses: a club searched but never
     selected. Each row flags whether it went on to be selected. See
     meta_ads.get_searched_clubs."""
-    return await meta_ads.get_searched_clubs(db, days)
+    return await meta_ads.get_searched_clubs(db, days, scope)
 
 
 @router.get("/ad-signups")

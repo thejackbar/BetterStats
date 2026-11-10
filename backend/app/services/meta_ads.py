@@ -602,6 +602,26 @@ def _action_value(actions: list | None, action_types: set[str]) -> float:
     return total
 
 
+def _lead_total(actions: list | None) -> float:
+    """Meta's lead count for one insights row.
+
+    The insights `actions` list carries `lead` (the TOTAL across every source) and,
+    alongside it, `offsite_conversion.fb_pixel_lead` (the pixel's share of that same
+    total) and `onsite_conversion.lead_grouped` (on-Facebook leads). Adding all three
+    counts the same events twice. It showed as 550 "Started registering" on the HQ
+    against a lifetime `lead` total of 275 across the ads (read from Meta on 10 Nov
+    2026). So the aggregate is used when Meta gives it, and the components are summed
+    only when it does not."""
+    by_type: dict[str, float] = {}
+    for a in actions or []:
+        t = a.get("action_type")
+        if t in _LEAD_ACTION_TYPES:
+            by_type[t] = by_type.get(t, 0.0) + _num(a.get("value"))
+    if "lead" in by_type:
+        return by_type["lead"]
+    return sum(by_type.values())
+
+
 def _parse_row(row: dict) -> dict:
     """Normalise one Graph API insights row (campaign or ad level) into our shape."""
     actions = row.get("actions") or []
@@ -612,7 +632,7 @@ def _parse_row(row: dict) -> dict:
     link_clicks = _num(row.get("inline_link_clicks"))
     link_ctr = _num(row.get("inline_link_click_ctr"))
     lpv = _action_value(actions, {"landing_page_view"})
-    leads = _action_value(actions, _LEAD_ACTION_TYPES)
+    leads = _lead_total(actions)
 
     cost_per_lpv = None
     for c in cost_per_action:
@@ -950,6 +970,160 @@ _META_VISITOR_EXISTS = _meta_visitor_exists(_SINCE_LOWER_BOUND)
 # searched" TABLES (get_selected_clubs/get_searched_clubs), which stay a full
 # follow-up/lead-management list regardless of the funnel reset.
 _META_VISITOR_EXISTS_PLAIN = _meta_visitor_exists("NOW() - (:days * INTERVAL '1 day')")
+# The lists' own window: the caller's period, narrowed (in campaign scope only) by the
+# campaign's restart date. NOT the manual counting-since cutoff (see get_selected_clubs).
+_SINCE_LOWER_BOUND_PLAIN = _SINCE_LOWER_BOUND
+_META_VISITOR_EXISTS_PLAIN_BOUND = _meta_visitor_exists(_SINCE_LOWER_BOUND)
+
+
+# ── Campaign scope for the on-site numbers ───────────────────────────────────
+# The wizard funnel, the club lists and the traffic card read `usage_events`,
+# which knows nothing about Meta campaigns, so with a campaign selected they used
+# to describe ALL traffic. A visitor belongs to the selected campaign when one of
+# their events in the window carries the campaign's own tags (utm_campaign from
+# CAMPAIGN_UTM_CAMPAIGNS, or a utm_content AD_DESTINATIONS maps to it), or is
+# plainly Meta traffic carrying no tag that names ANOTHER known campaign. That is
+# `_attribution_matches_campaign`, applied to events instead of registrations, in
+# the same order, so a visitor and the registration they go on to make are
+# classified the same way.
+def _event_in_campaign(alias: str) -> str:
+    """SQL boolean: THIS event row belongs to the selected campaign. Own tags win,
+    then plain Meta traffic that carries no tag naming another known campaign."""
+    camp = f"lower(COALESCE(NULLIF({alias}.utm_campaign, ''), substring({alias}.path from 'utm_campaign=([^&]+)')))"
+    cont = f"COALESCE(NULLIF({alias}.utm_content, ''), substring({alias}.path from 'utm_content=([^&]+)'))"
+    return f"""(
+                COALESCE({camp} = ANY(CAST(:camp_tags AS text[])), FALSE)
+                OR COALESCE({cont} = ANY(CAST(:camp_contents AS text[])), FALSE)
+                OR (
+                  ({alias}.traffic_source IN ('facebook', 'instagram')
+                   OR lower(COALESCE(NULLIF({alias}.utm_source, ''), substring({alias}.path from 'utm_source=([^&]+)')))
+                        IN ('fb', 'facebook', 'meta', 'ig', 'instagram')
+                   OR {alias}.path ~* 'fbclid=' OR {alias}.path ~* 'igshid=')
+                  AND NOT (
+                    COALESCE({camp} = ANY(CAST(:other_tags AS text[])), FALSE)
+                    OR COALESCE({cont} = ANY(CAST(:other_contents AS text[])), FALSE)
+                  )
+                )
+              )"""
+
+
+def _campaign_tag_params() -> dict:
+    """The bound arrays _event_in_campaign reads, for the CURRENT campaign."""
+    own_tags = {n.lower() for n in (CAMPAIGN_UTM_CAMPAIGNS.get(_campaign_id()) or set())}
+    own_contents = set(_current_campaign_utm_contents())
+    return {
+        "camp_tags": sorted(own_tags),
+        "camp_contents": sorted(own_contents),
+        "other_tags": sorted(set(_all_known_utm_campaigns()) - own_tags),
+        "other_contents": sorted(set(_all_known_utm_contents()) - own_contents),
+    }
+
+
+def _campaign_visitor_exists(created_at_bound: str, alias: str = "ue") -> str:
+    """SQL: this row's visitor has an event in the window that belongs to the
+    selected campaign. Bound arrays, never IN (SELECT ...) (CLAUDE.md rule 11)."""
+    return f"""
+        EXISTS (
+            SELECT 1 FROM usage_events mv
+            WHERE mv.visitor_id = {alias}.visitor_id
+              AND mv.created_at >= {created_at_bound}
+              AND {_event_in_campaign("mv")}
+        )
+"""
+
+
+SCOPES = ("campaign", "all")
+
+
+def normalise_scope(scope: str | None) -> str:
+    """Anything but an explicit 'all' is the selected campaign: fail toward the narrower view."""
+    return "all" if scope == "all" else "campaign"
+
+
+def _scope_since(scope: str, *, manual: bool) -> datetime | None:
+    """Lower bound for a scope. `manual` is whether the platform counting-since
+    setting applies too (the funnel stats honour it, the follow-up lists do not).
+    The campaign's own restart date applies only in campaign scope."""
+    if scope == "campaign":
+        return _window_start() if manual else _counts_from()
+    return _since() if manual else None
+
+
+def _scope_params(days: int, since: datetime | None) -> dict:
+    return {**_campaign_tag_params(), "days": days, "since": since}
+
+
+async def get_onsite_traffic(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS, scope: str = "campaign") -> dict:
+    """The on-site side of the ad click, for the SELECTED campaign: who arrived,
+    from where, which creative, where they landed, and whether they went on to a
+    high-intent page. The Usage page has the same card for ALL traffic; this one
+    exists because with a campaign selected, all traffic is the wrong answer.
+
+    scope='campaign' counts only page views that belong to the campaign (and only
+    from its restart date); scope='all' counts every Meta-sourced page view, the
+    Usage page's own definition. Anonymous visitors only, admin pages excluded."""
+    await _use_active_campaign(db)
+    scope = normalise_scope(scope)
+    days = max(1, min(days, 365))
+    params = _scope_params(days, _scope_since(scope, manual=False))
+    vkey = "COALESCE(ue.visitor_id::text, ue.ip_hash)"
+    meta_pred = ("(ue.traffic_source IN ('facebook', 'instagram') "
+                 "OR lower(COALESCE(NULLIF(ue.utm_source, ''), substring(ue.path from 'utm_source=([^&]+)'))) "
+                 "IN ('fb', 'facebook', 'meta', 'ig', 'instagram') OR ue.path ~* '(fbclid|igshid)=')")
+    in_scope = _event_in_campaign("ue") if scope == "campaign" else meta_pred
+    base = ("ue.event_type = 'page_view' AND ue.user_id IS NULL "
+            "AND split_part(ue.path, '?', 1) !~* '^/admin' "
+            f"AND ue.created_at >= {_SINCE_LOWER_BOUND} AND {in_scope}")
+    src = "lower(COALESCE(NULLIF(ue.utm_source, ''), substring(ue.path from 'utm_source=([^&]+)')))"
+    med = "lower(COALESCE(NULLIF(ue.utm_medium, ''), substring(ue.path from 'utm_medium=([^&]+)')))"
+    cam = "COALESCE(NULLIF(ue.utm_campaign, ''), substring(ue.path from 'utm_campaign=([^&]+)'))"
+    con = "COALESCE(NULLIF(ue.utm_content, ''), substring(ue.path from 'utm_content=([^&]+)'))"
+    land = "split_part(COALESCE(NULLIF(ue.landing_path, ''), ue.path), '?', 1)"
+
+    head = (await db.execute(text(f"""
+        SELECT COUNT(DISTINCT {vkey}) AS visitors, COUNT(*) AS views,
+               COUNT(DISTINCT {vkey}) FILTER (WHERE {src} IN ('ig', 'instagram') OR ue.path ~* 'igshid=') AS instagram,
+               COUNT(DISTINCT {vkey}) FILTER (WHERE {src} IN ('fb', 'facebook', 'meta') OR ue.path ~* 'fbclid=') AS facebook,
+               COUNT(DISTINCT {vkey}) FILTER (WHERE {med} ~ 'paid') AS paid
+        FROM usage_events ue WHERE {base}
+    """), params)).mappings().first()
+    creatives = (await db.execute(text(f"""
+        SELECT {con} AS content, {cam} AS campaign, COUNT(DISTINCT {vkey}) AS visitors
+        FROM usage_events ue WHERE {base} AND {con} IS NOT NULL
+        GROUP BY 1, 2 ORDER BY visitors DESC LIMIT 12
+    """), params)).mappings().all()
+    landing = (await db.execute(text(f"""
+        SELECT {land} AS page, COUNT(DISTINCT {vkey}) AS visitors
+        FROM usage_events ue WHERE {base}
+        GROUP BY 1 ORDER BY visitors DESC LIMIT 10
+    """), params)).mappings().all()
+    conv = (await db.execute(text(f"""
+        WITH mv AS (
+            SELECT DISTINCT {vkey} AS vkey FROM usage_events ue WHERE {base} AND {vkey} IS NOT NULL
+        ),
+        intent AS (
+            SELECT DISTINCT {vkey} AS vkey FROM usage_events ue
+            WHERE ue.event_type = 'page_view' AND ue.created_at >= {_SINCE_LOWER_BOUND}
+              AND split_part(ue.path, '?', 1) ~* '^/(pricing|contact)(/|$)'
+        )
+        SELECT (SELECT COUNT(*) FROM mv) AS visitors,
+               (SELECT COUNT(*) FROM mv WHERE vkey IN (SELECT vkey FROM intent)) AS reached_intent
+    """), params)).mappings().first()
+    visitors = int(conv["visitors"] or 0)
+    reached = int(conv["reached_intent"] or 0)
+    return {
+        "days": days,
+        "scope": scope,
+        "meta": {
+            "visitors": int(head["visitors"] or 0), "views": int(head["views"] or 0),
+            "facebook": int(head["facebook"] or 0), "instagram": int(head["instagram"] or 0),
+            "paid": int(head["paid"] or 0),
+        },
+        "conversion": {"visitors": visitors, "reached_intent": reached,
+                       "pct": round(100 * reached / visitors) if visitors else 0},
+        "creatives": [{"content": r["content"], "campaign": r["campaign"], "visitors": int(r["visitors"] or 0)} for r in creatives],
+        "landing": [{"page": r["page"], "visitors": int(r["visitors"] or 0)} for r in landing],
+    }
 
 
 async def get_club_selected_count(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS) -> int:
@@ -967,12 +1141,13 @@ async def get_club_selected_count(db: AsyncSession, days: int = CAMPAIGN_LENGTH_
           AND ue.route = 'club_prepared'
           AND ue.created_at >= {_SINCE_LOWER_BOUND}
           AND ue.visitor_id IS NOT NULL
-          AND {_META_VISITOR_EXISTS}
-    """), {"days": days, "since": _window_start()})).scalar()
+          AND {_campaign_visitor_exists(_SINCE_LOWER_BOUND)}
+    """), _scope_params(days, _window_start()))).scalar()
     return int(count or 0)
 
 
-async def get_registration_step_funnel(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS) -> list[dict]:
+async def get_registration_step_funnel(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS,
+                                        scope: str = "campaign") -> list[dict]:
     """In-app breakdown of WHERE within the registration wizard visitors drop
     off — the detail Meta's own reporting can't give us, since it only ever
     sees a Lead (fired at the very first step) and a CompleteRegistration
@@ -982,14 +1157,20 @@ async def get_registration_step_funnel(db: AsyncSession, days: int = CAMPAIGN_LE
     key/label/value/pct_of_top/pct_of_prev shape as compute_stream_funnel() so the
     frontend can reuse the same FunnelChart component."""
     await _use_active_campaign(db)  # resolves the counting-since cutoff, see _since()
+    scope = normalise_scope(scope)
+    # 'campaign' (the default) counts only the selected campaign's visitors; it used to
+    # count every visitor to the wizard, organic and email included, whatever campaign
+    # was selected. 'all' is that old view, kept on request.
+    visitor_clause = f"AND {_campaign_visitor_exists(_SINCE_LOWER_BOUND)}" if scope == "campaign" else ""
     rows = (await db.execute(text(f"""
         SELECT route, COUNT(DISTINCT visitor_id) AS n
-        FROM usage_events
+        FROM usage_events ue
         WHERE event_type = 'self_serve_step'
           AND created_at >= {_SINCE_LOWER_BOUND}
           AND visitor_id IS NOT NULL
+          {visitor_clause}
         GROUP BY route
-    """), {"days": days, "since": _window_start()})).mappings().all()
+    """), _scope_params(days, _scope_since(scope, manual=True)))).mappings().all()
     counts = {r["route"]: int(r["n"]) for r in rows}
 
     top = counts.get(REGISTRATION_STEP_ORDER[0][0], 0)
@@ -1018,7 +1199,8 @@ _SELECTED_STEP_LABEL = {
 }
 
 
-async def get_selected_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS) -> dict:
+async def get_selected_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS,
+                             scope: str = "campaign") -> dict:
     """Name the clubs behind the registration wizard's "Club selected" count.
 
     The step funnel (get_registration_step_funnel) only counts anonymous
@@ -1044,13 +1226,17 @@ async def get_selected_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
     # leads" numbers stay Meta-scoped elsewhere; this list is deliberately
     # all-source so no lead is lost.
     #
-    # Deliberately NOT windowed by the counting-since cutoff (_since()) —
+    # Deliberately NOT windowed by the manual counting-since cutoff (_since()) —
     # unlike the funnel STAT counts above it on the dashboard, this table is a
     # follow-up/lead-management tool ("who do we chase up") and a super admin
     # asking to reset the funnel to a clean baseline still wants every past
-    # lead listed here, not to have them drop out of view.
+    # lead listed here, not to have them drop out of view. The PERIOD is the
+    # caller's choice (`days`), and scope='campaign' (the default) keeps only the
+    # selected campaign's clubs and starts at its restart date; scope='all' lists
+    # every source, which is the follow-up view for organic and email starts.
     await _use_active_campaign(db)
-    window = {"days": days}
+    scope = normalise_scope(scope)
+    window = _scope_params(days, _scope_since(scope, manual=False))
     utm_contents = set(_current_campaign_utm_contents())
     _META_SOURCES = _META_ATTRIBUTION_SOURCES  # same set _attribution_matches_campaign uses
 
@@ -1063,64 +1249,70 @@ async def get_selected_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
                MIN(created_at)          AS first_at,
                MAX(created_at)          AS last_at,
                COUNT(DISTINCT visitor_id) AS visitors,
-               bool_or({_META_VISITOR_EXISTS_PLAIN}) AS via_meta
+               bool_or({_META_VISITOR_EXISTS_PLAIN_BOUND}) AS via_meta,
+               bool_or({_campaign_visitor_exists(_SINCE_LOWER_BOUND)}) AS via_campaign
         FROM usage_events ue
         WHERE event_type = 'self_serve_step'
           AND route = 'club_prepared'
-          AND created_at >= NOW() - (:days * INTERVAL '1 day')
+          AND created_at >= {_SINCE_LOWER_BOUND}
           AND NULLIF(TRIM(metadata->>'club_name'), '') IS NOT NULL
         GROUP BY 1, 2
     """), window)).mappings().all()
 
-    anon = (await db.execute(text("""
+    anon_clause = f"AND {_campaign_visitor_exists(_SINCE_LOWER_BOUND)}" if scope == "campaign" else ""
+    anon = (await db.execute(text(f"""
         SELECT COUNT(DISTINCT visitor_id) AS n
-        FROM usage_events
+        FROM usage_events ue
         WHERE event_type = 'self_serve_step'
           AND route = 'club_prepared'
-          AND created_at >= NOW() - (:days * INTERVAL '1 day')
+          AND created_at >= {_SINCE_LOWER_BOUND}
           AND visitor_id IS NOT NULL
           AND NULLIF(TRIM(metadata->>'club_name'), '') IS NULL
+          {anon_clause}
     """), window)).scalar() or 0
 
     # (2) Terms-step acknowledgements — carry the club name and an email.
-    ack_rows = (await db.execute(text("""
+    ack_rows = (await db.execute(text(f"""
         SELECT club_name, MIN(email) AS email,
                MIN(accepted_at) AS first_at, MAX(accepted_at) AS last_at
         FROM self_serve_acknowledgements
-        WHERE accepted_at >= NOW() - (:days * INTERVAL '1 day')
+        WHERE accepted_at >= {_SINCE_LOWER_BOUND_PLAIN}
         GROUP BY club_name
-    """), window)).mappings().all()
+    """), {"days": days, "since": _scope_since(scope, manual=False)})).mappings().all()
 
     # (3) Completed self-serve registrations — the org plus when it was created
     # (orgs carry no created_at; the idempotency key holds the timestamp).
     # All completions are listed; utm_content / utm_source come back so each one
     # can be tagged Meta-or-not in Python below.
-    done_rows = (await db.execute(text("""
+    done_rows = (await db.execute(text(f"""
         SELECT o.name AS club_name, o.slug, o.id::text AS org_id,
                MIN(k.created_at) AS at,
                MIN(o.signup_attribution->>'utm_content') AS utm_content,
-               MIN(o.signup_attribution->>'utm_source')  AS utm_source
+               MIN(o.signup_attribution->>'utm_source')  AS utm_source,
+               (array_agg(o.signup_attribution))[1] AS attribution
         FROM organisations o
         JOIN self_serve_idempotency_keys k ON k.org_id = o.id
         WHERE o.signup_source IS NOT NULL
-          AND k.created_at >= NOW() - (:days * INTERVAL '1 day')
+          AND k.created_at >= {_SINCE_LOWER_BOUND_PLAIN}
         GROUP BY o.name, o.slug, o.id
-    """), window)).mappings().all()
+    """), {"days": days, "since": _scope_since(scope, manual=False)})).mappings().all()
 
     clubs: dict[str, dict] = {}
 
     def _upsert(name, rank, *, first_at=None, last_at=None, org_id=None,
-                slug=None, email=None, visitors=0, via_meta=False):
+                slug=None, email=None, visitors=0, via_meta=False, via_campaign=False):
         key = (name or "").strip().lower()
         if not key:
             return
         c = clubs.setdefault(key, {
             "name": (name or "").strip(), "furthest_rank": 0, "furthest_step": "",
             "first_at": None, "last_at": None, "org_id": None, "slug": None,
-            "email": None, "visitors": 0, "via_meta": False,
+            "email": None, "visitors": 0, "via_meta": False, "via_campaign": False,
         })
         if via_meta:
             c["via_meta"] = True
+        if via_campaign:
+            c["via_campaign"] = True
         if rank > c["furthest_rank"]:
             c["furthest_rank"] = rank
             c["furthest_step"] = _SELECTED_STEP_LABEL[rank]
@@ -1141,7 +1333,7 @@ async def get_selected_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
         _upsert(r["club_name"], _SELECTED_STEP_RANK["selected"],
                 first_at=r["first_at"], last_at=r["last_at"],
                 org_id=r["org_id"], visitors=int(r["visitors"] or 0),
-                via_meta=bool(r["via_meta"]))
+                via_meta=bool(r["via_meta"]), via_campaign=bool(r["via_campaign"]))
     # Terms-step acknowledgements carry no Meta signal of their own, so they
     # enrich the furthest step (and email) of whatever club they name without
     # changing its source tag.
@@ -1152,7 +1344,9 @@ async def get_selected_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
         _upsert(r["club_name"], _SELECTED_STEP_RANK["completed"],
                 first_at=r["at"], last_at=r["at"], org_id=r["org_id"], slug=r["slug"],
                 via_meta=((r["utm_content"] in utm_contents)
-                          or ((r["utm_source"] or "").strip().lower() in _META_SOURCES)))
+                          or ((r["utm_source"] or "").strip().lower() in _META_SOURCES)),
+                # The registration is classified by the SAME rule as the headline count.
+                via_campaign=_attribution_matches_campaign(r["attribution"]))
 
     # Newest selection first; a club with no timestamp (shouldn't happen — every
     # source supplies one) sinks to the bottom without tripping the aware/naive
@@ -1169,6 +1363,16 @@ async def get_selected_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
 
     # A super admin flags test noise (e.g. their own stripetest run) as hidden —
     # a display-only tidy-up of this table, never touching the Sales Pipeline.
+    # Campaign scope keeps only clubs the campaign's visitors reached. The rest in
+    # the period (another campaign's, organic, email, or a Terms-step
+    # acknowledgement with no campaign beacon behind it, which carries no ad signal
+    # at all) are COUNTED, not listed, so the page can say how many it left out
+    # and offer the all-traffic view, rather than hiding them silently.
+    outside_campaign = 0
+    if scope == "campaign":
+        outside_campaign = sum(1 for c in rows if not c["via_campaign"])
+        rows = [c for c in rows if c["via_campaign"]]
+
     from app.services import platform_settings
     hidden_keys = await platform_settings.get_hidden_meta_selections(db)
     visible = [c for c in rows if c["key"] not in hidden_keys]
@@ -1180,10 +1384,13 @@ async def get_selected_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
         "identified": len(visible),
         "hidden_count": len(hidden),
         "anonymous": int(anon),
+        "scope": scope,
+        "outside_campaign": outside_campaign,
     }
 
 
-async def get_searched_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS) -> dict:
+async def get_searched_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS,
+                             scope: str = "campaign") -> dict:
     """Name the clubs visitors TYPED into the search box — the step before a
     club is actually clicked/selected.
 
@@ -1204,7 +1411,8 @@ async def get_searched_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
     reasoning as get_selected_clubs: this is a follow-up/lead-management
     list, not a funnel stat, so a reset shouldn't drop past leads from view."""
     await _use_active_campaign(db)
-    window = {"days": days}
+    scope = normalise_scope(scope)
+    window = _scope_params(days, _scope_since(scope, manual=False))
 
     # Clubs typed into the search box, grouped by the top result the search
     # returned, tagged Meta-or-not, with a sample of the literal search terms.
@@ -1215,14 +1423,15 @@ async def get_searched_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
                MAX(created_at)          AS last_at,
                COUNT(DISTINCT visitor_id) AS visitors,
                COUNT(*)                   AS searches,
-               bool_or({_META_VISITOR_EXISTS_PLAIN}) AS via_meta,
+               bool_or({_META_VISITOR_EXISTS_PLAIN_BOUND}) AS via_meta,
+               bool_or({_campaign_visitor_exists(_SINCE_LOWER_BOUND)}) AS via_campaign,
                (array_agg(DISTINCT NULLIF(TRIM(metadata->>'search_query'), ''))
                   FILTER (WHERE NULLIF(TRIM(metadata->>'search_query'), '') IS NOT NULL)
                )[1:5] AS queries
         FROM usage_events ue
         WHERE event_type = 'self_serve_step'
           AND route = 'club_searched'
-          AND created_at >= NOW() - (:days * INTERVAL '1 day')
+          AND created_at >= {_SINCE_LOWER_BOUND}
           AND NULLIF(TRIM(metadata->>'club_name'), '') IS NOT NULL
         GROUP BY 1, 2
     """), window)).mappings().all()
@@ -1231,14 +1440,14 @@ async def get_searched_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
     # wizard) in the same window — a searched club present here converted, the
     # rest are searched-only. Keyed by normalised name, so it lines up with the
     # search rows' own grouping regardless of which org_id each side captured.
-    selected_keys = set((await db.execute(text("""
+    selected_keys = set((await db.execute(text(f"""
         SELECT DISTINCT lower(TRIM(metadata->>'club_name')) AS k
         FROM usage_events
         WHERE event_type = 'self_serve_step'
           AND route = 'club_prepared'
-          AND created_at >= NOW() - (:days * INTERVAL '1 day')
+          AND created_at >= {_SINCE_LOWER_BOUND_PLAIN}
           AND NULLIF(TRIM(metadata->>'club_name'), '') IS NOT NULL
-    """), window)).scalars().all())
+    """), {"days": days, "since": _scope_since(scope, manual=False)})).scalars().all())
 
     rows: list[dict] = []
     for r in search_rows:
@@ -1254,10 +1463,14 @@ async def get_searched_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
             "searches": int(r["searches"] or 0),
             "queries": list(r["queries"] or []),
             "via_meta": bool(r["via_meta"]),
+            "via_campaign": bool(r["via_campaign"]),
             "selected": key in selected_keys,
             "first_at": r["first_at"].isoformat() if r["first_at"] else None,
             "last_at": r["last_at"].isoformat() if r["last_at"] else None,
         })
+
+    if scope == "campaign":
+        rows = [c for c in rows if c["via_campaign"]]
 
     _floor = datetime.min.replace(tzinfo=timezone.utc)
     rows.sort(key=lambda c: c["last_at"] or _floor.isoformat(), reverse=True)
@@ -1277,6 +1490,7 @@ async def get_searched_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
         "hidden_count": len(hidden),
         "searched_only_count": len(searched_only),
         "converted_count": len(visible) - len(searched_only),
+        "scope": scope,
     }
 
 
@@ -1441,7 +1655,10 @@ def build_insights(campaign: dict, ads: list[dict], daily_history: list[dict],
             })
 
     # Best vs worst spending ad.
-    spending_ads = [a for a in ads if (a.get("spend") or 0) >= 3 and a.get("cost_per_lpv")]
+    # Only ads that are still running: "shift budget its way" about a paused ad is
+    # advice nobody can act on (it named Ad_ClubSearch_Static_Sep2026 while paused).
+    spending_ads = [a for a in ads if (a.get("spend") or 0) >= 3 and a.get("cost_per_lpv")
+                    and (a.get("delivery_status") or "ACTIVE") == "ACTIVE"]
     if len(spending_ads) >= 2:
         best = min(spending_ads, key=lambda a: a["cost_per_lpv"])
         worst = max(spending_ads, key=lambda a: a["cost_per_lpv"])
@@ -1518,6 +1735,17 @@ async def run_snapshot(db: AsyncSession) -> dict:
     await upsert_snapshot(db, today, "campaign", campaign, reason, status)
     for ad in ads:
         await upsert_snapshot(db, today, "ad", ad)
+    # An ad with no delivery in the window gets no insights row, so an EARLIER pull the
+    # same day (lifetime figures, before a counting-since or restart date changed the
+    # window) would otherwise stay and be summed into the stream totals, the funnel, the
+    # ad list and the creative table, next to a campaign row that has moved on. It showed
+    # as "(untagged) A$217.72", three removed video ads' lifetime spend, after the 10 Nov
+    # restart. Today's rows are exactly what this pull returned, no more.
+    await db.execute(text("""
+        DELETE FROM meta_ad_snapshots
+         WHERE level = 'ad' AND campaign_id = :campaign_id AND snapshot_date = :d
+           AND COALESCE(ad_id, '') <> ALL(CAST(:ids AS text[]))
+    """), {"campaign_id": _campaign_id(), "d": today, "ids": [a["ad_id"] for a in ads if a.get("ad_id")]})
 
     # TRUE (non-cumulative) daily breakdowns, stored under their own levels
     # ('campaign'/'ad' above are lifetime-to-date-as-of-today totals, needed
@@ -2122,8 +2350,11 @@ def compute_stream_funnel(bucket: dict, results: int, club_selected: float | Non
         ("landing_page_views", "Landing page views", bucket.get("landing_page_views") or 0),
     ]
     if club_selected is not None:
+        # Meta's Lead fires the moment a club is picked, which is the same moment as our
+        # `club_prepared` beacon. They are two measures of ONE step, so they are not two
+        # stages in a row: the Lead count rides on this stage as a note (it used to be its
+        # own stage, which read as a 23,200% "continued" between them).
         stages_raw.append(("club_selected", "Club selected", club_selected or 0))
-        stages_raw.append(("leads", "Started registering (Meta-reported)", bucket.get("leads") or 0))
     stages_raw.append(("results", bucket.get("result_label") or "Results", results or 0))
 
     top = stages_raw[0][2] or 0
@@ -2132,10 +2363,16 @@ def compute_stream_funnel(bucket: dict, results: int, club_selected: float | Non
     for key, label, value in stages_raw:
         pct_of_top = round(100 * value / top, 1) if top else 0.0
         pct_of_prev = 100.0 if prev is None else (round(100 * value / prev, 1) if prev else 0.0)
-        stages.append({
+        stage = {
             "key": key, "label": label, "value": value,
             "pct_of_top": pct_of_top, "pct_of_prev": pct_of_prev,
-        })
+        }
+        if key == "club_selected":
+            leads = int(bucket.get("leads") or 0)
+            stage["note"] = (f"Meta counted {leads} Lead event{'' if leads == 1 else 's'} for the same step "
+                             "(its own count, so it can differ from ours).")
+            stage["meta_leads"] = leads
+        stages.append(stage)
         prev = value
     return stages
 

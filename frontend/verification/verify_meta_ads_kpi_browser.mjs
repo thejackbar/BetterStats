@@ -57,7 +57,9 @@ const trialStream = {
   ends_on: null, ended: false, since_change: null,
   funnel: [
     { key: 'impressions', label: 'Impressions', value: 90000, pct_of_top: 100, pct_of_prev: 100 },
-    { key: 'results', label: 'Free trial signups', value: SIGNUPS, pct_of_top: 0, pct_of_prev: 0.9 },
+    { key: 'club_selected', label: 'Club selected', value: 20, pct_of_top: 0, pct_of_prev: 0, meta_leads: 275,
+      note: 'Meta counted 275 Lead events for the same step (its own count, so it can differ from ours).' },
+    { key: 'results', label: 'Free trial signups', value: SIGNUPS, pct_of_top: 0, pct_of_prev: 30 },
   ],
 }
 const webinarEmpty = {
@@ -108,13 +110,13 @@ const ROWS = [
   row(6),
 ]
 
-const summaryFor = ({ webinar = webinarEmpty, countingSince = null, countsFrom = null, excluded = { before_restart: 0, undated: 0 } } = {}) => ({
+const summaryFor = ({ webinar = webinarEmpty, countingSince = null, countsFrom = null, excluded = { before_restart: 0, undated: 0 }, unattributed = 0 } = {}) => ({
   campaign: {
     spend: TRIAL_SPEND + webinar.spend, impressions: 90000, link_clicks: 800, link_ctr: 0.9,
     landing_page_views: 700, cost_per_lpv: 2.43, leads: 9, registrations: SIGNUPS,
     leads_adjustment: 0, leads_effective: SIGNUPS,
   },
-  ads: ADS, streams: [trialStream, webinar], creatives: CREATIVES, unattributed_spend: 0,
+  ads: ADS, streams: [trialStream, webinar], creatives: CREATIVES, unattributed_spend: unattributed,
   annotations: [], attribution_window_days: 7, undated_trial_results: 0,
   recommendation: null, recommendation_status: null, last_updated: new Date().toISOString(),
   leads_adjustment: 0, campaign_budget: 750, campaign_length_days: 30, insights: [],
@@ -133,17 +135,31 @@ const browser = await chromium.launch(existsSync(EXECUTABLE) ? { executablePath:
 const SELECTED = {
   clubs: [
     { name: 'Applegrove CC', key: 'applegrove cc', slug: null, via_meta: true, furthest_step: 'Registration completed', email: 'sec@applegrove.example', last_at: '2026-11-10T09:00:00Z' },
-    { name: 'Bayview CC', key: 'bayview cc', slug: null, via_meta: true, furthest_step: 'Reached Terms & privacy', email: null, last_at: '2026-11-10T08:00:00Z' },
-    { name: 'Cresthill CC', key: 'cresthill cc', slug: null, via_meta: false, furthest_step: 'Selected a club', email: null, last_at: '2026-11-09T08:00:00Z' },
+    { name: 'Bayview CC', key: 'bayview cc', slug: null, via_meta: true, furthest_step: 'Reached Terms & privacy', email: 'bayview@club.example', last_at: '2026-11-10T08:00:00Z' },
+    { name: 'Cresthill CC', key: 'cresthill cc', slug: null, via_meta: true, furthest_step: 'Club selected', email: null, last_at: '2026-11-09T08:00:00Z' },
   ],
-  hidden_clubs: [], identified: 3, hidden_count: 0, anonymous: 0,
+  hidden_clubs: [], identified: 3, hidden_count: 0, anonymous: 2, outside_campaign: 2, scope: 'campaign',
+}
+// What 'All traffic' adds: a club from other traffic, and no "left out" count.
+const SELECTED_ALL = {
+  ...SELECTED,
+  clubs: [...SELECTED.clubs,
+    { name: 'Organic CC', key: 'organic cc', slug: null, via_meta: false, furthest_step: 'Reached Terms & privacy', email: 'org@club.example', last_at: '2026-11-08T08:00:00Z' }],
+  identified: 4, outside_campaign: 0, scope: 'all',
 }
 const SEARCHED = {
   clubs: [
     { name: 'Dunmore CC', key: 'dunmore cc', via_meta: true, selected: false, visitors: 4, searches: 6, queries: ['dunmore', 'dunmore cricket'], last_at: '2026-11-10T07:00:00Z' },
     { name: 'Applegrove CC', key: 'applegrove cc', via_meta: true, selected: true, visitors: 2, searches: 2, queries: ['applegrove'], last_at: '2026-11-10T06:00:00Z' },
   ],
-  hidden_clubs: [], identified: 2, hidden_count: 0, searched_only_count: 1, converted_count: 1,
+  hidden_clubs: [], identified: 2, hidden_count: 0, searched_only_count: 1, converted_count: 1, scope: 'campaign',
+}
+const ONSITE = {
+  days: 7, scope: 'campaign',
+  meta: { visitors: 31, views: 60, facebook: 29, instagram: 2, paid: 31 },
+  conversion: { visitors: 31, reached_intent: 3, pct: 10 },
+  creatives: [{ content: 'check_out_your_club_v2', campaign: 'BC_AU_Trial_CBO_Sep2026', visitors: 31 }],
+  landing: [{ page: '/trial', label: 'Trial page', visitors: 31 }],
 }
 
 async function open({ summary, signups = { rows: ROWS, campaigns: [] }, signupsFail = false, listsFail = false,
@@ -152,10 +168,13 @@ async function open({ summary, signups = { rows: ROWS, campaigns: [] }, signupsF
   const ctx = await browser.newContext({ viewport: { width, height: 3200 } })
   const page = await ctx.newPage()
   const errors = []
+  const wire = []
   page.on('pageerror', (e) => errors.push(String(e)))
   await page.route('**/api/**', async (route) => {
     const u = new URL(route.request().url())
     const p = u.pathname.replace(/^\/api/, '')
+    wire.push(p + u.search)
+    const scopeQ = u.searchParams.get('scope')
     const json = (b, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(b) })
     if (/\/auth\/me/.test(p)) {
       return json({ id: 'boss', username: 'boss', display_name: 'Boss', role: 'super_admin',
@@ -184,8 +203,9 @@ async function open({ summary, signups = { rows: ROWS, campaigns: [] }, signupsF
         { key: 'b', label: 'Completed', value: 6, pct_of_top: 30, pct_of_prev: 30 },
       ] })
     }
-    if (/meta-ads\/selected-clubs/.test(p)) return listsFail ? json({ detail: 'boom' }, 500) : json(selected)
+    if (/meta-ads\/selected-clubs/.test(p)) return listsFail ? json({ detail: 'boom' }, 500) : json(scopeQ === 'all' && selected === SELECTED ? SELECTED_ALL : selected)
     if (/meta-ads\/searched-clubs/.test(p)) return listsFail ? json({ detail: 'boom' }, 500) : json(searched)
+    if (/meta-ads\/onsite/.test(p)) return json({ ...ONSITE, scope: scopeQ || 'campaign', days: Number(u.searchParams.get('days') || 30) })
     if (/meta-ads\/ad-signups/.test(p)) return signupsFail ? json({ detail: 'boom' }, 500) : json(signups)
     if (/usage\/campaigns/.test(p)) {
       return json({ days: 30, meta: { visitors: 10, facebook: 8, instagram: 2, paid: 9 },
@@ -198,14 +218,14 @@ async function open({ summary, signups = { rows: ROWS, campaigns: [] }, signupsF
   await page.locator('[data-testid="stream-card-trial"], [data-testid="kpi-strip"]')
     .first().waitFor({ state: 'visible', timeout: 15000 }).catch(() => {})
   await page.waitForTimeout(1200)
-  return { page, ctx, errors }
+  return { page, ctx, errors, wire }
 }
 const val = (page, id) => textOf(page.locator(`[data-testid="kpi-${id}-value"]`))
 const money = (n) => `A$${n.toFixed(2)}`
 
 // ── A. The normal read ───────────────────────────────────────────────────────
 {
-  const { page, ctx, errors } = await open({ summary: summaryFor() })
+  const { page, ctx, errors, wire } = await open({ summary: summaryFor() })
   ck('the KPI strip exists', await has(page.locator('[data-testid="kpi-strip"]')))
 
   ck('Spend is the campaign spend', (await val(page, 'spend')).trim() === money(TRIAL_SPEND), await val(page, 'spend'))
@@ -295,43 +315,108 @@ const money = (n) => `A$${n.toFixed(2)}`
   await page.waitForTimeout(700)
   ck('the toggle shows them', (await page.locator('.recharts-wrapper').count()) > 0)
 
-  // Demand section: one stacked block. NOTHING is behind a click: the lists of who
-  // typed a club in and the furthest step each reached are the follow-up list, and
-  // they were lost once already to a tab that opened on the funnel.
+  // ── The clubs panel: one list, stacked in view, with the stage each club reached ──
   const bodyNow = await page.locator('body').innerText()
+  const stageOf = async (name) => {
+    const row = page.locator('[data-testid="club-row"]', { hasText: name })
+    return (await row.count()) ? (await textOf(row.first().locator('[data-testid="club-stage"]'))).toLowerCase() : ''
+  }
   ck('the section has no tabs', (await page.locator('[role="tab"], [data-testid^="demand-tab-"]').count()) === 0)
-  ck('Clubs selected is on screen with nothing clicked', /clubs selected in the wizard/i.test(bodyNow))
-  ck('Clubs searched is on screen with nothing clicked', /clubs searched in the wizard/i.test(bodyNow))
-  ck('the wizard funnel is on screen too', /wizard: where visitors drop off/i.test(bodyNow))
-  ck('where Meta clicks land is on screen too', /where meta clicks land/i.test(bodyNow))
-  ck('each selected club is named', ['Applegrove CC', 'Bayview CC', 'Cresthill CC'].every((n) => bodyNow.includes(n)))
-  ck('and the furthest step each reached is shown (CSS-uppercase, so compared lowercase)',
-     /registration completed/i.test(bodyNow) && /reached terms & privacy/i.test(bodyNow) && /selected a club/i.test(bodyNow))
-  ck('each searched club is named with what was typed', bodyNow.includes('Dunmore CC') && bodyNow.includes('“dunmore”'))
-  ck('searched-only is told apart from selected', /searched only/i.test(bodyNow) && /\bselected\b/i.test(bodyNow))
-  const posOf = (re) => bodyNow.search(re)
-  ck('the two stage lists come before the funnel',
-     posOf(/clubs selected in the wizard/i) > -1 && posOf(/clubs selected in the wizard/i) < posOf(/wizard: where visitors drop off/i)
-     && posOf(/clubs searched in the wizard/i) < posOf(/wizard: where visitors drop off/i))
-  ck('no empty-state message when there is data', !(await has(page.locator('[data-testid="selected-empty"], [data-testid="searched-empty"], [data-testid="lists-failed"]'))))
+  ck('the clubs panel is on screen with nothing clicked', await has(page.locator('[data-testid="clubs-panel"]')))
+  ck('each club that typed in is named, once (the two lists are folded)',
+     (await page.locator('[data-testid="club-row"]').count()) === 4
+     && ['Applegrove CC', 'Bayview CC', 'Cresthill CC', 'Dunmore CC'].every((n) => bodyNow.includes(n)),
+     String(await page.locator('[data-testid="club-row"]').count()))
+  ck('a completed club says Completed', (await stageOf('Applegrove')).includes('completed'), await stageOf('Applegrove'))
+  ck('a club that reached the Terms step says so', (await stageOf('Bayview')).includes('reached terms'), await stageOf('Bayview'))
+  ck('a club that only picked one says Selected a club', (await stageOf('Cresthill')).includes('selected a club'), await stageOf('Cresthill'))
+  ck('a club only searched is told apart', (await stageOf('Dunmore')).includes('searched only'), await stageOf('Dunmore'))
+  ck('what was typed is shown', bodyNow.includes('“dunmore”'))
+  const count = async (k) => (await textOf(page.locator(`[data-testid="club-chip-count-${k}"]`))).trim()
+  ck('the stage chips carry counts', [await count('all'), await count('completed'), await count('terms'), await count('selected'), await count('searched')].join(',') === '4,1,1,1,1',
+     [await count('all'), await count('completed'), await count('terms'), await count('selected'), await count('searched')].join(','))
+  await clickIf(page.locator('[data-testid="club-chip-terms"]'))
+  ck('"Reached terms, not finished" shows only the club that stopped at Terms',
+     (await page.locator('[data-testid="club-row"]').count()) === 1 && (await page.locator('[data-testid="club-row"]').first().innerText()).includes('Bayview'))
+  await clickIf(page.locator('[data-testid="club-chip-searched"]'))
+  ck('"Searched only" shows only Dunmore', (await page.locator('[data-testid="club-row"]').count()) === 1 && (await page.locator('[data-testid="club-row"]').first().innerText()).includes('Dunmore'))
+  await clickIf(page.locator('[data-testid="club-chip-all"]'))
+  await page.locator('input[type="search"]').first().fill('crest')
+  ck('the name search narrows it', (await page.locator('[data-testid="club-row"]').count()) === 1 && (await page.locator('[data-testid="club-row"]').first().innerText()).includes('Cresthill'))
+  await page.locator('input[type="search"]').first().fill('')
+  ck('what the campaign view left out is counted, with a way to see it', /2 more clubs started in this period from other traffic/i.test(await textOf(page.locator('[data-testid="clubs-outside"]'))))
+  ck('selections that could not be named are counted too', /2 club selections in this period could not be named/i.test(await textOf(page.locator('[data-testid="clubs-unnamed"]'))))
+  ck('no empty or failed message when there is data', !(await has(page.locator('[data-testid="clubs-empty"], [data-testid="lists-failed"]'))))
+  ck('the wizard funnel and the traffic card are on screen too',
+     /wizard: where visitors drop off \(7 days\)/i.test(bodyNow) && await has(page.locator('[data-testid="traffic-card"]')))
+  ck('the club list leads, before the wizard funnel', bodyNow.search(/clubs that typed in their club/i) > -1 && bodyNow.search(/clubs that typed in their club/i) < bodyNow.search(/wizard: where visitors drop off/i))
+
+  // ── The trial funnel: Club selected and Meta's Lead are one step, not two ────────
+  const funnelText = await textOf(page.locator('[data-testid="stream-card-trial"]').locator('xpath=ancestor::div[contains(@class,"grid")][1]'))
+  ck('the trial funnel has no "Started registering" stage after Club selected', !/started registering/i.test(funnelText) && /club selected/i.test(funnelText), funnelText.slice(0, 200))
+  ck("Meta's Lead count is a note on the Club selected stage", /Meta counted 275 Lead events for the same step/.test(await textOf(page.locator('[data-testid="funnel-note"]'))))
+  ck('no step reads over 100% "continued" (it read 23,200%)', !/\b\d{3,}(\.\d)?% continued/.test(bodyNow))
+  ck('the webinar card is not shown for a campaign with no webinar ad or result', !(await has(page.locator('[data-testid="stream-card-webinar"]'))))
+
+  // ── The wire: one period and one scope, sent to every on-site panel ─────────────
+  const reads = (re) => wire.filter((w) => re.test(w))
+  ck('the first load asks for 7 days of THIS CAMPAIGN for the funnel, both lists and the traffic card',
+     reads(/registration-funnel\?days=7&scope=campaign/).length >= 1 && reads(/selected-clubs\?days=7&scope=campaign/).length >= 1
+     && reads(/searched-clubs\?days=7&scope=campaign/).length >= 1 && reads(/onsite\?days=7&scope=campaign/).length >= 1, wire.filter((w) => /meta-ads\/(reg|sel|sea|ons)/.test(w)).join(' | '))
+  ck('and no longer reads the Usage page\'s all-traffic card', reads(/usage\/campaigns/).length === 0, reads(/usage\/campaigns/).join(','))
+  const before = wire.length
+  await clickIf(page.locator('[data-testid="period-30"]'))
+  await page.waitForTimeout(600)
+  const afterPeriod = wire.slice(before)
+  ck('picking 30 days re-reads every panel for 30 days, still this campaign',
+     afterPeriod.some((w) => /selected-clubs\?days=30&scope=campaign/.test(w)) && afterPeriod.some((w) => /registration-funnel\?days=30&scope=campaign/.test(w))
+     && afterPeriod.some((w) => /onsite\?days=30&scope=campaign/.test(w)), afterPeriod.join(' | '))
+  const before2 = wire.length
+  await clickIf(page.locator('[data-testid="period-730"]'))
+  await page.waitForTimeout(600)
+  const afterWhole = wire.slice(before2)
+  ck('"Whole campaign" asks each endpoint for its own maximum (the funnel caps at 90, the card at 365)',
+     afterWhole.some((w) => /selected-clubs\?days=730&scope=campaign/.test(w)) && afterWhole.some((w) => /registration-funnel\?days=90&scope=campaign/.test(w))
+     && afterWhole.some((w) => /onsite\?days=365&scope=campaign/.test(w)), afterWhole.join(' | '))
+  await clickIf(page.locator('[data-testid="period-7"]'))
+  const before3 = wire.length
+  await clickIf(page.locator('[data-testid="scope-all"]'))
+  await page.waitForTimeout(600)
+  const afterScope = wire.slice(before3)
+  ck('"All traffic" re-reads everything with scope=all', afterScope.some((w) => /selected-clubs\?days=7&scope=all/.test(w)) && afterScope.some((w) => /onsite\?days=7&scope=all/.test(w)) && afterScope.some((w) => /registration-funnel\?days=7&scope=all/.test(w)), afterScope.join(' | '))
+  ck('the scope note changes to say every source', /every source/i.test(await textOf(page.locator('[data-testid="scope-note"]'))))
+  ck('the other traffic\'s club now appears', (await page.locator('[data-testid="club-row"]', { hasText: 'Organic CC' }).count()) === 1)
+  ck('and the "left out" note is gone', !(await has(page.locator('[data-testid="clubs-outside"]'))))
+  ck('a Meta-only filter appears for all traffic', await has(page.locator('[data-testid="club-meta-only"]')))
+  await page.locator('[data-testid="club-meta-only"]').check().catch(() => {})
+  ck('and it hides the club that did not come through Meta', (await page.locator('[data-testid="club-row"]', { hasText: 'Organic CC' }).count()) === 0)
+  await clickIf(page.locator('[data-testid="scope-campaign"]'))
   await page.screenshot({ path: '/tmp/meta_ads_kpi_desktop.png', fullPage: true })
   ck('no page errors', errors.length === 0, errors.join(' | '))
   await ctx.close()
 }
 
-// ── A2. The lists are empty, or fail to load: say so, never go quiet ──────────
+// ── A2. The list is empty, or fails to load: say so, never go quiet ─────────────
 {
-  const empty = { clubs: [], hidden_clubs: [], identified: 0, hidden_count: 0, anonymous: 0, searched_only_count: 0, converted_count: 0 }
+  const empty = { clubs: [], hidden_clubs: [], identified: 0, hidden_count: 0, anonymous: 0, searched_only_count: 0, converted_count: 0, outside_campaign: 0 }
   const { page, ctx } = await open({ summary: summaryFor(), selected: empty, searched: empty })
-  ck('empty lists say none recorded yet instead of vanishing',
-     (await has(page.locator('[data-testid="selected-empty"]'))) && (await has(page.locator('[data-testid="searched-empty"]'))))
+  ck('an empty list says no club typed in during the period instead of vanishing', /no club typed into the trial page from this campaign in the last 7 days/i.test(await textOf(page.locator('[data-testid="clubs-empty"]'))))
   ck('and that is not reported as a load failure', !(await has(page.locator('[data-testid="lists-failed"]'))))
   await ctx.close()
 }
 {
   const { page, ctx } = await open({ summary: summaryFor(), listsFail: true })
-  ck('a failed load of the lists is shown, not swallowed', await has(page.locator('[data-testid="lists-failed"]')))
-  ck('and no misleading "none recorded" appears beside it', !(await has(page.locator('[data-testid="selected-empty"], [data-testid="searched-empty"]'))))
+  ck('a failed load of the list is shown, not swallowed', await has(page.locator('[data-testid="lists-failed"]')))
+  ck('and no misleading "no club typed in" appears beside it', !(await has(page.locator('[data-testid="clubs-empty"]'))))
+  await ctx.close()
+}
+
+// ── A2b. Stale ad rows: the ads add up to MORE than the campaign spent ───────────
+{
+  const { page, ctx } = await open({ summary: summaryFor({ unattributed: -1419.84 }) })
+  ck('Cost per trial is withheld when the ad rows disagree with the campaign spend', (await val(page, 'cost')).trim() === '–', await val(page, 'cost'))
+  ck('and so is ROAS', (await val(page, 'roas')).trim() === '–', await val(page, 'roas'))
+  ck('and the page says why, and what to press', /add up to A\$1419\.84 more than the campaign/i.test(await textOf(page.locator('[data-testid="stale-spend"]'))) && /refresh now/i.test(await textOf(page.locator('[data-testid="stale-spend"]'))))
   await ctx.close()
 }
 

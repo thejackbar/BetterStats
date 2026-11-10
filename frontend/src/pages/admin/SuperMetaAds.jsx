@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   ResponsiveContainer, BarChart, Bar, LineChart, Line, XAxis, YAxis,
   CartesianGrid, Tooltip, ReferenceLine, ReferenceArea,
@@ -6,6 +6,7 @@ import {
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
 import { computeKpis, convertedByCreative, unmappedAds, creativeKey, NO_TAG } from './metaAdsKpi'
+import { mergeClubs, stageCounts, applyClubFilters, STAGES } from './metaAdsClubs'
 
 const DEFAULT_BUDGET = 900
 const DEFAULT_LENGTH_DAYS = 30
@@ -424,45 +425,109 @@ function InsightRow({ insight }) {
   )
 }
 
-// One row of the "Clubs selected in the wizard" table. `hidden` renders it as a
-// dimmed, flagged-as-test row with a Restore action; otherwise it shows a
-// "Flag as test" action that hides it (table-only — never touches the pipeline).
-function SelectionRow({ c, hidden = false, busy = false, onFlag, onRestore }) {
+// ── Period and scope: ONE control for every on-site panel ─────────────────────
+// With a campaign selected the on-site numbers used to be all traffic, and the club
+// list went back to the start of the year. The period narrows how far back, the
+// scope says whose traffic: the selected campaign (default) or everything.
+const PERIODS = [
+  { days: 1, label: '24 hours' },
+  { days: 7, label: '7 days' },
+  { days: 14, label: '14 days' },
+  { days: 30, label: '30 days' },
+  { days: 730, label: 'Whole campaign' },
+]
+const periodLabel = (days) => (PERIODS.find((p) => p.days === days) || PERIODS[1]).label.toLowerCase()
+
+function Segmented({ options, value, onChange, testPrefix }) {
   return (
-    <tr className={`border-b pb-hairline last:border-0 hover:bg-pb-surface2/40 ${hidden ? 'opacity-50' : ''}`}>
+    <div role="group" className="inline-flex flex-wrap rounded border border-pb-hairline overflow-hidden">
+      {options.map((o) => (
+        <button
+          key={String(o.value)}
+          type="button"
+          aria-pressed={value === o.value}
+          data-testid={`${testPrefix}-${o.value}`}
+          onClick={() => onChange(o.value)}
+          className={`px-2.5 py-1 font-mono text-[10px] uppercase tracking-wide2 ${
+            value === o.value ? 'bg-pb-accent text-white' : 'text-pb-dim hover:bg-pb-surface2'
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function PeriodScopeBar({ period, onPeriod, scope, onScope, countsFrom }) {
+  return (
+    <div data-testid="period-scope-bar" className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      <Segmented
+        testPrefix="period"
+        value={period}
+        onChange={onPeriod}
+        options={PERIODS.map((p) => ({ value: p.days, label: p.label }))}
+      />
+      <Segmented
+        testPrefix="scope"
+        value={scope}
+        onChange={onScope}
+        options={[{ value: 'campaign', label: 'This campaign' }, { value: 'all', label: 'All traffic' }]}
+      />
+      <span data-testid="scope-note" className="font-mono text-[9px] text-pb-faint">
+        {scope === 'campaign'
+          ? <>This campaign&rsquo;s visitors only{countsFrom ? <>, from {fmtDay(countsFrom)}</> : ''}.</>
+          : 'Every source, including other campaigns, email and organic.'}
+      </span>
+    </div>
+  )
+}
+
+const STAGE_BADGE = {
+  completed: 'border-emerald-500/40 text-emerald-300 bg-emerald-500/10',
+  terms: 'border-amber-500/40 text-amber-300 bg-amber-500/10',
+  selected: 'border-violet-500/40 text-violet-300 bg-violet-500/10',
+  searched: 'border-sky-500/40 text-sky-300 bg-sky-500/10',
+}
+// Chips, in the order a follow-up works through them. `terms` is "reached the Terms step and
+// has not finished", the clubs worth a call.
+const STAGE_CHIPS = [
+  { key: 'all', label: 'All' },
+  { key: 'completed', label: 'Completed' },
+  { key: 'terms', label: 'Reached terms, not finished' },
+  { key: 'selected', label: 'Selected a club' },
+  { key: 'searched', label: 'Searched only' },
+]
+
+function ClubRow({ c, busy, onFlag, onRestore }) {
+  const terms = c.queries.filter(Boolean)
+  return (
+    <tr data-testid="club-row" className={`border-b pb-hairline last:border-0 hover:bg-pb-surface2/40 ${c.hidden ? 'opacity-50' : ''}`}>
       <td className="px-2 py-2 text-pb-text font-medium whitespace-nowrap">
         {c.slug ? <a href={`/${c.slug}`} className="hover:underline">{c.name}</a> : c.name}
       </td>
       <td className="px-2 py-2">
-        <span className={`inline-block px-1.5 py-0.5 rounded-full border font-mono text-[9px] uppercase ${
-          c.via_meta
-            ? 'border-violet-500/40 text-violet-300 bg-violet-500/10'
-            : 'border-pb-hairline text-pb-faint'
-        }`}>
-          {c.via_meta ? 'Meta' : 'Other'}
+        <span data-testid="club-stage" className={`inline-block px-1.5 py-0.5 rounded-full border font-mono text-[9px] uppercase whitespace-nowrap ${STAGE_BADGE[c.stage]}`}>
+          {STAGES[c.stage].label}
         </span>
       </td>
       <td className="px-2 py-2">
         <span className={`inline-block px-1.5 py-0.5 rounded-full border font-mono text-[9px] uppercase ${
-          c.furthest_step === 'Registration completed'
-            ? 'border-emerald-500/40 text-emerald-300 bg-emerald-500/10'
-            : c.furthest_step === 'Reached Terms & privacy'
-              ? 'border-amber-500/40 text-amber-300 bg-amber-500/10'
-              : 'border-pb-hairline text-pb-faint'
+          c.via_meta ? 'border-violet-500/40 text-violet-300 bg-violet-500/10' : 'border-pb-hairline text-pb-faint'
         }`}>
-          {c.furthest_step}
+          {c.via_meta ? 'Meta' : 'Other'}
         </span>
       </td>
       <td className="px-2 py-2 text-pb-dim whitespace-nowrap">{c.email || '–'}</td>
+      <td className="px-2 py-2 text-pb-dim max-w-[16rem]">
+        <span className="block truncate" title={`${fmtNum(c.visitors)} visitor${c.visitors === 1 ? '' : 's'}, ${fmtNum(c.searches)} search${c.searches === 1 ? '' : 'es'}`}>
+          {terms.length ? terms.map((t) => `“${t}”`).join(' · ') : '–'}
+        </span>
+      </td>
       <td className="px-2 py-2 text-pb-dim whitespace-nowrap">{fmtTime(c.last_at)}</td>
       <td className="px-2 py-2 text-right whitespace-nowrap">
-        {hidden ? (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={onRestore}
-            className="font-mono text-[9px] uppercase text-pb-faint hover:text-pb-text disabled:opacity-40"
-          >
+        {c.hidden ? (
+          <button type="button" disabled={busy} onClick={onRestore} className="font-mono text-[9px] uppercase text-pb-faint hover:text-pb-text disabled:opacity-40">
             Restore
           </button>
         ) : (
@@ -470,7 +535,7 @@ function SelectionRow({ c, hidden = false, busy = false, onFlag, onRestore }) {
             type="button"
             disabled={busy}
             onClick={onFlag}
-            title="Hide this row from the table (doesn't affect the Sales Pipeline)"
+            title="Hide this row from the list (doesn't affect the Sales Pipeline)"
             className="font-mono text-[9px] uppercase text-pb-faint hover:text-red-300 disabled:opacity-40"
           >
             Flag as test
@@ -481,64 +546,192 @@ function SelectionRow({ c, hidden = false, busy = false, onFlag, onRestore }) {
   )
 }
 
-// One row of the "Clubs searched" table — a club that got typed into the
-// search box (results loaded) whether or not it was then selected. `selected`
-// tells the two apart; the whole point is surfacing the searched-only ones.
-function SearchRow({ c, hidden = false, busy = false, onFlag, onRestore }) {
-  const terms = (c.queries || []).filter(Boolean)
+// The follow-up list: every club that typed into the trial page in the chosen period, one row
+// each, with the furthest stage it reached. It was two tables (selected, searched) that said the
+// same club twice; they fold on the club name. Always stacked in view, never behind a tab, and
+// an empty or failed list says so (it was lost once to a tab that opened on the funnel).
+function ClubsPanel({ selected, searched, scope, onScope, period, failed, busyKey, onFlag, onRestore }) {
+  const filter = useClubFilter()
+  const [stage, setStage] = useState('all')
+  const [metaOnly, setMetaOnly] = useState(false)
+  const [showHidden, setShowHidden] = useState(false)
+  const [limit, setLimit] = useState(40)
+  const rows = useMemo(() => mergeClubs(selected, searched), [selected, searched])
+  const visible = rows.filter((r) => !r.hidden)
+  const hidden = rows.filter((r) => r.hidden)
+  const counts = stageCounts(visible)
+  const searchedRows = filter.apply(visible)
+  const shown = applyClubFilters(searchedRows, { stage, source: metaOnly ? 'meta' : 'all' })
+  const shownHidden = showHidden ? filter.apply(hidden) : []
+  const loading = !failed && (selected == null || searched == null)
+  const outside = selected?.outside_campaign || 0
+  const unnamed = selected?.anonymous || 0
   return (
-    <tr className={`border-b pb-hairline last:border-0 hover:bg-pb-surface2/40 ${hidden ? 'opacity-50' : ''}`}>
-      <td className="px-2 py-2 text-pb-text font-medium whitespace-nowrap">{c.name}</td>
-      <td className="px-2 py-2">
-        <span className={`inline-block px-1.5 py-0.5 rounded-full border font-mono text-[9px] uppercase ${
-          c.via_meta
-            ? 'border-violet-500/40 text-violet-300 bg-violet-500/10'
-            : 'border-pb-hairline text-pb-faint'
-        }`}>
-          {c.via_meta ? 'Meta' : 'Other'}
+    <div data-testid="clubs-panel" className="pb-card p-4 mb-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
+        <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint">
+          Clubs that typed in their club, and how far they got
+        </div>
+        <span className="font-mono text-[10px] text-pb-faintest flex items-center gap-2">
+          <span data-testid="clubs-count">{shown.length} of {visible.length} club{visible.length === 1 ? '' : 's'}, {periodLabel(period)}</span>
+          {hidden.length > 0 && (
+            <button type="button" onClick={() => setShowHidden((v) => !v)} className="px-1.5 py-0.5 rounded-full border border-pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-dim uppercase">
+              {showHidden ? 'Hide' : 'Show'} {hidden.length} test{hidden.length === 1 ? '' : 's'}
+            </button>
+          )}
         </span>
-      </td>
-      <td className="px-2 py-2">
-        <span className={`inline-block px-1.5 py-0.5 rounded-full border font-mono text-[9px] uppercase ${
-          c.selected
-            ? 'border-emerald-500/40 text-emerald-300 bg-emerald-500/10'
-            : 'border-sky-500/40 text-sky-300 bg-sky-500/10'
-        }`}>
-          {c.selected ? 'Selected' : 'Searched only'}
-        </span>
-      </td>
-      <td className="px-2 py-2 text-pb-dim font-mono whitespace-nowrap" title={`${fmtNum(c.searches)} search${c.searches === 1 ? '' : 'es'}`}>
-        {fmtNum(c.visitors)}
-      </td>
-      <td className="px-2 py-2 text-pb-dim max-w-[16rem]">
-        <span className="block truncate" title={terms.join(' · ')}>
-          {terms.length ? terms.map((t) => `“${t}”`).join(' · ') : '–'}
-        </span>
-      </td>
-      <td className="px-2 py-2 text-pb-dim whitespace-nowrap">{fmtTime(c.last_at)}</td>
-      <td className="px-2 py-2 text-right whitespace-nowrap">
-        {hidden ? (
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1.5 my-2.5">
+        {STAGE_CHIPS.map((chip) => (
           <button
+            key={chip.key}
             type="button"
-            disabled={busy}
-            onClick={onRestore}
-            className="font-mono text-[9px] uppercase text-pb-faint hover:text-pb-text disabled:opacity-40"
+            aria-pressed={stage === chip.key}
+            data-testid={`club-chip-${chip.key}`}
+            onClick={() => { setStage(chip.key); setLimit(40) }}
+            className={`px-2 py-1 rounded-full border font-mono text-[10px] ${
+              stage === chip.key ? 'border-pb-accent bg-pb-accent/15 text-pb-text' : 'border-pb-hairline text-pb-dim hover:border-pb-dim'
+            }`}
           >
-            Restore
+            {chip.label} <span data-testid={`club-chip-count-${chip.key}`} className="opacity-70">{counts[chip.key]}</span>
           </button>
-        ) : (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={onFlag}
-            title="Hide this row from the table (doesn't affect the Sales Pipeline)"
-            className="font-mono text-[9px] uppercase text-pb-faint hover:text-red-300 disabled:opacity-40"
-          >
-            Flag as test
-          </button>
+        ))}
+        {scope === 'all' && (
+          <label className="flex items-center gap-1.5 ml-1 font-mono text-[10px] text-pb-dim">
+            <input type="checkbox" checked={metaOnly} onChange={(e) => setMetaOnly(e.target.checked)} data-testid="club-meta-only" />
+            Meta only
+          </label>
         )}
-      </td>
-    </tr>
+      </div>
+
+      <ClubFilterBar filter={filter} placeholder="Search club name" />
+
+      {failed && (
+        <p data-testid="lists-failed" className="font-mono text-[10px] text-red-300 bg-red-500/10 border border-red-500/20 rounded px-3 py-2 mb-3">
+          Could not load the club list. Refresh the page to try again.
+        </p>
+      )}
+      {loading && <p className="text-xs text-pb-faint">Loading&hellip;</p>}
+
+      {!failed && !loading && rows.length === 0 && (
+        <p data-testid="clubs-empty" className="text-xs text-pb-faint">
+          No club typed into the trial page {scope === 'campaign' ? 'from this campaign ' : ''}in the last {periodLabel(period)}.
+        </p>
+      )}
+      {!failed && !loading && rows.length > 0 && shown.length === 0 && shownHidden.length === 0 && (
+        <p data-testid="clubs-no-match" className="text-xs text-pb-faint">No club matches those filters.</p>
+      )}
+
+      {(shown.length > 0 || shownHidden.length > 0) && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left font-mono text-[10px] tracking-wide2 uppercase text-pb-faint border-b pb-hairline">
+                <th className="px-2 py-2">Club</th>
+                <th className="px-2 py-2">Stage</th>
+                <th className="px-2 py-2">Source</th>
+                <th className="px-2 py-2">Contact email</th>
+                <th className="px-2 py-2">Typed</th>
+                <th className="px-2 py-2">Last seen</th>
+                <th className="px-2 py-2"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.slice(0, limit).map((c) => (
+                <ClubRow key={c.key} c={c} busy={busyKey === c.key} onFlag={() => onFlag(c)} />
+              ))}
+              {shownHidden.map((c) => (
+                <ClubRow key={'hidden-' + c.key} c={c} busy={busyKey === c.key} onRestore={() => onRestore(c)} />
+              ))}
+            </tbody>
+          </table>
+          {shown.length > limit && (
+            <button type="button" data-testid="clubs-more" onClick={() => setLimit((n) => n + 40)} className="mt-2 font-mono text-[10px] text-pb-faint hover:text-pb-text hover:underline">
+              Show {Math.min(40, shown.length - limit)} more of {shown.length - limit}
+            </button>
+          )}
+        </div>
+      )}
+
+      {scope === 'campaign' && outside > 0 && (
+        <p data-testid="clubs-outside" className="font-mono text-[9px] text-pb-faint mt-3">
+          {outside} more club{outside === 1 ? '' : 's'} started in this period from other traffic (another campaign, email or organic) and
+          {outside === 1 ? ' is' : ' are'} not listed.{' '}
+          <button type="button" onClick={() => onScope('all')} className="text-pb-accent hover:underline">Show all traffic</button>
+        </p>
+      )}
+      {unnamed > 0 && (
+        <p data-testid="clubs-unnamed" className="font-mono text-[9px] text-pb-faintest mt-1">
+          {unnamed} club selection{unnamed === 1 ? '' : 's'} in this period could not be named (picked before the club was captured on the beacon).
+        </p>
+      )}
+      <p className="font-mono text-[9px] text-pb-faintest mt-3">
+        One row per club, with the furthest stage it reached: searched, picked, reached the Terms step, or finished. &ldquo;Reached terms,
+        not finished&rdquo; is the list worth a call. &ldquo;Flag as test&rdquo; hides a row here and doesn&rsquo;t touch the Sales Pipeline.
+      </p>
+    </div>
+  )
+}
+
+// The on-site side of the ad click for the SELECTED campaign (the Usage page has the all-traffic one).
+function TrafficCard({ data, scope, period }) {
+  // Nothing to draw until a real answer arrives; an unexpected shape must not take the page down.
+  if (!data || !data.meta || !data.conversion) return null
+  const who = scope === 'campaign' ? 'Campaign visitors' : 'Meta visitors'
+  return (
+    <div data-testid="traffic-card" className="pb-card p-4">
+      <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint mb-3">
+        On-site traffic, our own visit tracking, {periodLabel(period)}
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4">
+        <Stat label={who} value={fmtNum(data.meta.visitors)} hint="site-tracked, not Meta's own count" />
+        <Stat label="Facebook" value={fmtNum(data.meta.facebook)} />
+        <Stat label="Instagram" value={fmtNum(data.meta.instagram)} />
+        <Stat label="Paid clicks" value={fmtNum(data.meta.paid)} />
+        <Stat label="Reached pricing/contact" value={fmtNum(data.conversion.reached_intent)} hint={`${data.conversion.pct}% of ${who.toLowerCase()}`} />
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <div className="font-mono text-[9px] uppercase tracking-wide text-pb-faint mb-1.5">Top ad creatives (by visitor)</div>
+          {data.creatives.length === 0 ? (
+            <p className="text-xs text-pb-faint">No tagged creatives seen in this period.</p>
+          ) : (
+            <table className="w-full text-xs">
+              <tbody>
+                {data.creatives.slice(0, 6).map((c, i) => (
+                  <tr key={i} className="border-b pb-hairline last:border-0">
+                    <td className="py-1.5 pr-2 text-pb-text">{c.content || '(untagged)'}</td>
+                    <td className="py-1.5 text-right text-pb-dim whitespace-nowrap">{fmtNum(c.visitors)} visitors</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+        <div>
+          <div className="font-mono text-[9px] uppercase tracking-wide text-pb-faint mb-1.5">Where the clicks land</div>
+          {data.landing.length === 0 ? (
+            <p className="text-xs text-pb-faint">No landing pages recorded in this period.</p>
+          ) : (
+            <table className="w-full text-xs">
+              <tbody>
+                {data.landing.slice(0, 6).map((l, i) => (
+                  <tr key={i} className="border-b pb-hairline last:border-0">
+                    <td className="py-1.5 pr-2 text-pb-text">{l.label || l.page}</td>
+                    <td className="py-1.5 text-right text-pb-dim whitespace-nowrap">{fmtNum(l.visitors)} visitors</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+      <p className="font-mono text-[9px] text-pb-faintest mt-3">
+        From our own visit tracking (not Meta's). Full breakdown for all traffic on the{' '}
+        <a href="/admin/usage" className="text-accent hover:underline">Usage</a> page.
+      </p>
+    </div>
   )
 }
 
@@ -573,6 +766,9 @@ function FunnelChart({ stages, title = 'Funnel: impressions to a completed regis
                 <div className="w-16 shrink-0 text-right font-mono text-xs text-pb-text">{fmtNum(s.value)}</div>
                 <div className="w-14 shrink-0 text-right font-mono text-[10px] text-pb-faint">{fmtPct(s.pct_of_top)}</div>
               </div>
+              {s.note && (
+                <div data-testid="funnel-note" className="pl-1 mt-1 font-mono text-[9px] text-pb-faintest">{s.note}</div>
+              )}
             </div>
           )
         })}
@@ -1023,16 +1219,17 @@ export default function SuperMetaAds() {
   const [adjusting, setAdjusting] = useState(false)
   const [showAdjLog, setShowAdjLog] = useState(false)
 
-  const [attribution, setAttribution] = useState(null)
+  const [onsite, setOnsite] = useState(null)
   const [adSignups, setAdSignups] = useState(null)
   const [registrationFunnel, setRegistrationFunnel] = useState(null)
   const [selectedClubs, setSelectedClubs] = useState(null)
   const [searchedClubs, setSearchedClubs] = useState(null)
-  const [showHiddenSelections, setShowHiddenSelections] = useState(false)
-  const [showSearchedOnly, setShowSearchedOnly] = useState(false)
-  const selectedFilter = useClubFilter()
-  const searchedFilter = useClubFilter()
   const [busySelectionKey, setBusySelectionKey] = useState('')
+  // One period and one scope for every on-site panel below the money. 7 days of the selected
+  // campaign is the default: a list going back to July is not a follow-up list.
+  const [period, setPeriod] = useState(7)
+  const [scope, setScope] = useState('campaign')
+  const [panelsNonce, setPanelsNonce] = useState(0)
 
   const [trendDays, setTrendDays] = useState(14)
   const [selectedAdId, setSelectedAdId] = useState(null)
@@ -1055,12 +1252,8 @@ export default function SuperMetaAds() {
       .catch((e) => setError(e.message || 'Could not load the Meta Ads dashboard.'))
       .finally(() => setLoading(false))
     api.metaAdsLeadAdjustments().then((d) => setAdjustments(d.adjustments || [])).catch(() => {})
-    api.adminUsageCampaigns({ days: 30 }).then(setAttribution).catch(() => {})
     api.metaAdsAdSignups().then(setAdSignups).catch(() => {})
-    api.metaAdsRegistrationFunnel().then((d) => setRegistrationFunnel(d.funnel || [])).catch(() => {})
-    setListsFailed(false)
-    api.metaAdsSelectedClubs().then(setSelectedClubs).catch(() => setListsFailed(true))
-    api.metaAdsSearchedClubs().then(setSearchedClubs).catch(() => setListsFailed(true))
+    setPanelsNonce((n) => n + 1)   // the funnel, club list and traffic card re-read for the new campaign / cutoff
     api.metaAdsCampaigns()
       .then((d) => { setCampaigns(d.campaigns || []); setActiveCampaignId(d.active_campaign_id || '') })
       .catch(() => {})
@@ -1069,25 +1262,31 @@ export default function SuperMetaAds() {
 
   useEffect(() => { load() }, [load])
 
-  // Hide/unhide is keyed on the normalised club name and shared by both the
-  // "selected" and "searched" tables, so refresh both after toggling one.
-  const hideSelection = useCallback((c) => {
-    setBusySelectionKey(c.key || c.name)
-    api.metaAdsHideSelection(c.key || c.name)
-      .then(setSelectedClubs)
-      .then(() => api.metaAdsSearchedClubs().then(setSearchedClubs))
-      .catch(() => {})
-      .finally(() => setBusySelectionKey(''))
-  }, [])
+  // The funnel, the club list and the traffic card for the chosen period and scope. A response
+  // that arrives after the person has already moved on is dropped (`live`), so a slow 30-day
+  // answer cannot overwrite the 7-day one on screen.
+  useEffect(() => {
+    let live = true
+    setListsFailed(false)
+    const fail = () => { if (live) setListsFailed(true) }
+    api.metaAdsRegistrationFunnel(Math.min(period, 90), scope).then((d) => { if (live) setRegistrationFunnel(d.funnel || []) }).catch(() => {})
+    api.metaAdsSelectedClubs(period, scope).then((d) => { if (live) setSelectedClubs(d) }).catch(fail)
+    api.metaAdsSearchedClubs(period, scope).then((d) => { if (live) setSearchedClubs(d) }).catch(fail)
+    api.metaAdsOnsite(Math.min(period, 365), scope).then((d) => { if (live) setOnsite(d) }).catch(() => {})
+    return () => { live = false }
+  }, [period, scope, panelsNonce])
 
-  const unhideSelection = useCallback((c) => {
+  // Hide/unhide is keyed on the normalised club name and shared by both lists, so refresh both.
+  const toggleSelection = useCallback((c, call) => {
     setBusySelectionKey(c.key || c.name)
-    api.metaAdsUnhideSelection(c.key || c.name)
+    call(c.key || c.name, period, scope)
       .then(setSelectedClubs)
-      .then(() => api.metaAdsSearchedClubs().then(setSearchedClubs))
+      .then(() => api.metaAdsSearchedClubs(period, scope).then(setSearchedClubs))
       .catch(() => {})
       .finally(() => setBusySelectionKey(''))
-  }, [])
+  }, [period, scope])
+  const hideSelection = useCallback((c) => toggleSelection(c, api.metaAdsHideSelection), [toggleSelection])
+  const unhideSelection = useCallback((c) => toggleSelection(c, api.metaAdsUnhideSelection), [toggleSelection])
 
   useEffect(() => {
     setHistoryLoading(true)
@@ -1195,19 +1394,6 @@ export default function SuperMetaAds() {
   const budget = summary?.campaign_budget ?? DEFAULT_BUDGET
   const lengthDays = summary?.campaign_length_days ?? DEFAULT_LENGTH_DAYS
 
-  // Club-name search and Last seen range, applied to the flagged-as-test rows
-  // as well: a filter that quietly left those unfiltered would report a match
-  // count the rows on screen disagree with.
-  const selectedRows = selectedFilter.apply(selectedClubs?.clubs)
-  const selectedHiddenRows = selectedFilter.apply(selectedClubs?.hidden_clubs)
-  // searchedMatched is the search/date filter alone; searchedRows adds the
-  // "Not selected only" toggle on top. The header counts read off the former,
-  // so ticking that toggle doesn't restate how many clubs the filter found.
-  const searchedMatched = searchedFilter.apply(searchedClubs?.clubs)
-  const searchedRows = searchedMatched.filter((c) => !showSearchedOnly || !c.selected)
-  const searchedNotSelected = searchedMatched.filter((c) => !c.selected).length
-  const searchedHiddenRows = searchedFilter.apply(searchedClubs?.hidden_clubs)
-
   const header = (
     <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
       <div>
@@ -1287,11 +1473,12 @@ export default function SuperMetaAds() {
   const signupRows = adSignups ? adSignups.rows : null
   const kpis = computeKpis({
     trialStream, webinarStream, campaign, signupRows, countingSince: summary?.counting_since,
+    unattributedSpend: summary?.unattributed_spend || 0,
   })
   const hasFunnel = !!registrationFunnel?.some((st) => st.value > 0)
-  const hasSelected = !!selectedClubs && (selectedClubs.clubs.length > 0 || selectedClubs.anonymous > 0
-    || (selectedClubs.hidden_count || 0) > 0)
-  const hasSearched = !!searchedClubs && (searchedClubs.clubs.length > 0 || (searchedClubs.hidden_count || 0) > 0)
+  // A stream that has never had an ad or a result is not shown: a webinar card reading 0 on a
+  // trial-only campaign is noise.
+  const activeStreams = streams.filter((st) => st.stream === 'trial' || (st.ad_count || 0) > 0 || (st.results || 0) > 0)
   const maxCostPerLpv = ads.reduce((m, a) => (a.cost_per_lpv != null && a.cost_per_lpv > m ? a.cost_per_lpv : m), 0)
 
   return (
@@ -1403,9 +1590,10 @@ export default function SuperMetaAds() {
                 event, told apart only by content_category. There is deliberately
                 no combined "registrations" total anywhere on this page: the two
                 cost very different amounts and only one of them is worth money. */}
-            {streams.length > 0 && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-1">
-                {streams.map((s) => (
+            {activeStreams.length > 0 && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-1 items-start">
+                <div className="space-y-2">
+                {activeStreams.map((s) => (
                   <StreamCard key={s.stream} stream={s}>
                     {s.stream === 'trial' && (
                       <>
@@ -1445,6 +1633,12 @@ export default function SuperMetaAds() {
                     )}
                   </StreamCard>
                 ))}
+                </div>
+                <div className="space-y-3">
+                  {activeStreams.filter((st) => (st.impressions || 0) > 0).map((st) => (
+                    <FunnelChart key={st.stream} stages={st.funnel} title={`${st.label}: impressions to a registration`} />
+                  ))}
+                </div>
               </div>
             )}
 
@@ -1461,6 +1655,13 @@ export default function SuperMetaAds() {
                 {fmtMoney(unattributedSpend)} of campaign spend isn&rsquo;t accounted for by any ad row
                 (a deleted ad, most likely). It sits in neither cost-per-result figure above rather than
                 being quietly charged to one of them.
+              </p>
+            )}
+
+            {unattributedSpend < -0.5 && (
+              <p data-testid="stale-spend" className="font-mono text-[9px] text-amber-300/80 mb-1">
+                The ads listed add up to {fmtMoney(-unattributedSpend)} more than the campaign&rsquo;s own spend, so some ad rows are older
+                than the last refresh. Cost per trial and ROAS are withheld until they agree. Press Refresh now.
               </p>
             )}
 
@@ -1505,297 +1706,44 @@ export default function SuperMetaAds() {
               />
             </div>
 
-            {/* One funnel PER STREAM. The single campaign-wide funnel that used
-                to sit here mixed units the moment the webinar ad started
-                spending: campaign-wide impressions above a bottom row that only
-                counted trial signups, so the drop at the end read as a
-                conversion collapse when it was two products in one column. */}
-            {streams.length > 0 && (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-4">
-                {streams.filter((s) => (s.impressions || 0) > 0).map((s) => (
-                  <FunnelChart
-                    key={s.stream}
-                    stages={s.funnel}
-                    title={`${s.label}: impressions to a registration`}
-                  />
-                ))}
-              </div>
-            )}
-
-            {/* WHERE IT'S COMING FROM. The demand side, one block: where
-                visitors drop off in the wizard, which clubs they searched and
-                selected, and where Meta's clicks land. These used to compete
-                with the money figures at the top level of the page. */}
+            {/* WHERE IT'S COMING FROM, for the SELECTED campaign. One period and one scope drive the
+                club list, the wizard funnel and the traffic card. The list leads and is never behind
+                a tab or a toggle: it is the follow-up list (it was lost once to a tab). */}
             <div data-testid="demand-section" className="mt-6 mb-3">
-              <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint">
+              <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint mb-2">
                 Where it&rsquo;s coming from
               </div>
-              <p className="font-mono text-[9px] text-pb-faintest mt-0.5">
-                Who typed their club in, how far each got, and where the clicks land. All stacked, nothing behind a tab.
-              </p>
+              <PeriodScopeBar period={period} onPeriod={setPeriod} scope={scope} onScope={setScope} countsFrom={summary?.counts_from} />
             </div>
 
-            {/* The two stage lists lead: they are the follow-up list (who typed a club, who
-                selected one, and the furthest step each reached), the most useful thing here.
-                They were lost once already to a tab that opened on the funnel. */}
-            {listsFailed && (
-              <p data-testid="lists-failed" className="font-mono text-[10px] text-red-300 bg-red-500/10 border border-red-500/20 rounded px-3 py-2 mb-3">
-                Could not load the club lists. Refresh the page to try again.
-              </p>
-            )}
-            {!listsFailed && selectedClubs && !hasSelected && (
-              <p data-testid="selected-empty" className="text-xs text-pb-faint mb-3">
-                Clubs selected in the wizard: none recorded yet.
-              </p>
-            )}
-            {!listsFailed && searchedClubs && !hasSearched && (
-              <p data-testid="searched-empty" className="text-xs text-pb-faint mb-3">
-                Clubs searched in the wizard: none recorded yet.
-              </p>
-            )}
+            <ClubsPanel
+              selected={selectedClubs}
+              searched={searchedClubs}
+              scope={scope}
+              onScope={setScope}
+              period={period}
+              failed={listsFailed}
+              busyKey={busySelectionKey}
+              onFlag={hideSelection}
+              onRestore={unhideSelection}
+            />
 
-            {/* Which clubs are behind the "Club selected" count — named wherever
-                we can identify them (beacon metadata, Terms-step name, or a
-                completed registration). */}
-            {hasSelected && (
-              <div className="pb-card p-4 mb-4">
-                <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
-                  <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint">
-                    Clubs selected in the wizard (all-time)
-                  </div>
-                  <span className="font-mono text-[10px] text-pb-faintest flex items-center gap-2">
-                    <span>
-                      {selectedFilter.active
-                        ? <>{selectedRows.length} of {selectedClubs.identified} identified</>
-                        : <>{selectedClubs.identified} identified</>}
-                      {selectedClubs.anonymous > 0 && <> &middot; {selectedClubs.anonymous} not captured</>}
-                    </span>
-                    {(selectedClubs.hidden_count || 0) > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => setShowHiddenSelections((v) => !v)}
-                        className="px-1.5 py-0.5 rounded-full border border-pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-dim uppercase"
-                      >
-                        {showHiddenSelections ? 'Hide' : 'Show'} {selectedClubs.hidden_count} test{selectedClubs.hidden_count === 1 ? '' : 's'}
-                      </button>
-                    )}
-                  </span>
-                </div>
-
-                <ClubFilterBar filter={selectedFilter} placeholder="Search club name" />
-
-                {selectedFilter.active && selectedRows.length === 0
-                  && !(showHiddenSelections && selectedHiddenRows.length) ? (
-                  <p className="text-xs text-pb-faint">
-                    No club matches that search or date range.
-                  </p>
-                ) : selectedClubs.clubs.length === 0
-                  && !(showHiddenSelections && (selectedClubs.hidden_clubs || []).length) ? (
-                  <p className="text-xs text-pb-faint">
-                    {selectedClubs.anonymous} club selection{selectedClubs.anonymous === 1 ? '' : 's'} in
-                    this window, but none can be named yet — they were picked before the club was captured
-                    on the selection beacon and never reached the Terms step. New selections from now on
-                    will be named here.
-                  </p>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="text-left font-mono text-[10px] tracking-wide2 uppercase text-pb-faint border-b pb-hairline">
-                          <th className="px-2 py-2">Club</th>
-                          <th className="px-2 py-2">Source</th>
-                          <th className="px-2 py-2">Furthest step</th>
-                          <th className="px-2 py-2">Contact email</th>
-                          <th className="px-2 py-2">Last seen</th>
-                          <th className="px-2 py-2"></th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {selectedRows.map((c) => (
-                          <SelectionRow
-                            key={c.name + (c.org_id || '')}
-                            c={c}
-                            busy={busySelectionKey === (c.key || c.name)}
-                            onFlag={() => hideSelection(c)}
-                          />
-                        ))}
-                        {showHiddenSelections && selectedHiddenRows.map((c) => (
-                          <SelectionRow
-                            key={'hidden-' + c.name + (c.org_id || '')}
-                            c={c}
-                            hidden
-                            busy={busySelectionKey === (c.key || c.name)}
-                            onRestore={() => unhideSelection(c)}
-                          />
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-                <p className="font-mono text-[9px] text-pb-faintest mt-3">
-                  The step funnel above counts anonymous visitors; this names the clubs behind them. A club
-                  is identified from the selection beacon (captured from this release on), the club name on
-                  a Terms-step acknowledgement, or a completed registration &mdash; whichever it reached furthest.
-                  A club that reaches the Terms step is added to the Sales Pipeline as a lead automatically.
-                  &ldquo;Flag as test&rdquo; only hides a row from this table &mdash; it doesn&rsquo;t touch the pipeline.
-                </p>
-              </div>
-            )}
-
-            {/* Clubs typed into the search box (results loaded) even when no
-                club was clicked — the interest signal one step before a
-                selection. "Searched only" = searched but never selected. */}
-            {hasSearched && (
-              <div className="pb-card p-4 mb-4">
-                <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
-                  <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint">
-                    Clubs searched in the wizard (all-time)
-                  </div>
-                  <span className="font-mono text-[10px] text-pb-faintest flex items-center gap-2">
-                    <span>
-                      {searchedFilter.active
-                        ? <>{searchedMatched.length} of {searchedClubs.identified} clubs</>
-                        : <>{searchedClubs.identified} club{searchedClubs.identified === 1 ? '' : 's'}</>}
-                      {(searchedFilter.active ? searchedNotSelected : searchedClubs.searched_only_count) > 0
-                        && <> &middot; {searchedFilter.active ? searchedNotSelected : searchedClubs.searched_only_count} not selected</>}
-                    </span>
-                    {searchedClubs.searched_only_count > 0 && searchedClubs.converted_count > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => setShowSearchedOnly((v) => !v)}
-                        className="px-1.5 py-0.5 rounded-full border border-pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-dim uppercase"
-                      >
-                        {showSearchedOnly ? 'Show all' : 'Not selected only'}
-                      </button>
-                    )}
-                  </span>
-                </div>
-
-                <ClubFilterBar filter={searchedFilter} placeholder="Search club name" />
-
-                {searchedFilter.active && searchedRows.length === 0 && searchedHiddenRows.length === 0 ? (
-                  <p className="text-xs text-pb-faint">
-                    No club matches that search or date range.
-                  </p>
-                ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="text-left font-mono text-[10px] tracking-wide2 uppercase text-pb-faint border-b pb-hairline">
-                        <th className="px-2 py-2">Top match</th>
-                        <th className="px-2 py-2">Source</th>
-                        <th className="px-2 py-2">Status</th>
-                        <th className="px-2 py-2">Visitors</th>
-                        <th className="px-2 py-2">Search terms</th>
-                        <th className="px-2 py-2">Last seen</th>
-                        <th className="px-2 py-2"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {searchedRows.map((c) => (
-                        <SearchRow
-                          key={c.name + (c.org_id || '')}
-                          c={c}
-                          busy={busySelectionKey === (c.key || c.name)}
-                          onFlag={() => hideSelection(c)}
-                        />
-                      ))}
-                      {searchedHiddenRows.map((c) => (
-                        <SearchRow
-                          key={'hidden-' + c.name + (c.org_id || '')}
-                          c={c}
-                          hidden
-                          busy={busySelectionKey === (c.key || c.name)}
-                          onRestore={() => unhideSelection(c)}
-                        />
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                )}
-                <p className="font-mono text-[9px] text-pb-faintest mt-3">
-                  A row is logged when a visitor&rsquo;s search returns a result, whether or not they then
-                  click one &mdash; the top match is recorded along with the text they typed. &ldquo;Searched
-                  only&rdquo; means the club showed up in a search but was never selected. &ldquo;Visitors&rdquo;
-                  counts distinct people; hover it for the raw search count. Meta-tagged rows came through the
-                  ad. &ldquo;Flag as test&rdquo; hides the row here and in the selected-clubs table.
-                </p>
-              </div>
-            )}
-
-            {/* Registration-wizard step breakdown — fills in the gap between
-                Meta's own Lead and CompleteRegistration events. */}
-            {hasFunnel && (
-              <div className="mb-4">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-4 items-start">
+              {hasFunnel ? (
                 <FunnelChart
                   stages={registrationFunnel}
-                  title="Registration wizard: where visitors drop off (last 30 days)"
+                  title={`Registration wizard: where visitors drop off (${periodLabel(period)})`}
                 />
-              </div>
-            )}
-
-            {/* On-site attribution & conversion, from our own visit tracking rather than Meta's numbers */}
-            {attribution && (
-              <div className="pb-card p-4 mb-4">
-                <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint mb-3">
-                  On-site attribution, our own visit tracking, last {attribution.days} days
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 mb-4">
-                  <Stat label="Meta visitors" value={fmtNum(attribution.meta.visitors)} hint="site-tracked, not Meta's own count" />
-                  <Stat label="Facebook" value={fmtNum(attribution.meta.facebook)} />
-                  <Stat label="Instagram" value={fmtNum(attribution.meta.instagram)} />
-                  <Stat label="Paid clicks" value={fmtNum(attribution.meta.paid)} />
-                  <Stat
-                    label="Reached pricing/contact"
-                    value={fmtNum(attribution.conversion.reached_intent)}
-                    hint={`${attribution.conversion.pct}% of Meta visitors`}
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                  <div>
-                    <div className="font-mono text-[9px] uppercase tracking-wide text-pb-faint mb-1.5">Top ad creatives (by visitor)</div>
-                    {attribution.creatives.length === 0 ? (
-                      <p className="text-xs text-pb-faint">No tagged creatives seen yet.</p>
-                    ) : (
-                      <table className="w-full text-xs">
-                        <tbody>
-                          {attribution.creatives.slice(0, 6).map((c, i) => (
-                            <tr key={i} className="border-b pb-hairline last:border-0">
-                              <td className="py-1.5 pr-2 text-pb-text">{c.content || '(untagged)'}</td>
-                              <td className="py-1.5 pr-2 text-pb-faint">{c.campaign || '–'}</td>
-                              <td className="py-1.5 text-right text-pb-dim whitespace-nowrap">{fmtNum(c.visitors)} visitors</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    )}
+              ) : (
+                <div data-testid="wizard-empty" className="pb-card p-4">
+                  <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint mb-2">
+                    Registration wizard: where visitors drop off ({periodLabel(period)})
                   </div>
-                  <div>
-                    <div className="font-mono text-[9px] uppercase tracking-wide text-pb-faint mb-1.5">Where Meta clicks land</div>
-                    {attribution.landing.length === 0 ? (
-                      <p className="text-xs text-pb-faint">No landing pages recorded yet.</p>
-                    ) : (
-                      <table className="w-full text-xs">
-                        <tbody>
-                          {attribution.landing.slice(0, 6).map((l, i) => (
-                            <tr key={i} className="border-b pb-hairline last:border-0">
-                              <td className="py-1.5 pr-2 text-pb-text">{l.label || l.page}</td>
-                              <td className="py-1.5 text-right text-pb-dim whitespace-nowrap">{fmtNum(l.visitors)} visitors</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    )}
-                  </div>
+                  <p className="text-xs text-pb-faint">No one reached the wizard {scope === 'campaign' ? 'from this campaign ' : ''}in this period.</p>
                 </div>
-                <p className="font-mono text-[9px] text-pb-faintest mt-3">
-                  From our own visit tracking (not Meta's), so it independently confirms whether an ad click actually
-                  went anywhere on the site. Full breakdown on the{' '}
-                  <a href="/admin/usage" className="text-accent hover:underline">Usage</a> page.
-                </p>
-              </div>
-            )}
+              )}
+              <TrafficCard data={onsite} scope={scope} period={period} />
+            </div>
 
             {/* The ads: the table says which creative produces paying clubs, the
                 cards beneath carry each ad's Winner / Laggard status and the
