@@ -1577,3 +1577,12 @@ Read-only review after Jack and Claude (chat) tagged the live ad (id 12025134262
 - "Club selected" and "Started registering" are the same moment (Lead fires on club pick), so the funnel's step-to-step percentage between them (407.4%) compares two measures of one event over two windows, ours since the reset and Meta's lifetime. NOT fixed.
 - The "most efficient ad, shift budget its way" headline (`build_insights`) ignores `delivery_status`, so it can name a paused ad. NOT fixed.
 - Found in the v9.142.5 strip: Cost / trial and ROAS read the trial STREAM's spend (sum of ad rows) while the Spend tile reads the campaign row. With stale rows the stream spend was A$1,421.44 against a Spend tile of A$1.60. NOT fixed.
+
+
+## v9.142.6.3: the stage lists were hidden by v9.142.5's tabs
+
+Reported as "we've lost the list of people who typed their club into the trial page and what stage they got to". Nothing was lost: `get_selected_clubs` and `get_searched_clubs` read 365 days of `usage_events`, are not tied to the campaign or to counting-since (rule 19), and the old page rendered both unconditionally. The v9.142.5 reorganisation put them behind four tabs that opened on the wizard funnel, so the follow-up list was one click from invisible. The brief allowed "tabbed or stacked"; stacked is the only one that cannot hide anything.
+
+- The section is stacked again, the two stage lists first (Clubs selected with Furthest step, Clubs searched with Searched only / Selected), then the funnel, then Where Meta clicks land. An empty list says "none recorded yet" and a failed load says so (`listsFailed`), so a list can no longer go quiet.
+- Proof: `verify_meta_ads_kpi_browser.mjs` now asserts the lists, their names and stages are on screen with nothing clicked (64 checks). The control on the shipped tabbed page fails 10 and does not crash.
+- Process slip, caught by that suite: the first edit sliced `function TabBar` to the next comment marker and deleted 14 components (`StreamCard` onward). `vite build` still passed, because an undefined identifier is a runtime error. Restored from git and redone with a bounded slice; the component list was compared against the committed file. After any scripted removal in this file, run a browser suite, not just a build.

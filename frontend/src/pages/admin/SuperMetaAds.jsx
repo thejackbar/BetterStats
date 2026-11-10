@@ -411,27 +411,6 @@ function CountingSince({ countingSince, editing, input, setInput, saving, onOpen
   )
 }
 
-function TabBar({ tabs, value, onChange }) {
-  return (
-    <div role="tablist" className="inline-flex flex-wrap rounded border border-pb-hairline overflow-hidden">
-      {tabs.map((t) => (
-        <button
-          key={t.key}
-          role="tab"
-          aria-selected={value === t.key}
-          data-testid={`demand-tab-${t.key}`}
-          onClick={() => onChange(t.key)}
-          className={`px-2.5 py-1 font-mono text-[10px] uppercase tracking-wide2 ${
-            value === t.key ? 'bg-pb-accent text-white' : 'text-pb-dim hover:bg-pb-surface2'
-          }`}
-        >
-          {t.label}{t.count != null && <span className="opacity-70"> {t.count}</span>}
-        </button>
-      ))}
-    </div>
-  )
-}
-
 function InsightRow({ insight }) {
   const style = SEVERITY_STYLE[insight.severity] || SEVERITY_STYLE.info
   return (
@@ -1058,7 +1037,7 @@ export default function SuperMetaAds() {
   const [trendDays, setTrendDays] = useState(14)
   const [selectedAdId, setSelectedAdId] = useState(null)
   const [showAllInsights, setShowAllInsights] = useState(false)
-  const [demandTab, setDemandTab] = useState('funnel')
+  const [listsFailed, setListsFailed] = useState(false)
   const [showCharts, setShowCharts] = useState(false)
 
   const [campaigns, setCampaigns] = useState([])
@@ -1079,8 +1058,9 @@ export default function SuperMetaAds() {
     api.adminUsageCampaigns({ days: 30 }).then(setAttribution).catch(() => {})
     api.metaAdsAdSignups().then(setAdSignups).catch(() => {})
     api.metaAdsRegistrationFunnel().then((d) => setRegistrationFunnel(d.funnel || [])).catch(() => {})
-    api.metaAdsSelectedClubs().then(setSelectedClubs).catch(() => {})
-    api.metaAdsSearchedClubs().then(setSearchedClubs).catch(() => {})
+    setListsFailed(false)
+    api.metaAdsSelectedClubs().then(setSelectedClubs).catch(() => setListsFailed(true))
+    api.metaAdsSearchedClubs().then(setSearchedClubs).catch(() => setListsFailed(true))
     api.metaAdsCampaigns()
       .then((d) => { setCampaigns(d.campaigns || []); setActiveCampaignId(d.active_campaign_id || '') })
       .catch(() => {})
@@ -1312,12 +1292,6 @@ export default function SuperMetaAds() {
   const hasSelected = !!selectedClubs && (selectedClubs.clubs.length > 0 || selectedClubs.anonymous > 0
     || (selectedClubs.hidden_count || 0) > 0)
   const hasSearched = !!searchedClubs && (searchedClubs.clubs.length > 0 || (searchedClubs.hidden_count || 0) > 0)
-  const demandTabs = [
-    { key: 'funnel', label: 'Wizard funnel' },
-    { key: 'searched', label: 'Clubs searched', count: searchedClubs ? searchedClubs.identified : null },
-    { key: 'selected', label: 'Clubs selected', count: selectedClubs ? selectedClubs.identified : null },
-    { key: 'traffic', label: 'Where Meta clicks land', count: null },
-  ]
   const maxCostPerLpv = ads.reduce((m, a) => (a.cost_per_lpv != null && a.cost_per_lpv > m ? a.cost_per_lpv : m), 0)
 
   return (
@@ -1531,28 +1505,38 @@ export default function SuperMetaAds() {
                 visitors drop off in the wizard, which clubs they searched and
                 selected, and where Meta's clicks land. These used to compete
                 with the money figures at the top level of the page. */}
-            <div data-testid="demand-section" className="mt-6 mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div data-testid="demand-section" className="mt-6 mb-3">
               <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint">
                 Where it&rsquo;s coming from
               </div>
-              <TabBar tabs={demandTabs} value={demandTab} onChange={setDemandTab} />
+              <p className="font-mono text-[9px] text-pb-faintest mt-0.5">
+                Who typed their club in, how far each got, and where the clicks land. All stacked, nothing behind a tab.
+              </p>
             </div>
 
-            {/* Registration-wizard step breakdown — fills in the gap between
-                Meta's own Lead and CompleteRegistration events. */}
-            {demandTab === 'funnel' && hasFunnel && (
-              <div className="mb-4">
-                <FunnelChart
-                  stages={registrationFunnel}
-                  title="Registration wizard: where visitors drop off (last 30 days)"
-                />
-              </div>
+            {/* The two stage lists lead: they are the follow-up list (who typed a club, who
+                selected one, and the furthest step each reached), the most useful thing here.
+                They were lost once already to a tab that opened on the funnel. */}
+            {listsFailed && (
+              <p data-testid="lists-failed" className="font-mono text-[10px] text-red-300 bg-red-500/10 border border-red-500/20 rounded px-3 py-2 mb-3">
+                Could not load the club lists. Refresh the page to try again.
+              </p>
+            )}
+            {!listsFailed && selectedClubs && !hasSelected && (
+              <p data-testid="selected-empty" className="text-xs text-pb-faint mb-3">
+                Clubs selected in the wizard: none recorded yet.
+              </p>
+            )}
+            {!listsFailed && searchedClubs && !hasSearched && (
+              <p data-testid="searched-empty" className="text-xs text-pb-faint mb-3">
+                Clubs searched in the wizard: none recorded yet.
+              </p>
             )}
 
             {/* Which clubs are behind the "Club selected" count — named wherever
                 we can identify them (beacon metadata, Terms-step name, or a
                 completed registration). */}
-            {demandTab === 'selected' && hasSelected && (
+            {hasSelected && (
               <div className="pb-card p-4 mb-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
                   <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint">
@@ -1640,7 +1624,7 @@ export default function SuperMetaAds() {
             {/* Clubs typed into the search box (results loaded) even when no
                 club was clicked — the interest signal one step before a
                 selection. "Searched only" = searched but never selected. */}
-            {demandTab === 'searched' && hasSearched && (
+            {hasSearched && (
               <div className="pb-card p-4 mb-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
                   <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint">
@@ -1718,8 +1702,19 @@ export default function SuperMetaAds() {
               </div>
             )}
 
+            {/* Registration-wizard step breakdown — fills in the gap between
+                Meta's own Lead and CompleteRegistration events. */}
+            {hasFunnel && (
+              <div className="mb-4">
+                <FunnelChart
+                  stages={registrationFunnel}
+                  title="Registration wizard: where visitors drop off (last 30 days)"
+                />
+              </div>
+            )}
+
             {/* On-site attribution & conversion, from our own visit tracking rather than Meta's numbers */}
-            {demandTab === 'traffic' && attribution && (
+            {attribution && (
               <div className="pb-card p-4 mb-4">
                 <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint mb-3">
                   On-site attribution, our own visit tracking, last {attribution.days} days
@@ -1779,13 +1774,6 @@ export default function SuperMetaAds() {
                   <a href="/admin/usage" className="text-accent hover:underline">Usage</a> page.
                 </p>
               </div>
-            )}
-
-            {((demandTab === 'funnel' && !hasFunnel) || (demandTab === 'selected' && !hasSelected)
-              || (demandTab === 'searched' && !hasSearched) || (demandTab === 'traffic' && !attribution)) && (
-              <p data-testid="demand-empty" className="text-xs text-pb-faint mb-4">
-                Nothing recorded here yet for this campaign.
-              </p>
             )}
 
             {/* The ads: the table says which creative produces paying clubs, the

@@ -129,7 +129,24 @@ const HISTORY = Array.from({ length: 14 }, (_, i) => ({
 
 const browser = await chromium.launch(existsSync(EXECUTABLE) ? { executablePath: EXECUTABLE } : {})
 
-async function open({ summary, signups = { rows: ROWS, campaigns: [] }, signupsFail = false,
+const SELECTED = {
+  clubs: [
+    { name: 'Applegrove CC', key: 'applegrove cc', slug: null, via_meta: true, furthest_step: 'Registration completed', email: 'sec@applegrove.example', last_at: '2026-11-10T09:00:00Z' },
+    { name: 'Bayview CC', key: 'bayview cc', slug: null, via_meta: true, furthest_step: 'Reached Terms & privacy', email: null, last_at: '2026-11-10T08:00:00Z' },
+    { name: 'Cresthill CC', key: 'cresthill cc', slug: null, via_meta: false, furthest_step: 'Selected a club', email: null, last_at: '2026-11-09T08:00:00Z' },
+  ],
+  hidden_clubs: [], identified: 3, hidden_count: 0, anonymous: 0,
+}
+const SEARCHED = {
+  clubs: [
+    { name: 'Dunmore CC', key: 'dunmore cc', via_meta: true, selected: false, visitors: 4, searches: 6, queries: ['dunmore', 'dunmore cricket'], last_at: '2026-11-10T07:00:00Z' },
+    { name: 'Applegrove CC', key: 'applegrove cc', via_meta: true, selected: true, visitors: 2, searches: 2, queries: ['applegrove'], last_at: '2026-11-10T06:00:00Z' },
+  ],
+  hidden_clubs: [], identified: 2, hidden_count: 0, searched_only_count: 1, converted_count: 1,
+}
+
+async function open({ summary, signups = { rows: ROWS, campaigns: [] }, signupsFail = false, listsFail = false,
+                      selected = SELECTED, searched = SEARCHED,
                       tokens = null, width = 1500 } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: 3200 } })
   const page = await ctx.newPage()
@@ -163,8 +180,8 @@ async function open({ summary, signups = { rows: ROWS, campaigns: [] }, signupsF
         { key: 'b', label: 'Completed', value: 6, pct_of_top: 30, pct_of_prev: 30 },
       ] })
     }
-    if (/meta-ads\/selected-clubs/.test(p)) return json({ clubs: [], hidden_clubs: [], identified: 0, hidden_count: 0, anonymous: 4 })
-    if (/meta-ads\/searched-clubs/.test(p)) return json({ clubs: [], hidden_clubs: [], identified: 0, hidden_count: 0, searched_only_count: 0, converted_count: 0 })
+    if (/meta-ads\/selected-clubs/.test(p)) return listsFail ? json({ detail: 'boom' }, 500) : json(selected)
+    if (/meta-ads\/searched-clubs/.test(p)) return listsFail ? json({ detail: 'boom' }, 500) : json(searched)
     if (/meta-ads\/ad-signups/.test(p)) return signupsFail ? json({ detail: 'boom' }, 500) : json(signups)
     if (/usage\/campaigns/.test(p)) {
       return json({ days: 30, meta: { visitors: 10, facebook: 8, instagram: 2, paid: 9 },
@@ -274,18 +291,43 @@ const money = (n) => `A$${n.toFixed(2)}`
   await page.waitForTimeout(700)
   ck('the toggle shows them', (await page.locator('.recharts-wrapper').count()) > 0)
 
-  // Demand section: one block, tabbed.
-  ck('the demand section has four tabs', (await page.locator('[data-testid^="demand-tab-"]').count()) === 4)
-  ck('the wizard funnel is the default tab', /wizard: where visitors drop off/i.test(await page.locator('body').innerText()))
-  await clickIf(page.locator('[data-testid="demand-tab-selected"]'))
-  ck('Clubs selected tab shows its table card', /clubs selected in the wizard/i.test(await page.locator('body').innerText()))
-  ck('and the funnel is no longer drawn', !/wizard: where visitors drop off/i.test(await page.locator('body').innerText()))
-  await clickIf(page.locator('[data-testid="demand-tab-searched"]'))
-  ck('an empty tab says so rather than going blank', await has(page.locator('[data-testid="demand-empty"]')))
-  await clickIf(page.locator('[data-testid="demand-tab-traffic"]'))
-  ck('Where Meta clicks land tab shows the traffic card', /where meta clicks land/i.test(await page.locator('body').innerText()))
+  // Demand section: one stacked block. NOTHING is behind a click: the lists of who
+  // typed a club in and the furthest step each reached are the follow-up list, and
+  // they were lost once already to a tab that opened on the funnel.
+  const bodyNow = await page.locator('body').innerText()
+  ck('the section has no tabs', (await page.locator('[role="tab"], [data-testid^="demand-tab-"]').count()) === 0)
+  ck('Clubs selected is on screen with nothing clicked', /clubs selected in the wizard/i.test(bodyNow))
+  ck('Clubs searched is on screen with nothing clicked', /clubs searched in the wizard/i.test(bodyNow))
+  ck('the wizard funnel is on screen too', /wizard: where visitors drop off/i.test(bodyNow))
+  ck('where Meta clicks land is on screen too', /where meta clicks land/i.test(bodyNow))
+  ck('each selected club is named', ['Applegrove CC', 'Bayview CC', 'Cresthill CC'].every((n) => bodyNow.includes(n)))
+  ck('and the furthest step each reached is shown (CSS-uppercase, so compared lowercase)',
+     /registration completed/i.test(bodyNow) && /reached terms & privacy/i.test(bodyNow) && /selected a club/i.test(bodyNow))
+  ck('each searched club is named with what was typed', bodyNow.includes('Dunmore CC') && bodyNow.includes('“dunmore”'))
+  ck('searched-only is told apart from selected', /searched only/i.test(bodyNow) && /\bselected\b/i.test(bodyNow))
+  const posOf = (re) => bodyNow.search(re)
+  ck('the two stage lists come before the funnel',
+     posOf(/clubs selected in the wizard/i) > -1 && posOf(/clubs selected in the wizard/i) < posOf(/wizard: where visitors drop off/i)
+     && posOf(/clubs searched in the wizard/i) < posOf(/wizard: where visitors drop off/i))
+  ck('no empty-state message when there is data', !(await has(page.locator('[data-testid="selected-empty"], [data-testid="searched-empty"], [data-testid="lists-failed"]'))))
   await page.screenshot({ path: '/tmp/meta_ads_kpi_desktop.png', fullPage: true })
   ck('no page errors', errors.length === 0, errors.join(' | '))
+  await ctx.close()
+}
+
+// ── A2. The lists are empty, or fail to load: say so, never go quiet ──────────
+{
+  const empty = { clubs: [], hidden_clubs: [], identified: 0, hidden_count: 0, anonymous: 0, searched_only_count: 0, converted_count: 0 }
+  const { page, ctx } = await open({ summary: summaryFor(), selected: empty, searched: empty })
+  ck('empty lists say none recorded yet instead of vanishing',
+     (await has(page.locator('[data-testid="selected-empty"]'))) && (await has(page.locator('[data-testid="searched-empty"]'))))
+  ck('and that is not reported as a load failure', !(await has(page.locator('[data-testid="lists-failed"]'))))
+  await ctx.close()
+}
+{
+  const { page, ctx } = await open({ summary: summaryFor(), listsFail: true })
+  ck('a failed load of the lists is shown, not swallowed', await has(page.locator('[data-testid="lists-failed"]')))
+  ck('and no misleading "none recorded" appears beside it', !(await has(page.locator('[data-testid="selected-empty"], [data-testid="searched-empty"]'))))
   await ctx.close()
 }
 
