@@ -610,4 +610,5 @@ async def submit(
         )
 
     # The frontend follows this straight into the new admin's live dashboard.
-    return {**result, "redirect": "/admin"}
+    # A returning admin was not signed in (no session, password untouched): they go to the sign-in page.
+    return {**result, "redirect": "/login" if result.get("returning_admin") else "/admin"}

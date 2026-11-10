@@ -201,8 +201,12 @@ def compose(*, snapshot: dict, registrant: dict, new_person: bool, trial_ends_at
     who = [f"{registrant['name']}", f"Email: {registrant['email']}"]
     if registrant.get("phone"):
         who.append(f"Phone: {registrant['phone']}")
-    who.append("A new person: none of the club's earlier admins use this email." if new_person
-               else "The same email as one of the club's earlier admins.")
+    if new_person:
+        who.append("A new person: none of the club's earlier admins use this email.")
+    else:
+        who.append("The same email as one of the club's earlier admins, so this is the club's own admin coming back.")
+        who.append("Their login was not changed and they were not signed in. They sign in with their existing "
+                   "password (Forgot your password? is on the sign-in page).")
     sections.append(("Who registered", who))
 
     earlier = [f"{a['name']} ({a['email'] or 'no email'}){', primary admin' if a['primary'] else ''}"

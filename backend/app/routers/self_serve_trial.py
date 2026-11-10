@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 import bcrypt
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -367,6 +367,10 @@ class ValidateAdminRequest(BaseModel):
     username: str = ""
     email: str = ""
     mobile_number: str = ""
+    # The club the wizard prepared. Only used to tell a returning admin of that club (see
+    # ``_returning_admin_user``) from a stranger whose email is already on another account.
+    org_id: str = ""
+    club_name: str = ""
 
 
 async def _validate_admin_fields(db: AsyncSession, data: ValidateAdminRequest) -> dict:
@@ -386,12 +390,45 @@ async def _validate_admin_fields(db: AsyncSession, data: ValidateAdminRequest) -
     )
 
 
+async def _returning_admin_user(db: AsyncSession, matched, email: str):
+    """The existing User when ``email`` is an admin of THIS club and the club's free trial ran
+    out (``auth.modules.trial_lapsed``), else None. That person may register again with their own
+    email: the club already has them, so no second account is made, their password and username
+    are left alone, and they are not signed in (see ``submit``). An email on any other account,
+    or an admin of a club that is not a lapsed trial, stays refused."""
+    from app.auth.modules import trial_lapsed
+    mail = (email or "").strip().lower()
+    if matched is None or not mail:
+        return None
+    rows = (await db.execute(
+        select(OrgModuleSubscription).where(OrgModuleSubscription.organisation_id == matched.id)
+    )).scalars().all()
+    if not trial_lapsed(matched, rows):
+        return None
+    return (await db.execute(
+        select(User).join(ClubMembership, ClubMembership.user_id == User.id)
+        .where(ClubMembership.club_id == matched.id, ClubMembership.role == "club_admin",
+               func.lower(User.email) == mail)
+        .limit(1)
+    )).scalars().first()
+
+
 @router.post("/validate-admin")
 async def validate_admin(data: ValidateAdminRequest, db: AsyncSession = Depends(get_db)):
     """Validate-as-you-type for the admin-details step."""
     errors = await _validate_admin_fields(db, data)
+    returning = False
+    if errors.get("email") == admin_identity.EMAIL_TAKEN_MESSAGE:
+        club_id = _parse_uuid(data.org_id)
+        matched = (await find_matching_organisation(db, club_id, data.club_name, include_archived=False)
+                   if club_id else None)
+        if await _returning_admin_user(db, matched, data.email) is not None:
+            # Their own account is not a fault. Their username is not used either (they keep theirs).
+            returning = True
+            errors = {k: v for k, v in errors.items() if k not in ("email", "username")}
     return {
         "valid": not errors,
+        "returning_admin": returning,
         "errors": errors,
         "normalised": {
             "username": (data.username or "").strip().lower(),
@@ -628,6 +665,8 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
             "status": existing_key.status,
             "org_id": str(existing_key.org_id) if existing_key.org_id else None,
             "user_id": str(existing_key.user_id) if existing_key.user_id else None,
+            # a returning admin's key stores no user id (they are never signed in by it)
+            "returning_admin": bool(existing_key.org_id and not existing_key.user_id),
             "replayed": True,
         }
 
@@ -653,6 +692,12 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
         first_name=data.first_name, last_name=data.last_name, display_name=data.display_name,
         username=data.username, email=data.email, mobile_number=data.mobile_number,
     ))
+    # An earlier admin of this lapsed club registering again with their own email: their account
+    # already exists, so "email taken" and their username are not faults and no password is asked.
+    returning_user = await _returning_admin_user(db, matched, email) if admin_errors.get("email") == \
+        admin_identity.EMAIL_TAKEN_MESSAGE else None
+    if returning_user is not None:
+        admin_errors = {k: v for k, v in admin_errors.items() if k not in ("email", "username")}
     if admin_errors:
         raise HTTPException(status_code=422, detail={"errors": list(admin_errors.values())})
 
@@ -666,9 +711,10 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
     if ack.scalar_one_or_none() is None:
         raise HTTPException(status_code=422, detail="Acknowledgements have not been accepted")
 
-    password_errors = password_policy.password_errors(data.password, data.confirm_password)
-    if password_errors:
-        raise HTTPException(status_code=422, detail={"errors": password_errors})
+    if returning_user is None:
+        password_errors = password_policy.password_errors(data.password, data.confirm_password)
+        if password_errors:
+            raise HTTPException(status_code=422, detail={"errors": password_errors})
 
     # A club whose trial ended is being registered again. Read what it looked like (earlier
     # admins, dates, modules) NOW: once the registration runs, the new admin is on the club and
@@ -685,22 +731,33 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
     # concurrent signup for the same username/email despite the pre-check,
     # the unique-constraint violation surfaces here, cleanly, before anything
     # else exists.
-    username = (data.username or "").strip().lower()
-    user = User(
-        username=username,
-        email=email,
-        password_hash=bcrypt.hashpw(data.password.encode(), bcrypt.gensalt()).decode(),
-        display_name=(data.display_name or "").strip(),
-        first_name=(data.first_name or "").strip(),
-        last_name=(data.last_name or "").strip(),
-        mobile_number=(data.mobile_number or "").strip(),
-    )
-    db.add(user)
-    try:
-        await db.flush()
-    except IntegrityError:
-        await db.rollback()
-        raise HTTPException(status_code=409, detail="That username or email was just taken — try again.")
+    if returning_user is not None:
+        # No new account, and the existing one is not touched: not its password, username or
+        # profile. A 4-digit email code proves the address for registering, but it is too weak to
+        # sign someone in to an existing account, so no session is issued either (see the public
+        # route). They sign in with the login they already have.
+        user = returning_user
+    else:
+        username = (data.username or "").strip().lower()
+        user = User(
+            username=username,
+            email=email,
+            password_hash=bcrypt.hashpw(data.password.encode(), bcrypt.gensalt()).decode(),
+            display_name=(data.display_name or "").strip(),
+            first_name=(data.first_name or "").strip(),
+            last_name=(data.last_name or "").strip(),
+            mobile_number=(data.mobile_number or "").strip(),
+        )
+        db.add(user)
+        try:
+            await db.flush()
+        except IntegrityError:
+            await db.rollback()
+            raise HTTPException(status_code=409, detail="That username or email was just taken — try again.")
+    # Who to ring: what they typed on the form, which for a returning admin is newer than the account.
+    contact_name = ((data.display_name or "").strip() or f"{data.first_name} {data.last_name}".strip()
+                    or user.display_name or "")
+    contact_phone = (data.mobile_number or "").strip() or user.mobile_number or None
 
     # Club creation + sync kickoff + marketing-directory link: the same
     # underlying logic the existing authenticated-user "onboard" flow uses
@@ -801,7 +858,8 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
         for stale in stale_redemptions:
             stale.status = "revoked"
 
-        db.add(ClubMembership(club_id=org.id, user_id=user.id, role="club_admin"))
+        if returning_user is None:
+            db.add(ClubMembership(club_id=org.id, user_id=user.id, role="club_admin"))
         await db.flush()
         await ensure_primary_admin(db, org.id)
 
@@ -819,7 +877,7 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
 
         db.add(SelfServeIdempotencyKey(
             idempotency_key=key, email=email, status="completed",
-            org_id=org.id, user_id=user.id,
+            org_id=org.id, user_id=None if returning_user is not None else user.id,
         ))
         await db.commit()
 
@@ -840,8 +898,8 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
         from app.services import crm as crm_service
         background_tasks.add_task(
             crm_service.sync_self_serve_trial_registration,
-            org_id=org.id, org_name=name, contact_name=user.display_name,
-            email=email, phone=user.mobile_number or None, attribution=data.attribution,
+            org_id=org.id, org_name=name, contact_name=contact_name,
+            email=email, phone=contact_phone, attribution=data.attribution,
         )
         # Queued after the CRM sync above, which background tasks run in order, so the deal is
         # there when this runs. Every returning club is flagged for a personal follow-up.
@@ -849,8 +907,7 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
             background_tasks.add_task(
                 returning_club_followup.run,
                 snapshot=returning,
-                registrant={"name": user.display_name or f"{user.first_name} {user.last_name}".strip(),
-                            "email": email, "phone": user.mobile_number or None},
+                registrant={"name": contact_name, "email": email, "phone": contact_phone},
                 visitor_id=getattr(data, "visitorId", None),
                 attribution=data.attribution,
                 registered_at=datetime.now(timezone.utc),
@@ -874,7 +931,9 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
     return {
         "status": "completed",
         "org_id": str(org.id),
-        "user_id": str(user.id),
+        # None for a returning admin: they are not signed in, so nothing may sign them in by id
+        "user_id": None if returning_user is not None else str(user.id),
+        "returning_admin": returning_user is not None,
         "run_id": str(run_id),
         "name": name,
         "modules": [MODULE_CORE, *requested_modules],
