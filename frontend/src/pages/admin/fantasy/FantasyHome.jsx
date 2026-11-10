@@ -22,6 +22,23 @@ const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 const fmtDay = (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })
 const fmtSpan = ([a, b]) => (!b || a === b ? fmtDay(a) : `${fmtDay(a)} to ${fmtDay(b)}`)
 
+// What the round's stored status is called on screen. The words "scored" and "unsettled" are the
+// engine's; a club admin reads "confirmed" (final points are locked in) and "reopened".
+const STATUS_WORD = { scored: 'confirmed', unsettled: 'reopened' }
+
+// The three things an admin can do to a round's scores, in plain words. Shown above the table so the
+// buttons are not guesswork.
+const SCORE_ACTIONS = [
+  ['Sync scores', 'Re-reads the scorecards from Play-Cricket now. Use it when a game has finished and a score looks missing. Points stay running scores, nothing is locked in.'],
+  ['Confirm final scores', 'Locks in the round\'s points once its games are done. The ladder and prices move, and managers get their free transfer.'],
+  ['Reopen round', 'Takes a confirmed round back to running scores, for one confirmed too early or by mistake. Chips and transfers managers made are kept.'],
+]
+
+function RowBtn({ onClick, busy, kind = 'ghost', children }) {
+  const cls = kind === 'accent' ? 'bg-pb-accent text-white hover:opacity-90' : 'border pb-hairline text-pb-text hover:bg-pb-surface2'
+  return <button onClick={onClick} disabled={busy} className={`px-2.5 py-1 rounded text-xs font-medium disabled:opacity-50 ${cls}`}>{busy ? '…' : children}</button>
+}
+
 function LockCell({ r, onChanged, flash, fail }) {
   const [editing, setEditing] = useState(false)
   const [val, setVal] = useState('')
@@ -103,7 +120,7 @@ export default function FantasyHome() {
   })
   const fixDates = async () => {
     const lines = realign.changes.map(c => `Round ${c.round_number}: ${fmtSpan(c.stored)} becomes ${fmtSpan(c.draw)}`).join('\n')
-    if (!window.confirm(`Move these rounds to the draw's dates?\n\n${lines}\n\nA round that only gets longer is scored again with its extra games. A round that moves to different games is taken back out of settlement first and shows running points. Nothing a manager did is changed.`)) return
+    if (!window.confirm(`Move these rounds to the draw's dates?\n\n${lines}\n\nA round that only gets longer is confirmed again with its extra games. A round that moves to different games is reopened first and shows running points. Nothing a manager did is changed.`)) return
     setBusy('realign'); setErr(null)
     try { const r = await api.fantasyRealignApply(season.id); flash(`Moved ${plural(r.realigned.length, 'round')} to the draw's dates.`); await load() }
     catch (e) { fail(e) } finally { setBusy('') }
@@ -132,14 +149,14 @@ export default function FantasyHome() {
     catch (e) { fail(e) } finally { setBusy('') }
   }
   const unsettleOne = async (r) => {
-    if (!window.confirm(`Unsettle ${r.name || `Round ${r.round_number}`}? Its points come off the ladder and player totals. Chips and transfers managers made are kept. An ended round stays unsettled, and locked to managers, until you settle it again.`)) return
+    if (!window.confirm(`Reopen ${r.name || `Round ${r.round_number}`}? Its points come off the ladder and player totals and it goes back to running scores. Chips and transfers managers made are kept. An ended round stays reopened, and locked to managers, until you press Confirm final scores again.`)) return
     setBusy(`r:${r.id}`); setErr(null)
-    try { await api.fantasyUnsettleRound(r.id); flash('Round unsettled.'); await load() }
+    try { await api.fantasyUnsettleRound(r.id); flash('Round reopened. Press Confirm final scores when its points are right.'); await load() }
     catch (e) { fail(e) } finally { setBusy('') }
   }
   const settleOne = async (r) => {
     const rid = r.id
-    if (r.playing && r.status !== 'scored' && !window.confirm('Games are still being played in this round. Confirm the final scores now? You can unsettle it again, and running scores carry on until then.')) return
+    if (r.playing && r.status !== 'scored' && !window.confirm('Games are still being played in this round. Confirm the final scores now? You can reopen it again, and running scores carry on until then.')) return
     setBusy(`r:${rid}`); try { const r = await api.fantasySettleRound(rid); flash(`Confirmed scores for ${plural(r.players_scored, 'player')}.`); await load() }
     catch (e) { fail(e) } finally { setBusy('') }
   }
@@ -245,6 +262,16 @@ export default function FantasyHome() {
                   : <p className="text-xs text-pb-faint">These can't be moved automatically while managers' choices hang off them.</p>}
               </div>
             )}
+            {rounds?.length > 0 && (
+              <dl className="mb-4 grid gap-2 sm:grid-cols-3 text-xs" data-testid="score-actions">
+                {SCORE_ACTIONS.map(([name, text]) => (
+                  <div key={name} className="rounded border pb-hairline px-3 py-2">
+                    <dt className="font-medium text-pb-text">{name}</dt>
+                    <dd className="text-pb-faint mt-0.5">{text}</dd>
+                  </div>
+                ))}
+              </dl>
+            )}
             {!rounds?.length ? (
               <p className="text-sm text-pb-faint">No rounds yet. Click “Generate rounds”.</p>
             ) : (
@@ -269,7 +296,7 @@ export default function FantasyHome() {
                         </td>
                         <td className="py-1.5 pr-3">
                           <span className={r.status === 'scored' ? 'text-pb-accent' : r.status === 'unsettled' ? 'text-amber-400' : r.playing ? 'text-green-400' : 'text-pb-faint'}>
-                            {r.playing && r.status !== 'scored' && r.status !== 'unsettled' ? 'live' : r.syncable && r.status === 'upcoming' ? 'ended, not confirmed' : r.status}
+                            {r.playing && r.status !== 'scored' && r.status !== 'unsettled' ? 'live' : r.syncable && r.status === 'upcoming' ? 'ended, not confirmed' : (STATUS_WORD[r.status] || r.status)}
                           </span>
                           {r.syncable && r.status !== 'unsettled' && (
                             <div className="text-[11px] text-pb-faint mt-0.5 max-w-xs">
@@ -278,30 +305,33 @@ export default function FantasyHome() {
                               {r.status === 'scored' ? ' Confirmed already, and still follows late scorecards.' : ' Running scores until you confirm the round.'}
                             </div>
                           )}
+                          {r.syncable && r.status === 'upcoming' && !r.playing && (
+                            <div className="text-[11px] text-amber-400 mt-0.5 max-w-xs">
+                              This round is over. Press Confirm final scores to lock its points in.
+                            </div>
+                          )}
+                          {r.status === 'unsettled' && (
+                            <div className="text-[11px] text-amber-400 mt-0.5 max-w-xs">
+                              This round was reopened and has no points. Press Confirm final scores to put them back.
+                            </div>
+                          )}
                           {r.drift && (
                             <div className="text-[11px] text-amber-400 mt-0.5 max-w-xs">
-                              Scorecards have changed since this was settled: {r.drift.count} player{r.drift.count === 1 ? '' : 's'} score differently now
+                              Scorecards have changed since this round was confirmed: {r.drift.count} player{r.drift.count === 1 ? '' : 's'} score differently now
                               ({r.drift.players.join(', ')}{r.drift.count > r.drift.players.length ? ', …' : ''}). Press Confirm final scores to bring it up to date; it also happens overnight.
                             </div>
                           )}
                         </td>
                         <td className="py-1.5 pr-3 text-right whitespace-nowrap">
-                          {r.status === 'scored' && (
-                            <button onClick={() => unsettleOne(r)} disabled={busy === `r:${r.id}`}
-                              className="text-xs underline text-pb-faint hover:text-pb-text disabled:opacity-50 mr-3">
-                              Unsettle
-                            </button>
-                          )}
-                          {r.syncable && r.status !== 'unsettled' && (
-                            <button onClick={syncScores} disabled={busy === 'sync'}
-                              className="text-xs underline text-pb-accent hover:text-pb-text disabled:opacity-50 mr-3">
-                              {busy === 'sync' ? '…' : 'Sync scores'}
-                            </button>
-                          )}
-                          <button onClick={() => settleOne(r)} disabled={busy === `r:${r.id}`}
-                            className="text-xs underline text-pb-faint hover:text-pb-text disabled:opacity-50">
-                            {busy === `r:${r.id}` ? '…' : 'Confirm final scores'}
-                          </button>
+                          <div className="flex flex-wrap justify-end gap-1.5">
+                            {r.syncable && r.status !== 'unsettled' && (
+                              <RowBtn onClick={syncScores} busy={busy === 'sync'}>Sync scores</RowBtn>
+                            )}
+                            <RowBtn kind={r.status === 'scored' ? 'ghost' : 'accent'} onClick={() => settleOne(r)} busy={busy === `r:${r.id}`}>Confirm final scores</RowBtn>
+                            {r.status === 'scored' && (
+                              <RowBtn onClick={() => unsettleOne(r)} busy={busy === `r:${r.id}`}>Reopen round</RowBtn>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}

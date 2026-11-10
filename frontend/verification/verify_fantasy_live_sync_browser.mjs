@@ -84,6 +84,10 @@ async function openPage({ width = 1440, syncReply, liveSync = true, ended = fals
       liveOn = JSON.parse(body).live_sync
       return json(route, { rules: { live_sync: liveOn } })
     }
+    if (path === '/club-admin/fantasy/rounds/r1/unsettle') {
+      calls.push(`POST ${path}`)
+      return json(route, { removed: 12 })
+    }
     if (path === '/club-admin/fantasy/rounds/r1/settle' || path === '/club-admin/fantasy/rounds/r2/settle') {
       calls.push(`POST ${path}`)
       return json(route, { players_scored: 12 })
@@ -113,7 +117,7 @@ const flashText = async (page) => (await page.locator('div.rounded.bg-pb-accent\
   ck('only the running round offers Sync scores in its row', (await r2.getByText('Sync scores').count()) === 1 && (await r3.getByText('Sync scores').count()) === 0
      && (await r1.getByText('Sync scores').count()) === 0)
   ck('every round offers Confirm final scores, and nothing in the table still says Settle',
-     (await page.getByText('Confirm final scores').count()) === 3 && !/\bSettle\b/.test(await page.locator('table').innerText()))
+     (await page.locator('table').getByText('Confirm final scores').count()) === 3 && !/\bSettle\b/.test(await page.locator('table').innerText()))
   ck('the header offers Sync scores and Confirm finished rounds', (await page.getByRole('button', { name: 'Sync scores' }).count()) >= 1
      && (await page.getByRole('button', { name: 'Confirm finished rounds' }).count()) === 1)
   ck('Live scoring shows as on', await page.getByText('Live scoring on').count() === 1)
@@ -227,6 +231,49 @@ const PLAN = (blockers = []) => ({
 {
   const { page, ctx } = await openPage({ syncReply: {} })
   ck('when the rounds match the draw there is no notice', (await page.getByTestId('realign').count()) === 0)
+  await ctx.close()
+}
+
+// ── 2d. Plain words for the three score actions (no "settle" / "unsettle") ───────
+// Reported (Sunbury CC, Nov 2026): admins could not tell what Settle and Unsettle did or where to re-sync.
+{
+  const { page, ctx, calls, errors } = await openPage({ ended: false, syncReply: { ran: true, games_checked: 1, players_moved: 0, message: null, rounds: [] } })
+  const box = page.getByTestId('score-actions')
+  const bt = await box.innerText()
+  ck('a panel explains Sync scores, Confirm final scores and Reopen round in words',
+     /Sync scores/.test(bt) && /Confirm final scores/.test(bt) && /Reopen round/.test(bt) && /Re-reads the scorecards/.test(bt) && /Locks in the round/.test(bt), bt)
+  const all = await page.locator('body').innerText()
+  ck('no button, label or message on the screen says Settle, Unsettle, settled or unsettled',
+     !/\b(un)?settle[ds]?\b/i.test(all), (all.match(/.{20}\b(un)?settle[ds]?\b.{20}/i) || [''])[0])
+  const r1 = rowOf(page, 'Round 1')
+  ck('a round with its points locked in reads "confirmed", not "scored"', /confirmed/.test(await r1.innerText()) && !/\bscored\b/.test(await r1.innerText()), await r1.innerText())
+  ck('only a confirmed round offers Reopen round', (await r1.getByRole('button', { name: 'Reopen round' }).count()) === 1
+     && (await rowOf(page, 'Round 2').getByRole('button', { name: 'Reopen round' }).count()) === 0
+     && (await rowOf(page, 'Round 3').getByRole('button', { name: 'Reopen round' }).count()) === 0)
+  ck('Sync scores and Confirm final scores are real buttons in the row, not links',
+     (await rowOf(page, 'Round 2').getByRole('button', { name: 'Sync scores' }).count()) === 1
+     && (await rowOf(page, 'Round 2').getByRole('button', { name: 'Confirm final scores' }).count()) === 1)
+  calls.length = 0
+  await r1.getByRole('button', { name: 'Reopen round' }).click()
+  await page.waitForTimeout(300)
+  ck('Reopen round asks first, in plain words', calls[0]?.startsWith('dialog:Reopen Round 1?'), calls.join(' | '))
+  ck('and sends the unsettle request (the route name is internal)', calls.includes('POST /club-admin/fantasy/rounds/r1/unsettle'), calls.join(' | '))
+  ck('and says what to do next', /Round reopened\. Press Confirm final scores/.test(await flashText(page)), await flashText(page))
+  ck('no page errors', errors.length === 0, errors.join(' | '))
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/fantasy_admin_score_actions_1440.png`, fullPage: true })
+  await ctx.close()
+}
+{
+  const { page, ctx } = await openPage({ ended: true, syncReply: {} })
+  const t = await rowOf(page, 'Round 2').innerText()
+  ck('a round that is over but not confirmed tells the admin what to press', /This round is over\. Press Confirm final scores to lock its points in\./.test(t), t)
+  await ctx.close()
+}
+{
+  const { page, ctx } = await openPage({ width: 390, syncReply: {} })
+  const over = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+  ck('at 390px the explainer and the buttons cause no sideways page scroll', over <= 0, `overflow ${over}px`)
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/fantasy_admin_score_actions_390.png`, fullPage: true })
   await ctx.close()
 }
 
