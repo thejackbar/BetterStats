@@ -1218,7 +1218,7 @@ async def unsettle_round(round_id: str, club=Depends(get_current_club), db: Asyn
     if rnd is None or str(rnd.organisation_id) != str(club.id):
         raise HTTPException(status_code=404, detail="Round not found")
     if rnd.status != "scored":
-        raise HTTPException(status_code=409, detail="This round isn't settled.")
+        raise HTTPException(status_code=409, detail="This round isn't confirmed yet.")
     fs = await _load_season(db, club, str(rnd.fantasy_season_id))
     n = await fantasy_engine.unsettle_round(db, fs, rnd)
     await db.commit()
