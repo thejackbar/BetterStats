@@ -51,12 +51,12 @@ MAX_REPLY_CHARS = 1200
 HTTP_TIMEOUT = 15.0
 
 HANDOFF_MESSAGE = (
-    "I have passed this to Jack and Elton. They will reply here, or by email if you leave this window. "
+    "I have passed this to Jack and Elton. They will reply here in this chat. "
     "Add anything that will help them, like which club and screen you were on."
 )
 UNAVAILABLE_MESSAGE = (
     "I can't look that up right now, so I have passed your message to Jack and Elton. "
-    "They will reply here, or by email if you leave this window."
+    "They will reply here in this chat."
 )
 
 # A person asking for a person is not a question for the model.
