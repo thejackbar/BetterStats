@@ -58,6 +58,23 @@ registerParts({
     C('subColor', 'Grade and opposition', ROW, (p) => p.ink),
     ...FOOTER_PARTS,
   ],
+  TW3: [
+    T('title1', 'First word(s)', HEAD, () => 'TEAM OF'),
+    C('title1Color', 'First word colour', HEAD, (p) => p.ink),
+    T('title2', 'Second word(s)', HEAD, () => 'THE WEEK'),
+    C('title2Color', 'Second word colour', HEAD, (p) => p.ink),
+    C('roundColor', 'Round line', HEAD, (p) => p.accent),
+    C('frameColor', 'Top and bottom bands', FOOT, (p) => p.accent),
+    C('photoBg', 'Photo backdrop', CARD, null, { autoLabel: 'White' }),
+    C('tabBg', 'Number tab', CARD, (p) => p.accent),
+    C('numColor', 'Card number', CARD, (p) => p.primary),
+    C('bandBg', 'Name band', CARD, (p) => p.accent),
+    C('nameColor', 'Name', CARD, (p) => p.primary),
+    C('panelBg', 'Score panel', CARD, null, { autoLabel: 'Dark' }),
+    C('statColor', 'Score line', CARD, (p) => p.ink),
+    C('pointsBg', 'Points tag', CARD, (p) => p.accent),
+    C('pointsColor', 'Points text', CARD, (p) => p.primary),
+  ],
 })
 
 const DISPLAY = "var(--social-display-font, 'Anton', sans-serif)"
@@ -344,13 +361,226 @@ export function TeamOfWeekBoard({ palette: pal, width = 1080, height = 1080, tea
   )
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// TW3 — Round cards: crest and sponsor over the heading, white photo cards
+// ═══════════════════════════════════════════════════════════════════════════
+// A poster rather than a sheet: a patterned band top and bottom, the crest in the
+// middle of the header with the round at its left and the sponsor at its right,
+// a worn heading underneath, then white cards (number tab, photo, name band, a dark
+// score panel). Colours come from the palette (`primary` ground, `accent` bands and
+// tabs, `ink` type); the sponsor sits in its own slot at the right of the header.
+const TW3_M = 54
+const TW3_SCALLOP = 12
+const tw3Band = (height) => grow(height, 34, 0.012)
+const tw3Foot = (height) => grow(height, 46, 0.012)
+
+function frame3(width, height) {
+  const A = aspectOf(width, height)
+  const band = tw3Band(height)
+  const crest = pick(A, { square: 124, portrait: 142, story: 170 })
+  const titleH = pick(A, { square: 72, portrait: 86, story: 104 })
+  const crestTop = band + TW3_SCALLOP + 6
+  const titleTop = crestTop + crest + 10
+  const foot = tw3Foot(height)
+  return { A, band, crest, titleH, crestTop, titleTop, top: titleTop + titleH + 14, foot, bottom: foot + 22 }
+}
+
+// The sponsor's room: the right of the header, as tall as the crest and heading
+// together. It is one rectangle whatever the count, because the grid fits its
+// logos inside it. `slotTW3` is the one function the layout and SPONSOR_SLOTS share.
+const TW3_SLOT_W = 190
+function slotTW3(width = 1080, height = 1080) {
+  const F = frame3(width, height)
+  const y = F.crestTop - 2
+  return { x: width - TW3_M - TW3_SLOT_W, y, w: TW3_SLOT_W, h: F.top - 14 - y, pad: 0, gap: 12, panel: 'none' }
+}
+
+// The scuffed look of the heading: a mask with small holes and a few scratches
+// punched out of it, drawn once from a fixed seed so the post is the same every
+// time it is drawn and exported. A mask (not a filter) because the PNG export
+// paints masks.
+const DISTRESS_MASK = (() => {
+  let seed = 20260
+  const rnd = () => { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296 }
+  const W = 1000, H = 120
+  let d = `M0 0H${W}V${H}H0Z`
+  for (let i = 0; i < 300; i++) {
+    const x = rnd() * W, y = rnd() * H, r = 0.7 + rnd() * rnd() * 5.5
+    d += `M${(x - r).toFixed(1)} ${y.toFixed(1)}a${r.toFixed(1)} ${r.toFixed(1)} 0 1 0 ${(2 * r).toFixed(1)} 0a${r.toFixed(1)} ${r.toFixed(1)} 0 1 0 ${(-2 * r).toFixed(1)} 0Z`
+  }
+  for (let i = 0; i < 16; i++) {
+    const x = rnd() * W, y = rnd() * H, w = 18 + rnd() * 80
+    d += `M${x.toFixed(1)} ${y.toFixed(1)}h${w.toFixed(1)}v${(1 + rnd() * 1.6).toFixed(1)}h${(-w).toFixed(1)}Z`
+  }
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 ${W} ${H}' preserveAspectRatio='none'><path fill-rule='evenodd' d='${d}'/></svg>`
+  return `url("data:image/svg+xml;utf8,${encodeURIComponent(svg)}")`
+})()
+
+// "202* (150)" becomes "202* RUNS", "2/19 (4)" becomes "2/19": the card says what
+// happened, the balls and overs stay on the scorecard. Anything else (a line the
+// club typed, "2 ct") is printed as it is.
+export function cardStat(line) {
+  return String(line || '').split('·').map((seg) => {
+    const t = seg.trim()
+    const bat = /^(\d+\*?)\s*\(\d+\)$/.exec(t)
+    if (bat) return `${bat[1]} RUNS`
+    return t.replace(/\s*\([\d.]+\)$/, '')
+  }).filter(Boolean).join(' · ').toUpperCase()
+}
+
+const DOTS = 'rgba(0,0,0,0.2)'
+function bandDots(texture) {
+  return texture ? {
+    backgroundImage: `radial-gradient(circle at 50% 50%, ${DOTS} 0 3px, transparent 3.5px), radial-gradient(circle at 50% 50%, ${DOTS} 0 3px, transparent 3.5px)`,
+    backgroundSize: '24px 24px', backgroundPosition: '0 0, 12px 12px',
+  } : {}
+}
+
+// Plain functions returning their root `div` (a component child only takes a
+// z-index if it spreads `style`).
+function topBand({ pal, width, F, parts, texture }) {
+  const c = pc(parts, 'frameColor', pal.accent)
+  return (
+    <div data-layer="Top band" style={{ position: 'absolute', left: 0, top: 0, width, height: F.band + TW3_SCALLOP }}>
+      <div style={{ height: F.band, background: c, ...bandDots(texture) }} />
+      <div style={{ height: TW3_SCALLOP, backgroundImage: `radial-gradient(circle at 50% 0, ${c} 0 11.5px, transparent 12px)`, backgroundSize: '24px 12px', backgroundRepeat: 'repeat-x' }} />
+    </div>
+  )
+}
+
+function bottomBand({ pal, width, F, parts, texture }) {
+  const c = pc(parts, 'frameColor', pal.accent)
+  return (
+    <div data-layer="Footer" style={{ position: 'absolute', left: 0, bottom: 0, width, height: F.foot + TW3_SCALLOP }}>
+      <div style={{ height: TW3_SCALLOP, backgroundImage: `radial-gradient(circle at 50% 100%, ${c} 0 11.5px, transparent 12px)`, backgroundSize: '24px 12px', backgroundRepeat: 'repeat-x' }} />
+      <div style={{ height: F.foot, background: c, ...bandDots(texture), position: 'relative' }}>
+        <div style={{ position: 'absolute', right: TW3_M, top: '50%', transform: 'translateY(-50%)', padding: '3px 10px', background: c, display: 'flex', alignItems: 'center' }}>
+          <CreditMark ink={inkOn(c)} h={Math.round(F.foot * 0.5)} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export function TeamOfWeekCards({ palette: pal, width = 1080, height = 1080, team = {}, players = [], totw = {}, sponsors, parts }) {
+  const texture = usePostLook().texture !== false
+  const P = players.slice(0, TOTW_MAX)
+  const n = P.length
+  const F = frame3(width, height)
+  const cols = totwColumns(n)
+  const rows = Math.max(1, Math.ceil(n / cols))
+  const gap = 14
+  const gridW = width - TW3_M * 2
+  const gridH = height - F.top - F.bottom
+  const cardW = Math.floor((gridW - gap * (cols - 1)) / cols)
+  const cardH = Math.floor((gridH - gap * (rows - 1)) / rows)
+  const radius = 14
+  // Everything on a card is sized from the card, so a 5-wide card of fourteen is
+  // not set like a 3-wide card of six.
+  const bandH = Math.max(28, Math.min(46, Math.round(cardH * 0.125)))
+  const statH = Math.max(36, Math.min(72, Math.round(cardH * 0.19)))
+  const tabW = Math.max(34, Math.min(62, Math.round(cardW * 0.2)))
+  const tabH = Math.round(tabW * 0.92)
+  const nameMax = Math.max(11, Math.min(22, Math.round(cardW * 0.08)))
+  const statMax = Math.max(13, Math.min(30, Math.round(cardW * 0.115)))
+  const titleW = width - TW3_M * 2 - TW3_SLOT_W - 24
+  const leftW = Math.floor((width - F.crest) / 2) - TW3_M - 24
+  const roundSize = pick(F.A, { square: 76, portrait: 88, story: 104 })
+  const round = String(totw.round || '').toUpperCase()
+  const kicker = [totw.heading, totw.date, totw.comp].filter(Boolean).join(' · ').toUpperCase()
+  const title2Default = totw.basis === 'round' ? 'THE ROUND' : 'THE WEEK'
+  const t1 = pt(parts, 'title1', 'TEAM OF'), t2 = pt(parts, 'title2', title2Default)
+  const bandBg = pc(parts, 'bandBg', pal.accent)
+  const nameInk = pc(parts, 'nameColor', pc(parts, 'bandBg', null) ? inkOn(bandBg) : pal.primary)
+  const photoBg = pc(parts, 'photoBg', '#ffffff')
+  const panelBg = pc(parts, 'panelBg', null)
+  const tabBg = pc(parts, 'tabBg', pal.accent)
+  const numInk = pc(parts, 'numColor', pc(parts, 'tabBg', null) ? inkOn(tabBg) : pal.primary)
+  const statInk = pc(parts, 'statColor', panelBg ? inkOn(panelBg) : pal.ink)
+  return (
+    <LayerRoot style={{
+      width, height, position: 'relative', overflow: 'hidden',
+      background: pal.primary, color: pal.ink, fontFamily: BODY,
+    }}>
+      <Halftone color={pal.ink} opacity={0.04} size={9} />
+      {topBand({ pal, width, F, parts, texture })}
+      <div data-layer="Round" style={{
+        position: 'absolute', left: TW3_M, top: F.crestTop, width: leftW, height: F.crest,
+        display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', gap: 6,
+      }}>
+        {kicker ? <div style={{ fontFamily: MONO, fontSize: 14, letterSpacing: 3, fontWeight: 600, opacity: 0.75, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{kicker}</div> : null}
+        {round ? (
+          <AutoFitText text={round} max={roundSize} min={24}
+            style={{ fontFamily: DISPLAY, letterSpacing: 1, lineHeight: 0.92, color: pc(parts, 'roundColor', pal.accent) }} />
+        ) : null}
+      </div>
+      <div data-layer="Club crest" style={{ position: 'absolute', left: Math.round((width - F.crest) / 2), top: F.crestTop, width: F.crest, height: F.crest }}>
+        <ClubLogo src={team.logo || null} monogram={team.monogram} color={pal.ink} size={F.crest} shape="shield" />
+      </div>
+      <div data-layer="Title" style={{
+        position: 'absolute', left: TW3_M, top: F.titleTop, width: titleW, height: F.titleH,
+        ...(texture ? { WebkitMaskImage: DISTRESS_MASK, maskImage: DISTRESS_MASK, WebkitMaskSize: '100% 100%', maskSize: '100% 100%' } : null),
+      }}>
+        <AutoFitText max={Math.round(F.titleH * 1.15)} min={20} text={`${t1} ${t2}`} measureDeps={[t1, t2]}
+          style={{ fontFamily: DISPLAY, letterSpacing: 3, lineHeight: 0.85, textTransform: 'uppercase' }}>
+          <span style={{ color: pc(parts, 'title1Color', pal.ink) }}>{t1}</span>
+          {t1 && t2 ? ' ' : null}
+          <span style={{ color: pc(parts, 'title2Color', pal.ink) }}>{t2}</span>
+        </AutoFitText>
+      </div>
+      <div data-layer="Players" style={{
+        position: 'absolute', left: TW3_M, right: TW3_M, top: F.top, bottom: F.bottom,
+        display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignContent: 'flex-start', gap,
+      }}>
+        {n === 0 ? emptyState(pal) : null}
+        {P.map((p, i) => {
+          const t = p.totw || {}
+          const name = [p.first, p.last].filter(Boolean).join(' ').toUpperCase()
+          return (
+            <div key={p._id || i} style={{
+              width: cardW, height: cardH, position: 'relative', overflow: 'hidden', boxSizing: 'border-box',
+              borderRadius: radius, background: photoBg, display: 'flex', flexDirection: 'column',
+            }}>
+              <div style={{ flex: 1, position: 'relative', overflow: 'hidden', minHeight: 0 }}>
+                <Face p={p} team={team} palette={pal} pos="center bottom" />
+                <div style={{
+                  position: 'absolute', top: 0, left: 0, width: tabW, height: tabH, display: 'grid', placeItems: 'center',
+                  background: tabBg, color: numInk, borderBottomRightRadius: 12,
+                  fontFamily: DISPLAY, fontSize: Math.round(tabH * 0.62), lineHeight: 1,
+                }}>{i + 1}</div>
+                {totw.showPoints && t.points != null ? (
+                  <div style={{ position: 'absolute', top: 0, right: 0, padding: '3px 8px', borderBottomLeftRadius: 10, background: pc(parts, 'pointsBg', pal.accent), color: pc(parts, 'pointsColor', pal.primary), fontFamily: DISPLAY, fontSize: 15, letterSpacing: 1, lineHeight: 1.2 }}>{t.points} PTS</div>
+                ) : null}
+              </div>
+              <div style={{ height: bandH, background: bandBg, color: nameInk, padding: '0 8px', display: 'flex', flexDirection: 'column', justifyContent: 'center', boxSizing: 'border-box' }}>
+                <AutoFitText text={name} max={nameMax} min={8} measureDeps={[cardW]}
+                  style={{ fontFamily: BODY, fontWeight: 600, letterSpacing: 0.8, lineHeight: 1.1, textAlign: 'center' }} />
+              </div>
+              <div style={{
+                height: statH, color: statInk, padding: '0 8px', display: 'flex', flexDirection: 'column', justifyContent: 'center', boxSizing: 'border-box',
+                ...(panelBg ? { background: panelBg } : { backgroundColor: pal.primary, backgroundImage: 'linear-gradient(rgba(0,0,0,0.34), rgba(0,0,0,0.34))' }),
+              }}>
+                <AutoFitText text={cardStat(t.line)} max={statMax} min={9} measureDeps={[cardW]}
+                  style={{ fontFamily: BODY, fontWeight: 600, letterSpacing: 1, lineHeight: 1.1, textAlign: 'center' }} />
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      {bottomBand({ pal, width, F, parts, texture })}
+      <Grain opacity={0.45} id="tw3-g" />
+    </LayerRoot>
+  )
+}
+
 TeamOfWeekGrid.displayName = 'TeamOfWeekGrid'
 TeamOfWeekBoard.displayName = 'TeamOfWeekBoard'
+TeamOfWeekCards.displayName = 'TeamOfWeekCards'
 Line.displayName = 'Line'
 Face.displayName = 'Face'
 
 // Where this file's layouts keep the sponsor grid (see sponsorSlots.js).
-export const SPONSOR_SLOTS = { TW1: slotTW, TW2: slotTW }
+export const SPONSOR_SLOTS = { TW1: slotTW, TW2: slotTW, TW3: slotTW3 }
 
 // The milestone layouts (milestone-templates.jsx) are built on the same frame: a
 // masthead, a body and the sponsor strip along the foot. One definition of the

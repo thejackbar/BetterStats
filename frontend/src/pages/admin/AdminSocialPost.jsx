@@ -44,7 +44,7 @@ import {
   DEFAULT_MILESTONE_WINDOW, achievedMilestones, defaultPicks, milestoneUnit, milestoneValueText, formatMilestoneDate,
 } from '../../social/milestoneItems'
 import MilestonePicker from '../../components/admin/socialpost/MilestonePicker'
-import { TeamOfWeekGrid, TeamOfWeekBoard, TOTW_MIN, TOTW_MAX, TOTW_DEFAULT } from '../../social/totw-templates'
+import { TeamOfWeekGrid, TeamOfWeekBoard, TeamOfWeekCards, TOTW_MIN, TOTW_MAX, TOTW_DEFAULT } from '../../social/totw-templates'
 import { MAKEUP_KINDS, MAKEUP_LABELS, FANTASY_MAKEUP, makeupSize, poolKinds, pickMakeup, shortfallText } from '../../social/totwMakeup'
 import { exportNodeToPng } from '../../social/exportImage'
 import { shortClubName, stripGradeTail } from '../../social/clubNames'
@@ -134,6 +134,7 @@ const ALL_TEMPLATES = [
   // Team of the week — the round's best performers across every grade, 6 to 14 of them.
   { id: 'TW1', name: 'Team Sheet',     component: TeamOfWeekGrid,     desc: 'Photo cards, any team size',      maxPlayers: TOTW_MAX, kind: 'totw' },
   { id: 'TW2', name: 'Ranked Board',   component: TeamOfWeekBoard,    desc: 'One row per player, best first',  maxPlayers: TOTW_MAX, kind: 'totw' },
+  { id: 'TW3', name: 'Round Cards',    component: TeamOfWeekCards,    desc: 'Crest, sponsor and white photo cards', maxPlayers: TOTW_MAX, kind: 'totw' },
   // Player milestones — the club ticks which recorded milestones to feature.
   { id: 'MS1', name: 'Milestone Cards', component: MilestoneCards,    desc: 'Photo cards with the big number', maxPlayers: 0, kind: 'milestones' },
   { id: 'MS2', name: 'Milestone Board', component: MilestoneBoard,    desc: 'One row per milestone',           maxPlayers: 0, kind: 'milestones' },
@@ -157,7 +158,7 @@ const ALL_TEMPLATES = [
 // The football build drops the layouts that only mean anything with cricket
 // data: the batting order, the results wrap's batting/bowling leaders, and
 // every layout of the three hidden post types (toss, scorecard, final score).
-const AFL_HIDDEN_TEMPLATES = new Set([...CUSTOM_LAYOUT_IDS, 'T4', 'T11', 'T12', 'T13', 'C5', 'RR7', 'C2', 'C4', 'RS1', 'RS2', 'RS3', 'RS4', 'RS5', 'RS6', 'RS7', 'RS8', 'RS9', 'SC1', 'SC2', 'SC3', 'TW1', 'TW2', 'MS1', 'MS2'])
+const AFL_HIDDEN_TEMPLATES = new Set([...CUSTOM_LAYOUT_IDS, 'T4', 'T11', 'T12', 'T13', 'C5', 'RR7', 'C2', 'C4', 'RS1', 'RS2', 'RS3', 'RS4', 'RS5', 'RS6', 'RS7', 'RS8', 'RS9', 'SC1', 'SC2', 'SC3', 'TW1', 'TW2', 'TW3', 'MS1', 'MS2'])
 const TEMPLATES = IS_AFL ? ALL_TEMPLATES.filter(t => !AFL_HIDDEN_TEMPLATES.has(t.id)) : ALL_TEMPLATES
 
 // The lineup templates that crop the hero photo into a fixed box, and the shape
@@ -194,7 +195,7 @@ const TAB_MAP = {
   C1: 'announcement', C5: 'announcement', C2: 'toss', C3: 'motm',
   C4: 'result', RS1: 'result', RS2: 'result', RS3: 'result', RS4: 'result', RS5: 'result', RS6: 'result', RS7: 'result', RS8: 'result', RS9: 'result',
   RR1: 'results', RR2: 'results', RR3: 'results', RR4: 'results', RR5: 'results', RR6: 'results', RR7: 'results',
-  TW1: 'totw', TW2: 'totw',
+  TW1: 'totw', TW2: 'totw', TW3: 'totw',
   MS1: 'milestones', MS2: 'milestones',
   SC1: 'scorecard', SC2: 'scorecard', SC3: 'scorecard',
   EV1: 'events', EV2: 'events', EV3: 'events', EV4: 'events', EV5: 'events', EV6: 'events',

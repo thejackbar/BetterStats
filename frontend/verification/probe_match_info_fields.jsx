@@ -52,6 +52,7 @@ const LAYOUTS = {
   C5: [giant.GiantType, { ...lineupProps, announcement: { kind: 'DEBUT', headline: 'ZZANNZZ', subheadline: '', player: players[0] } }],
   TW1: [totw.TeamOfWeekGrid, { palette: pal, players, totw: { round: 'ROUND 1', date: 'SAT 1 JAN', comp: COMP, showPoints: true } }],
   TW2: [totw.TeamOfWeekBoard, { palette: pal, players, totw: { round: 'ROUND 1', date: 'SAT 1 JAN', comp: COMP, showPoints: true } }],
+  TW3: [totw.TeamOfWeekCards, { palette: pal, players, totw: { round: 'ROUND 1', date: 'SAT 1 JAN', comp: COMP, showPoints: true } }],
 }
 const out = {}
 for (const [id, [C, props]] of Object.entries(LAYOUTS)) {
