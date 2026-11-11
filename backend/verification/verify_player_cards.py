@@ -106,11 +106,16 @@ if HAVE_SWAPS:
         from app.services.player_card_social_ddl import STATEMENTS as SOCIAL_DDL
     except ImportError:   # the control run on the commit before the social side
         SOCIAL_DDL = []
+    try:
+        from app.services.player_card_dismissed_ddl import STATEMENTS as DISMISSED_DDL
+    except ImportError:   # the control run on the commit before dismissing suggested swaps
+        DISMISSED_DDL = []
     ITEM_DDL = getattr(_swap_ddl, "ITEM_STATEMENTS", [])  # absent before migration 366
 else:
     swaps = None
     SWAP_DDL = []
     SOCIAL_DDL = []
+    DISMISSED_DDL = []
     COMMUNITY_DDL = []
     PACKS_DDL = []
     DESIGNS_DDL = []
@@ -196,7 +201,7 @@ async def build_schema() -> None:
             await conn.execute(text(sql.replace("OR REPLACE ", "")))
         for stmt in SUPERSEDED_DDL:
             await conn.execute(text(stmt))
-        for stmt in CARD_DDL + SWAP_DDL + SOCIAL_DDL + COMMUNITY_DDL + PACKS_DDL + DESIGNS_DDL + GIFTS_DDL + PHOTOS_DDL + LOOKS_DDL + CHALLENGES_DDL + WINNER_DDL:
+        for stmt in CARD_DDL + SWAP_DDL + SOCIAL_DDL + COMMUNITY_DDL + PACKS_DDL + DESIGNS_DDL + GIFTS_DDL + PHOTOS_DDL + LOOKS_DDL + CHALLENGES_DDL + WINNER_DDL + DISMISSED_DDL:
             await conn.execute(text(stmt))
 
 
@@ -1235,7 +1240,7 @@ async def main() -> None:
             check("a spare is a copy beyond the one kept (three Charlie is two spare)", by.get(f"p:{CHARLIE}", {}).get("spare") == 2, str(by.keys()))
             check("...and every pulled copy of the player's own card is a spare", by.get(f"p:{ALPHA}", {}).get("spare") == 1)
             check("a single card is not a spare", f"p:{BRAVO}" not in by and sp_["total"] == 3)
-            check("being open to offers is off until it is turned on, and no demand is shown", by[f"p:{CHARLIE}"]["open"] is False and "wanted_by" not in by[f"p:{CHARLIE}"])
+            check("being open to offers is off until it is turned on (the wish list count is shown either way)", by[f"p:{CHARLIE}"]["open"] is False and isinstance(by[f"p:{CHARLIE}"].get("wanted_by", "absent"), int), str(by[f"p:{CHARLIE}"]))
             await social.add_want(db, club, snap, d, f"p:{CHARLIE}")
             check("open to offers needs a spare (409)", await refused(social.set_open(db, club, snap, a, f"p:{BRAVO}", True)) == 409)
             await social.set_open(db, club, snap, a, f"p:{CHARLIE}", True)
@@ -1825,6 +1830,61 @@ async def main() -> None:
                     await db.commit()
                     sg1 = await social.suggested_swaps(db, club, wl_snap, z1)
                     check("with two cards each way there is still one suggestion per player, the best pair first, and it says there are 4 ways", len(sg1) == 1 and sg1[0]["options"] == 4 and sg1[0]["give"]["spare"] is True, str(sg1)[:300])
+                    # Is a card I hold on somebody else's wish list? A count, never names.
+                    if hasattr(social, "wanted_counts"):
+                        A_, B_, C_, D_ = str(ALPHA), str(BRAVO), str(CHARLIE), str(DELTA)
+                        wc1, wc2 = await social.wanted_counts(db, club, wl_snap, z1), await social.wanted_counts(db, club, wl_snap, z2)
+                        check("a card I hold that another player has on their wish list says so: Z1 holds ALPHA and BRAVO, Z2 wants both", wc1.get((A_, None)) == 1 and wc1.get((B_, None)) == 1, str(wc1))
+                        check("...and a card I hold that nobody wants is not counted (Z1's own card)", (z1, None) not in wc1, str(wc1))
+                        check("the count carries no names: only cards come back, as numbers", all(isinstance(v, int) for v in wc1.values()) and z2 not in str(wc1))
+                        check("a card I do NOT hold is never counted for me (Z1 does not hold CHARLIE, though Z1 wants it)", (C_, None) not in wc1)
+                        # Other wishers can exist in this club, so Z1's own want is the one that is toggled: the count moves by exactly one.
+                        before = wc2.get((C_, None), 0)
+                        await social.remove_want(db, club, z1, f"p:{CHARLIE}"); await db.commit()
+                        after = (await social.wanted_counts(db, club, wl_snap, z2)).get((C_, None), 0)
+                        check("from the other side: Z1's wish for CHARLIE (held by Z2) adds exactly one to what Z2 sees", before >= 1 and before - after == 1, str((before, after)))
+                        await social.add_want(db, club, wl_snap, z1, f"p:{CHARLIE}"); await db.commit()
+                        sp1 = {c["key"]: c for c in (await social.spares(db, club, wl_snap, z1))["cards"]}
+                        check("a spare says how many players want it even when I am not open to offers", sp1.get(f"p:{ALPHA}", {}).get("open") is False and sp1.get(f"p:{ALPHA}", {}).get("wanted_by") == 1, str(sp1.get(f"p:{ALPHA}")))
+                        mine_cards = [{"key": f"p:{ALPHA}", "player_id": A_}, {"key": f"p:{BRAVO}", "player_id": B_}, {"key": f"p:{z1}", "player_id": z1}]
+                        await social.with_wanted_by(db, club, wl_snap, z1, mine_cards)
+                        check("the book's cards carry wanted_by (a held card nobody wants, Z1's own, reads 0)", [c["wanted_by"] for c in mine_cards] == [1, 1, 0], str(mine_cards))
+                        det = await social.card_detail(db, club, wl_snap, z1, f"p:{ALPHA}")
+                        check("the card page of a card I hold says how many want it", det.get("wanted_by") == 1, str({k: v for k, v in det.items() if k != "card"}))
+                        det_not = await social.card_detail(db, club, wl_snap, z1, f"p:{CHARLIE}")
+                        check("...and the card page of a card I do not hold says nothing about wishes", "wanted_by" not in det_not, str({k: v for k, v in det_not.items() if k != "card"}))
+                        # a player who already holds a copy (their list is only cleaned when read) is not counted
+                        await wl_give(Z2, ALPHA)
+                        check("a wisher who already holds a copy is not counted", (await social.wanted_counts(db, club, wl_snap, z1)).get((A_, None), 0) == 0)
+                        await db.execute(text("DELETE FROM player_card_copies WHERE owner_player_id = :p AND subject_player_id = :s"), {"p": Z2, "s": ALPHA}); await db.commit()
+                        check("...and counts again once they no longer hold it (control that the check above could have counted)", (await social.wanted_counts(db, club, wl_snap, z1)).get((A_, None)) == 1)
+                    # Dismissing a suggested swap hides that exact pairing for the one who dismissed it
+                    if hasattr(social, "dismiss_suggestion"):
+                        pair = (f"p:{ALPHA}", f"p:{CHARLIE}")
+                        await social.dismiss_suggestion(db, club, wl_snap, z1, z2, *pair); await db.commit()
+                        sg1, sg2 = await social.suggested_swaps(db, club, wl_snap, z1), await social.suggested_swaps(db, club, wl_snap, z2)
+                        check("a dismissed pairing is hidden from the one who dismissed it: the suggestion moves to another pair", len(sg1) == 1 and (sg1[0]["give"]["key"], sg1[0]["want"]["key"]) != pair and sg1[0]["options"] == 3, str(sg1)[:300])
+                        check("...and the other player still sees theirs, untouched (4 ways)", len(sg2) == 1 and sg2[0]["options"] == 4, str(sg2)[:300])
+                        await social.dismiss_suggestion(db, club, wl_snap, z1, z2, *pair); await db.commit()
+                        check("dismissing the same pairing twice is harmless", (await db.execute(text("SELECT count(*) FROM player_card_dismissed_swaps WHERE player_id = :p"), {"p": Z1})).scalar() == 1)
+                        others = [(f"p:{ALPHA}", f"p:{DELTA}"), (f"p:{BRAVO}", f"p:{CHARLIE}"), (f"p:{BRAVO}", f"p:{DELTA}")]
+                        for g_, w_ in others:
+                            await social.dismiss_suggestion(db, club, wl_snap, z1, z2, g_, w_)
+                        await db.commit()
+                        check("dismiss every pairing with a player and the suggestion goes", await social.suggested_swaps(db, club, wl_snap, z1) == [] and len(await social.suggested_swaps(db, club, wl_snap, z2)) == 1)
+                        await social.restore_suggestion(db, club, z1, z2, f"p:{BRAVO}", f"p:{DELTA}"); await db.commit()
+                        sg1 = await social.suggested_swaps(db, club, wl_snap, z1)
+                        check("undo brings that pairing back, and only that one", len(sg1) == 1 and (sg1[0]["give"]["key"], sg1[0]["want"]["key"]) == (f"p:{BRAVO}", f"p:{DELTA}") and sg1[0]["options"] == 1, str(sg1)[:300])
+                        try:
+                            await social.dismiss_suggestion(db, club, wl_snap, z1, z1, *pair); refused_self = False
+                        except Exception as exc:
+                            refused_self = isinstance(exc, swaps.SwapError)   # refused before any write, so no rollback (it would expire `club`)
+                        check("a player cannot dismiss a suggestion with themselves", refused_self)
+                        for g_, w_ in [pair] + others:
+                            await social.restore_suggestion(db, club, z1, z2, g_, w_)
+                        await db.commit()
+                        sg1 = await social.suggested_swaps(db, club, wl_snap, z1)
+                        check("with everything restored the suggestion is back to four ways (and the rest of this section is unchanged)", len(sg1) == 1 and sg1[0]["options"] == 4, str(sg1)[:300])
                     # the request over them
                     await swaps.create_swap(db, club, wl_snap, z1, z2, [{"key": f"p:{ALPHA}", "qty": 1}], [{"key": f"p:{CHARLIE}", "qty": 1}])
                     await db.commit()

@@ -130,6 +130,11 @@ CARRIED: tuple[tuple[str, str, str, Optional[tuple[str, ...]]], ...] = (
     # What a player completed in a challenge (what a card earned cannot be earned twice) and their own private sets (migration 380).
     ("player_card_challenge_runs", "player_id", "uuid", ("challenge_key", "n")),
     ("player_card_my_sets", "player_id", "uuid", None),
+    # Suggested swaps a player dismissed: the asker, the other player and the subject of each card (migration 386).
+    ("player_card_dismissed_swaps", "player_id", "uuid", ("other_player_id", "give_subject_player_id", "give_special_id", "want_subject_player_id", "want_special_id")),
+    ("player_card_dismissed_swaps", "other_player_id", "uuid", ("player_id", "give_subject_player_id", "give_special_id", "want_subject_player_id", "want_special_id")),
+    ("player_card_dismissed_swaps", "give_subject_player_id", "uuid", ("player_id", "other_player_id", "give_special_id", "want_subject_player_id", "want_special_id")),
+    ("player_card_dismissed_swaps", "want_subject_player_id", "uuid", ("player_id", "other_player_id", "give_subject_player_id", "give_special_id", "want_special_id")),
 )
 
 # Tables whose primary key is not an `id` column: the column that identifies one
@@ -174,7 +179,7 @@ _OWN_CLUB_TABLES = {
     "player_card_packs", "player_card_copies", "player_special_cards", "player_card_hidden",
     "player_card_swaps", "player_card_swap_items",
     "player_card_wants", "player_card_open_offers", "player_card_prefs", "player_card_alerts", "player_card_showcase",
-    "player_card_challenge_runs", "player_card_my_sets",
+    "player_card_challenge_runs", "player_card_my_sets", "player_card_dismissed_swaps",
 }
 
 _CAST = {"int": "int[]", "uuid": "uuid[]"}

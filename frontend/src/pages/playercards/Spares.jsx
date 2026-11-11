@@ -65,7 +65,7 @@ export default function Spares() {
             </div>
           )}
           <h2 className="font-mono text-[11px] tracking-wide2 uppercase text-pb-faint mt-8 mb-1">Open to offers</h2>
-          <p className="text-sm text-pb-dim mb-3 max-w-prose">Switch it on for a spare and you will see how many other players want that card. They are never named, and nobody is told you are open.</p>
+          <p className="text-sm text-pb-dim mb-3 max-w-prose">Nobody is told you are open. Each spare shows how many other players have it on their wish list, as a number and never names.</p>
           {err && <div role="alert" className="text-sm mb-2" style={{ color: 'var(--pb-red, #f87171)' }}>{err}</div>}
           <div className="flex flex-col gap-2" data-open-list>
             {data.cards.map((c) => (
@@ -74,7 +74,7 @@ export default function Spares() {
                 <div className="min-w-0 flex-1">
                   <div className="text-sm font-semibold" style={{ overflowWrap: 'anywhere' }}>{cardLine(c)}</div>
                   <div className="text-[12.5px] text-pb-dim" data-open-note>
-                    {c.spare} {c.spare === 1 ? 'spare' : 'spares'}{c.open ? ` · ${c.wanted_by} ${c.wanted_by === 1 ? 'player wants' : 'players want'} this card` : ''}
+                    {c.spare} {c.spare === 1 ? 'spare' : 'spares'}{c.wanted_by > 0 ? ` · on ${c.wanted_by} ${c.wanted_by === 1 ? 'wish list' : 'wish lists'}` : ''}
                   </div>
                 </div>
                 <label className="inline-flex items-center gap-2 text-sm shrink-0">

@@ -4578,6 +4578,10 @@ async def lifespan(app: FastAPI):
         from app.services.player_card_winner_ddl import STATEMENTS as _PLAYER_CARD_WINNER_DDL
         for _stmt in _PLAYER_CARD_WINNER_DDL:
             await conn.execute(text(_stmt))
+        # Migration 386: suggested swaps a player has dismissed. Same one-copy rule.
+        from app.services.player_card_dismissed_ddl import STATEMENTS as _PLAYER_CARD_DISMISSED_DDL
+        for _stmt in _PLAYER_CARD_DISMISSED_DDL:
+            await conn.execute(text(_stmt))
         # Migration 379: challenges, their completions and players' own sets. Same one-copy rule.
         from app.services.player_card_challenges_ddl import STATEMENTS as _PLAYER_CARD_CHALLENGES_DDL
         for _stmt in _PLAYER_CARD_CHALLENGES_DDL:

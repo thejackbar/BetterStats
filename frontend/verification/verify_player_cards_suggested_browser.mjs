@@ -2,6 +2,8 @@
 //  * Swaps shows the suggestion to a player (both cards, the other player, a spare note), one tap asks with the exact request
 //    {to_player_id, give: [{key, qty: 1}], want: [{key, qty: 1}]}, and the screen reports it and reads the board again;
 //  * Change it opens the swap builder with that player and both cards already chosen;
+//  * Dismiss sends exactly {player_id, give_key, want_key}, hides that suggestion at once and offers Undo, which sends the same body back;
+//  * a card in My cards that other players want says so (Wanted tag and count), and a card nobody wants has none;
 //  * with no suggestions nothing about them is drawn; Home shows how many there are; no sideways scroll at 390.
 //
 //   APP_URL=http://localhost:4173 node verification/verify_player_cards_suggested_browser.mjs
@@ -9,6 +11,7 @@ import { chromium } from 'playwright'
 import { cardsUrl } from './lib/cardsPage.mjs'
 
 const BASE = process.env.APP_URL || 'http://localhost:4173'
+const SHOT = process.env.SHOT_DIR || ''
 const PASS = [], FAIL = []
 const check = (name, cond, detail = '') => {
   ;(cond ? PASS : FAIL).push(name)
@@ -24,6 +27,7 @@ const WANT = card('p3', 'Adams, Brian', 'epic', 81)
 const SUGGESTION = { player: { player_id: 'p7', name: 'Dave, Dan' }, give: GIVE, want: WANT, options: 4 }
 const state = { suggested: [SUGGESTION] }
 const asked = []
+const dismissed = [], restored = []
 
 const run = async () => {
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium' })
@@ -39,11 +43,13 @@ const run = async () => {
       const json = (b, status = 200) => r.fulfill({ status, contentType: 'application/json', body: JSON.stringify(b) })
       if (!url.includes('/public/availability/')) return json({})
       if (/\/me\/cards\/swaps\/players\//.test(url)) return json({ player: SUGGESTION.player, cards: [{ ...WANT, tradeable: 1 }] })
+      if (/\/me\/cards\/swaps\/suggested\/dismiss$/.test(url)) { dismissed.push(JSON.parse(rq.postData())); state.suggested = []; return json({ ok: true }) }
+      if (/\/me\/cards\/swaps\/suggested\/restore$/.test(url)) { restored.push(JSON.parse(rq.postData())); state.suggested = [SUGGESTION]; return json({ ok: true }) }
       if (/\/me\/cards\/swaps$/.test(url) && method === 'POST') { asked.push(JSON.parse(rq.postData())); state.suggested = []; return json({ id: 'sw1', status: 'pending' }) }
       if (/\/me\/cards\/swaps(\?|$)/.test(url)) return json({ incoming: [], outgoing: [], recent: [], suggested: state.suggested, mine: [{ ...GIVE, tradeable: 2 }], people: [{ player_id: 'p7', name: 'Dave, Dan', tradeable: 3 }], expires_days: 14, max_open: 10 })
       if (/\/me\/cards\/(showcase|feed|board|sets)/.test(url)) return json({ cards: [], events: [], entries: [], sets: [], max: 6 })
       if (/\/me\/cards\/wants/.test(url)) return json({ wants: [], ready: 0, limit: 100 })
-      if (/\/me\/cards$/.test(url)) return json({ club: CLUB, week_resets_at: '2026-10-26T16:00:00+00:00', packs: [], pack_size: 5, season: 'Summer', cards: [card('p1', 'Barendse, Jack', 'rare', 62, { mine: true }), GIVE], totals: {} })
+      if (/\/me\/cards$/.test(url)) return json({ club: CLUB, week_resets_at: '2026-10-26T16:00:00+00:00', packs: [], pack_size: 5, season: 'Summer', cards: [card('p1', 'Barendse, Jack', 'rare', 62, { mine: true, wanted_by: 0 }), { ...GIVE, wanted_by: 3 }], totals: {} })
       if (/\/me\/profile/.test(url)) return json({ club: CLUB, player: { id: 'p1', display_name: 'Barendse, Jack' }, modules: ['cards'], cards: { ready: 0, swaps_waiting: 0 }, has_availability: false, squads: [], selected: [], training: { upcoming: [] }, can_update_details: false })
       if (/\/me(\?|$)/.test(url)) return json({ club: CLUB, player: { id: 'p1', display_name: 'Barendse, Jack' }, dates: [], availability: {}, has_squad: false, squads: [], has_availability: false })
       return json({ club: CLUB, require_pin: true, has_availability: false, players: [{ id: 'p1', display_name: 'Barendse, Jack', has_phone: true }] })
@@ -76,6 +82,31 @@ const run = async () => {
   {
     state.suggested = [SUGGESTION]
     const { ctx, page } = await open(1280, '/swaps', '[data-suggested]')
+    check('there is a Dismiss button on the suggestion, named for the player', /Dave, Dan/.test((await page.locator('[data-suggestion-dismiss]').getAttribute('aria-label')) || ''))
+    await page.click('[data-suggestion-dismiss]')
+    await page.waitForSelector('[data-suggestion-dismissed]')
+    check('Dismiss sends exactly the player and the two cards, and nothing else', JSON.stringify(dismissed[0]) === JSON.stringify({ player_id: 'p7', give_key: 'p:p2', want_key: 'p:p3' }), JSON.stringify(dismissed))
+    check('the suggestion is gone at once and the screen offers Undo', (await page.locator('[data-suggested]').count()) === 0 && (await page.locator('[data-suggestion-undo]').count()) === 1)
+    check('a dismissal does not send a swap request', asked.length === 1)
+    await page.click('[data-suggestion-undo]')
+    await page.waitForSelector('[data-suggested]')
+    check('Undo sends the same player and cards to restore, and the suggestion comes back', JSON.stringify(restored[0]) === JSON.stringify(dismissed[0]) && (await page.locator('[data-suggestion="p7"]').count()) === 1 && (await page.locator('[data-suggestion-dismissed]').count()) === 0, JSON.stringify(restored))
+    await ctx.close()
+  }
+  {
+    const { ctx, page } = await open(1280, '/book', '[data-screen="book"]')
+    const wanted = page.locator('[data-slot-card="p:p2"] [data-wanted-by]')
+    check('a card other players want carries a Wanted tag with the count', (await wanted.count()) === 1 && /Wanted ×3/.test(await wanted.innerText()), String(await wanted.count()))
+    check('a card nobody wants has no tag (and it could have, since another card on the same page does)', (await page.locator('[data-slot-card="p:p1"] [data-wanted-by]').count()) === 0 && (await page.locator('[data-slot-card="p:p1"]').count()) === 1)
+    check('the tile says so to a screen reader too', /on 3 wish lists/.test((await page.locator('[data-slot-card="p:p2"]').getAttribute('aria-label')) || ''))
+    await page.click('[data-slot-card="p:p2"]')
+    await page.waitForSelector('[data-card-viewer]')
+    check('holding the card up says it is on 3 wish lists', /On 3 wish lists/i.test(await page.locator('[data-viewer-wanted]').innerText()))
+    await ctx.close()
+  }
+  {
+    state.suggested = [SUGGESTION]
+    const { ctx, page } = await open(1280, '/swaps', '[data-suggested]')
     await page.click('[data-suggestion-change]')
     await page.waitForSelector('[data-screen="new-swap"]')
     await page.waitForTimeout(600)
@@ -90,10 +121,17 @@ const run = async () => {
     check('with no suggestions nothing about them is drawn', (await page.locator('[data-suggested]').count()) === 0)
     await ctx.close()
   }
+  {
+    const { ctx, page } = await open(390, '/book', '[data-screen="book"]')
+    check('/book with a Wanted tag has no sideways scroll at 390', (await overflow(page)) <= 0, String(await overflow(page)))
+    if (SHOT) await page.screenshot({ path: `${SHOT}/wanted-book-390.png` })
+    await ctx.close()
+  }
   for (const route of ['', '/swaps']) {
     state.suggested = [SUGGESTION]
     const { ctx, page } = await open(390, route, route ? '[data-suggested]' : '[data-suggested-tag]')
     check(`${route || '/'} has no sideways scroll at 390`, (await overflow(page)) <= 0, String(await overflow(page)))
+    if (SHOT && route) await page.screenshot({ path: `${SHOT}/dismiss-swaps-390.png`, fullPage: true })
     await ctx.close()
   }
   check('no errors in the console', errors.length === 0, errors.slice(0, 3).join(' | '))

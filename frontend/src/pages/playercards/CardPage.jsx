@@ -54,7 +54,7 @@ export default function CardPage() {
           <div className="text-center mt-2" style={{ font: `600 10px ${MONO}`, letterSpacing: 1.4, textTransform: 'uppercase', opacity: 0.65 }}>Tap the card to turn it over</div>
         </div>
         <div className="flex-1 min-w-[260px]">
-          {res.mine_copies > 0 && <div data-you-have className="rounded-xl border pb-hairline bg-pb-surface px-4 py-3 mb-3 text-sm">You have {res.mine_copies === 1 ? 'this card' : `${res.mine_copies} of this card`}.</div>}
+          {res.mine_copies > 0 && <div data-you-have className="rounded-xl border pb-hairline bg-pb-surface px-4 py-3 mb-3 text-sm">You have {res.mine_copies === 1 ? 'this card' : `${res.mine_copies} of this card`}.{res.wanted_by > 0 && <span data-wanted-by={res.wanted_by}> {res.wanted_by === 1 ? '1 other player has it' : `${res.wanted_by} other players have it`} on their wish list.</span>}</div>}
           {card.kind === 'player' && (
             <div className="rounded-xl border pb-hairline bg-pb-surface px-4 py-3 mb-3 text-sm" data-card-rarity>
               <span className="font-mono text-[10px] tracking-wide2 uppercase text-pb-faint block mb-1">Rarity</span>
