@@ -1,0 +1,19 @@
+# Open Higgsfield AI web app. Merge into /srv/docker/docker-compose.yaml.
+# Put higgsfield.Dockerfile at /srv/docker/support-tools/higgsfield.Dockerfile.
+# Route studio.betterat.cricket to open-higgsfield:3000 in nginx-proxy-manager and
+# give that host an Access List (username and password) before it goes live.
+
+services:
+  open-higgsfield:
+    build:
+      context: /srv/docker/support-tools
+      dockerfile: higgsfield.Dockerfile
+      args:
+        HIGGSFIELD_REF: main   # CHANGE: a commit you have read
+    restart: unless-stopped
+    networks:
+      - docker-shared-net
+
+networks:
+  docker-shared-net:
+    external: true   # already defined in the central file, do NOT add a second definition

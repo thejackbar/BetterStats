@@ -13,12 +13,12 @@ const btn = { padding: '11px 18px', borderRadius: 12, font: `700 12px ${MONO}`, 
 
 // Two players who each hold a card the other is after. Shown to both of them, so either can start it: one tap asks, or the builder opens with
 // both cards chosen. A request that is already open over either card takes the suggestion away.
-function SuggestedSwaps({ list, busy, onAsk, onChange, ...ui }) {
+function SuggestedSwaps({ list, busy, onAsk, onChange, onDismiss, ...ui }) {
   if (!list || !list.length) return null
   return (
     <section data-suggested className="rounded-2xl border pb-hairline bg-pb-surface p-4 mb-5" style={{ borderColor: ui.accent }}>
       <h2 style={{ font: `800 italic 20px ${ui.display}`, textTransform: 'uppercase' }}>{list.length === 1 ? 'A suggested swap' : 'Suggested swaps'}</h2>
-      <p className="text-sm text-pb-dim mt-0.5 mb-3 max-w-prose">These players have a card on your wish list and want a card you hold. Both of you see the same suggestion.</p>
+      <p className="text-sm text-pb-dim mt-0.5 mb-3 max-w-prose">These players have a card on your wish list and want a card you hold. Both of you see the same suggestion, and dismissing it only hides it for you.</p>
       <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 330px), 1fr))' }}>
         {list.map((s) => (
           <div key={s.player.player_id} data-suggestion={s.player.player_id} className="rounded-xl border pb-hairline p-3">
@@ -32,6 +32,7 @@ function SuggestedSwaps({ list, busy, onAsk, onChange, ...ui }) {
             <div className="flex gap-2 justify-center mt-3 flex-wrap">
               <button type="button" disabled={busy} onClick={() => onAsk(s)} data-suggestion-ask style={{ ...btn, background: ui.accent, color: onColor(ui.accent), border: 0 }}>Ask {s.player.name.split(',').pop().trim() || 'them'}</button>
               <button type="button" disabled={busy} onClick={() => onChange(s)} data-suggestion-change style={btn}>Change it</button>
+              <button type="button" disabled={busy} onClick={() => onDismiss(s)} data-suggestion-dismiss aria-label={`Dismiss the suggested swap with ${s.player.name}`} style={btn}>Dismiss</button>
             </div>
           </div>
         ))}
@@ -79,6 +80,35 @@ export default function Swaps({ tab = 'asking' }) {
       read(); loadSwaps()
     }
   }
+  // Hide one suggested pairing. The other player still sees theirs; Undo brings it back.
+  const [dismissed, setDismissed] = useState(null)
+  const pairBody = (s) => ({ player_id: s.player.player_id, give_key: s.give.key, want_key: s.want.key })
+  const dismissSuggested = async (s) => {
+    setBusy(true); setMsg(''); setDismissed(null)
+    try {
+      await api.availPublicDismissSuggestedSwap(token, pairBody(s))
+      setDismissed(s)
+    } catch (e) {
+      setMsg(e?.message || 'That did not work.')
+    } finally {
+      setBusy(false)
+      read(); loadSwaps()
+    }
+  }
+  const undoDismiss = async () => {
+    const s = dismissed
+    if (!s) return
+    setBusy(true)
+    try {
+      await api.availPublicRestoreSuggestedSwap(token, pairBody(s))
+      setDismissed(null)
+    } catch (e) {
+      setMsg(e?.message || 'That did not work.')
+    } finally {
+      setBusy(false)
+      read(); loadSwaps()
+    }
+  }
   const changeSuggested = (s) => navigate(`${basePath}/swaps/new`, { state: { give: s.give, ask: { player: s.player, card: { ...s.want, tradeable: 1 } } } })
 
   if (failed) return <div className="text-sm text-pb-faint" data-swaps-failed>Swaps could not load. Reload to try again.</div>
@@ -92,8 +122,14 @@ export default function Swaps({ tab = 'asking' }) {
       <PageHead title="Swaps" sub={`Swap any cards you hold for any cards another player holds, as many each way as you like. Nothing moves until they say yes. Requests lapse after ${board.expires_days} days.`}
         actions={<><span data-doubles-count className="font-mono text-[11px] tracking-wide2 uppercase text-pb-faint">{offerable === 0 ? 'No cards to offer yet' : `${offerable} ${offerable === 1 ? 'card' : 'cards'} you could offer`}</span>
           <Link to={`${basePath}/swaps/new`} data-swap-start style={{ ...btn, background: accent, color: onColor(accent) }}>Start a swap</Link></>} />
-      <SuggestedSwaps list={board.suggested} busy={busy} onAsk={askSuggested} onChange={changeSuggested} club={club} accent={accent} display={display} sponsor={sponsor} />
+      <SuggestedSwaps list={board.suggested} busy={busy} onAsk={askSuggested} onChange={changeSuggested} onDismiss={dismissSuggested} club={club} accent={accent} display={display} sponsor={sponsor} />
       <FindCards token={token} onAsk={(a) => navigate(`${basePath}/swaps/new`, { state: { ask: a } })} {...ui} />
+      {dismissed && (
+        <div role="status" data-suggestion-dismissed className="text-sm mb-3">
+          Suggestion dismissed.{' '}
+          <button type="button" disabled={busy} onClick={undoDismiss} data-suggestion-undo className="underline font-semibold">Undo</button>
+        </div>
+      )}
       {msg && <div role="status" data-swap-msg className="text-sm mb-3">{msg}</div>}
       <div role="tablist" aria-label="Swaps" className="flex gap-2 mb-4 flex-wrap">
         {tabs.map(([to, label, n, key]) => (

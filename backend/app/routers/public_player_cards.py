@@ -53,6 +53,8 @@ async def get_my_cards(token: str, request: Request, db: AsyncSession = Depends(
     await db.commit()
     packs = await cards.available_packs(db, pid, snap)
     collection = await cards.collection(db, club, player, snap)
+    # How many other players have each card the asker holds on their wish list: a count, never names.
+    await social.with_wanted_by(db, club, snap, pid, collection["cards"])
     return {
         "club": _club_branding(club),
         "week_resets_at": cards.week_ends_at(snap["settings"]).isoformat(),
@@ -223,6 +225,41 @@ async def ask_for_swap(token: str, body: SwapBody, request: Request, db: AsyncSe
     if background_tasks is not None:
         background_tasks.add_task(alerts.swap_asked, club.id, new_id)
     return {"id": new_id, "status": "pending"}
+
+
+# Declared before `/swaps/{swap_id}/{action}`, which would otherwise take `suggested/dismiss`.
+class DismissBody(BaseModel):
+    player_id: str
+    give_key: str
+    want_key: str
+
+
+@router.post("/{token}/me/cards/swaps/suggested/dismiss")
+async def dismiss_suggested(token: str, body: DismissBody, request: Request, db: AsyncSession = Depends(get_db)):
+    """Hide one suggested swap (the pairing of the two cards with that player) from the asker's list."""
+    club, player, snap = await _ready(db, request, token)
+    rate_limit.enforce(f"cards-dismiss:{player.id}:{_client_ip(request)}", SWAP_LIMIT * 2, SWAP_WINDOW,
+                       detail="Slow down. Give it a few seconds and try again.")
+    try:
+        await social.dismiss_suggestion(db, club, snap, str(player.id), body.player_id, body.give_key, body.want_key)
+    except swaps.SwapError as exc:
+        await db.rollback()
+        raise _refuse(exc)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/{token}/me/cards/swaps/suggested/restore")
+async def restore_suggested(token: str, body: DismissBody, request: Request, db: AsyncSession = Depends(get_db)):
+    """Undo a dismissal, so the suggested swap can come back."""
+    club, player, snap = await _ready(db, request, token)
+    try:
+        await social.restore_suggestion(db, club, str(player.id), body.player_id, body.give_key, body.want_key)
+    except swaps.SwapError as exc:
+        await db.rollback()
+        raise _refuse(exc)
+    await db.commit()
+    return {"ok": True}
 
 
 @router.post("/{token}/me/cards/swaps/{swap_id}/counter")

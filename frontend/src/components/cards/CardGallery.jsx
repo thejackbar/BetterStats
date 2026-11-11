@@ -221,6 +221,11 @@ function Viewer({ card, club, accent, display, sponsor, onClose, onShare, onOffe
         <div style={{ font: `600 11px ${MONO}`, letterSpacing: 1.6, textTransform: 'uppercase', color: 'rgba(255,255,255,.75)', textAlign: 'center' }}>
           {countOf(card, browse) > 1 ? `${countOf(card, browse)} ${browse ? 'could go' : 'copies'}  ·  ` : ''}Tap the card to turn it over
         </div>
+        {!browse && card.wanted_by > 0 && (
+          <div data-viewer-wanted style={{ font: `600 11px ${MONO}`, letterSpacing: 1.2, textTransform: 'uppercase', color: onColor(accent), background: accent, borderRadius: 999, padding: '4px 12px' }}>
+            On {card.wanted_by} {card.wanted_by === 1 ? 'wish list' : 'wish lists'}
+          </div>
+        )}
         <div onClick={(e) => e.stopPropagation()} style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
           {onShare && <button type="button" data-viewer-share onClick={() => onShare(card)} style={actionBtn}>Share</button>}
           {action && <button type="button" data-viewer-action onClick={() => action.onClick(card)} style={{ ...actionBtn, background: action.primary ? action.accent : actionBtn.background, color: action.primary ? onColor(action.accent) : '#fff', border: action.primary ? 0 : actionBtn.border }}>{action.label}</button>}
@@ -433,11 +438,12 @@ export default function CardGallery({ cards = [], totals, club, accent, display 
                     if (c.stack) return <StackSlot key={c.key} item={c} width={cardW} club={club} accent={accent} display={display} sponsor={sponsor} onOpen={setStack} marked={marked} />
                     const dot = browse && onAction
                     const slot = (
-                      <button key={dot ? undefined : c.key} type="button" onClick={() => hold(c)} data-slot-card={c.key} data-tier={c.tier} aria-label={`${c.name}${c.kind === 'special' ? `, ${c.title}` : `, ${(TIERS[c.tier] || TIERS.common).label}`}${remote ? `, ${c.others || 'no'} other ${c.others === 1 ? 'player' : 'players'} could swap one` : countOf(c, browse) > 1 ? `, ${countOf(c, browse)} ${browse ? 'could go' : 'copies'}` : ''}${marked?.has(c.key) ? ', picked' : ''}`}
+                      <button key={dot ? undefined : c.key} type="button" onClick={() => hold(c)} data-slot-card={c.key} data-tier={c.tier} aria-label={`${c.name}${c.kind === 'special' ? `, ${c.title}` : `, ${(TIERS[c.tier] || TIERS.common).label}`}${remote ? `, ${c.others || 'no'} other ${c.others === 1 ? 'player' : 'players'} could swap one` : countOf(c, browse) > 1 ? `, ${countOf(c, browse)} ${browse ? 'could go' : 'copies'}` : ''}${!remote && !browse && c.wanted_by > 0 ? `, on ${c.wanted_by} ${c.wanted_by === 1 ? 'wish list' : 'wish lists'}` : ''}${marked?.has(c.key) ? ', picked' : ''}`}
                         style={{ position: 'relative', padding: 0, border: 0, background: 'none', cursor: 'pointer', width: cardW, height: cardW * (CARD_H / CARD_W), flex: 'none', textAlign: 'left', outline: marked?.has(c.key) ? `3px solid ${accent}` : 'none', outlineOffset: 2, borderRadius: cardW * 0.07 }}>
                         <ScaledCard width={cardW}><CardView card={c} club={club} accent={accent} display={display} sponsor={sponsor} /></ScaledCard>
                         {(remote ? false : countOf(c, browse) > 1) && <span data-copies style={{ position: 'absolute', right: 6, bottom: '22%', padding: '1px 7px', borderRadius: 999, background: '#0b1018', border: '1px solid rgba(255,255,255,.5)', color: '#fff', font: `700 11px ${MONO}` }}>×{countOf(c, browse)}</span>}
                         {remote && <OthersBadge card={c} accent={accent} />}
+                        {!remote && !browse && c.wanted_by > 0 && <span data-wanted-by={c.wanted_by} aria-hidden style={{ position: 'absolute', left: 6, bottom: '22%', padding: '1px 7px', borderRadius: 999, background: accent, color: onColor(accent), font: `700 10px ${MONO}`, boxShadow: '0 1px 4px rgba(0,0,0,.5)' }}>{c.wanted_by === 1 ? 'Wanted' : `Wanted ×${c.wanted_by}`}</span>}
                       </button>
                     )
                     if (!dot) return slot

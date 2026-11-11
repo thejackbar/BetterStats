@@ -17,6 +17,7 @@ from app.auth.modules import require_module
 from app.routers import instructional_videos
 from app.routers import audit as audit_router
 from app.routers import admin_broadcasts
+from app.routers import support_chat as support_chat_router
 from app.routers import product_updates
 from app.routers import club_links as club_links_router
 from app.routers import privacy_requests as privacy_requests_router
@@ -4577,6 +4578,10 @@ async def lifespan(app: FastAPI):
         from app.services.player_card_winner_ddl import STATEMENTS as _PLAYER_CARD_WINNER_DDL
         for _stmt in _PLAYER_CARD_WINNER_DDL:
             await conn.execute(text(_stmt))
+        # Migration 386: suggested swaps a player has dismissed. Same one-copy rule.
+        from app.services.player_card_dismissed_ddl import STATEMENTS as _PLAYER_CARD_DISMISSED_DDL
+        for _stmt in _PLAYER_CARD_DISMISSED_DDL:
+            await conn.execute(text(_stmt))
         # Migration 379: challenges, their completions and players' own sets. Same one-copy rule.
         from app.services.player_card_challenges_ddl import STATEMENTS as _PLAYER_CARD_CHALLENGES_DDL
         for _stmt in _PLAYER_CARD_CHALLENGES_DDL:
@@ -6687,6 +6692,8 @@ app.include_router(sales_commissions.router)  # Sales Commissions — forecast +
 app.include_router(usage.router)
 app.include_router(login_attempts.router)
 app.include_router(admin_broadcasts.router)  # Super-admin messages on the club admin dashboard
+app.include_router(support_chat_router.admin_router)   # Help window identity (Chatwoot)
+app.include_router(support_chat_router.public_router)  # Chatwoot agent bot webhook (secret in the path)
 app.include_router(product_updates.router)  # Super-admin: daily product update (Stop switch, log)
 app.include_router(club_links_router.router)  # Super Admin: link clubs so Club Admins can switch between them
 app.include_router(privacy_requests_router.router)  # Super Admin: find a person, download the PDF of what we hold about them

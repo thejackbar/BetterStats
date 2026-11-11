@@ -4,9 +4,11 @@ alert settings.
 * A wish list is private to its owner. A card on it is listed with who could swap one right now, which is the same thing
   anyone can already see in Club cards. Nobody else is ever told what is on someone's list, with ONE exception: a suggested swap
   (below) shows each of two players a card of theirs the other is after, and a card of the other's they are after, because the
-  match is the point. Nothing else on either list is shown.
+  match is the point. Nothing else on either list is shown. Everyone else only ever gets a count of wishes on a card they hold.
 * A card comes off the wish list the moment the player holds a copy, however it came (`player_cards.drop_fulfilled_wants`).
-* A holder who marks a spare "open to offers" is told how many players want it, as a number, never as names.
+* A player is told how many other players have a card they HOLD on their wish list, as a number, never as names
+  (`wanted_counts`): in the book, on the card page and on Spares. A player already holding a copy does not count.
+* A suggested swap can be dismissed. It hides that exact pairing for the player who dismissed it and nobody else.
 * A spare is a copy beyond the one a player keeps: two copies of a card is one spare. A player's own card is theirs without a
   row, so every pulled copy of it is a spare.
 """
@@ -94,15 +96,100 @@ async def wanted_keys(db: AsyncSession, club: Organisation, me: str) -> set[str]
     return {swaps.key_of(*c) for c, _ in await wanted_cards(db, club, me)}
 
 
+async def wanted_counts(db: AsyncSession, club: Organisation, snap: dict, me: str, held: Optional[set[Card]] = None) -> dict[Card, int]:
+    """How many OTHER players have each card on their wish list, for the cards `me` holds (every card with a row, and their own
+    card). A count and never names. Someone out of the pool, or who already holds a copy (their list is cleaned lazily), is not
+    counted. Only cards in `held` come back, so a card the asker does not hold is never counted for them."""
+    if held is None:
+        held = set((await swaps._rows_by_card(db, club.id, me)).get(me, {}))
+        held.add((me, None))
+    if not held:
+        return {}
+    rows = (await db.execute(text(
+        "SELECT player_id::text, subject_player_id::text, special_id::text FROM player_card_wants "
+        "WHERE organisation_id = CAST(:o AS UUID) AND player_id <> CAST(:me AS UUID) "
+        "AND subject_player_id = ANY(CAST(:subjects AS uuid[]))"
+    ), {"o": str(club.id), "me": me, "subjects": sorted({c[0] for c in held})})).fetchall()
+    if not rows:
+        return {}
+    everyone = await swaps._rows_by_card(db, club.id)
+    out: dict[Card, int] = {}
+    for owner, subject, special_id in rows:
+        card = (subject, special_id)
+        if card not in held or owner not in snap["people"]:
+            continue
+        if everyone.get(owner, {}).get(card, 0) > 0:
+            continue
+        out[card] = out.get(card, 0) + 1
+    return out
+
+
+async def with_wanted_by(db: AsyncSession, club: Organisation, snap: dict, me: str, cards_out: list[dict]) -> list[dict]:
+    """Put `wanted_by` on each of the asker's own card payloads, from `wanted_counts`. Both kinds of payload carry `player_id`
+    (the subject) and a key that is `p:<player>` or `s:<special>`."""
+    def card_of(c: dict) -> Card:
+        return (str(c.get("player_id") or ""), c.get("special_id") or None)
+    counts = await wanted_counts(db, club, snap, me, {card_of(c) for c in cards_out if c.get("player_id")})
+    for c in cards_out:
+        c["wanted_by"] = counts.get(card_of(c), 0)
+    return cards_out
+
+
 # ── Suggested swaps ───────────────────────────────────────────────────────────────────────────────────────────
 
 MAX_SUGGESTIONS = 12
 
 
+async def _dismissed(db: AsyncSession, club: Organisation, me: str) -> set[tuple[str, Card, Card]]:
+    """The pairings `me` has dismissed: (other player, the card I would give, the card I would get)."""
+    rows = (await db.execute(text(
+        "SELECT other_player_id::text, give_subject_player_id::text, give_special_id::text, "
+        "want_subject_player_id::text, want_special_id::text FROM player_card_dismissed_swaps "
+        "WHERE organisation_id = CAST(:o AS UUID) AND player_id = CAST(:me AS UUID)"
+    ), {"o": str(club.id), "me": me})).fetchall()
+    return {(r[0], (r[1], r[2]), (r[3], r[4])) for r in rows}
+
+
+async def dismiss_suggestion(db: AsyncSession, club: Organisation, snap: dict, me: str, other: str, give_key: str, want_key: str) -> None:
+    """Hide one suggested pairing for `me`. The other player still sees their side of it; a different pairing is still suggested."""
+    if other == me or other not in snap["people"]:
+        raise SwapError("That player is not available to swap with.", 404)
+    give, _ = await swaps._resolve(db, club.id, snap, give_key)
+    want, _ = await swaps._resolve(db, club.id, snap, want_key)
+    await db.execute(text(
+        "INSERT INTO player_card_dismissed_swaps (organisation_id, player_id, other_player_id, give_subject_player_id, give_special_id, "
+        "want_subject_player_id, want_special_id) VALUES (CAST(:o AS UUID), CAST(:me AS UUID), CAST(:other AS UUID), "
+        "CAST(:gs AS UUID), CAST(:gsp AS UUID), CAST(:ws AS UUID), CAST(:wsp AS UUID)) ON CONFLICT DO NOTHING"
+    ), {"o": str(club.id), "me": me, "other": other, "gs": give[0], "gsp": give[1], "ws": want[0], "wsp": want[1]})
+
+
+async def restore_suggestion(db: AsyncSession, club: Organisation, me: str, other: str, give_key: str, want_key: str) -> None:
+    """Undo a dismissal (the row is the player's own and nobody else decided anything about it, so it is deleted)."""
+    give, want = swaps.parse_key(give_key), swaps.parse_key(want_key)
+    # A special card's subject is read off the card itself, as `remove_want` does.
+    resolved = []
+    for card in (give, want):
+        if card[0] == "":
+            row = (await db.execute(text(
+                "SELECT player_id::text FROM player_special_cards WHERE id = CAST(:i AS UUID) AND organisation_id = CAST(:o AS UUID)"
+            ), {"i": card[1], "o": str(club.id)})).first()
+            if not row:
+                return
+            card = (row[0], card[1])
+        resolved.append(card)
+    give, want = resolved
+    await db.execute(text(
+        "DELETE FROM player_card_dismissed_swaps WHERE organisation_id = CAST(:o AS UUID) AND player_id = CAST(:me AS UUID) "
+        "AND other_player_id = CAST(:other AS UUID) AND give_subject_player_id = CAST(:gs AS UUID) "
+        "AND give_special_id IS NOT DISTINCT FROM CAST(:gsp AS UUID) AND want_subject_player_id = CAST(:ws AS UUID) "
+        "AND want_special_id IS NOT DISTINCT FROM CAST(:wsp AS UUID)"
+    ), {"o": str(club.id), "me": me, "other": other, "gs": give[0], "gsp": give[1], "ws": want[0], "wsp": want[1]})
+
+
 async def suggested_swaps(db: AsyncSession, club: Organisation, snap: dict, me: str) -> list[dict]:
     """Players who hold a card on MY wish list and want a card I hold, one suggestion per player: my card for theirs. It reads the same
-    from either side, so both players are prompted. A player who already has a live request with me over either card is left out
-    (it is being dealt with). Where a player offers several, the pair is the best match: a spare of mine before a card I only have
+    from either side, so both players are prompted, except that a pairing one of them dismissed (`dismiss_suggestion`) is hidden from
+    that player only. A player who already has a live request with me over either card is left out (it is being dealt with). Where a player offers several, the pair is the best match: a spare of mine before a card I only have
     one of, then the two cards closest in rarity, then the rarer card I am after."""
     mine_wants = {c for c, _ in await wanted_cards(db, club, me)}
     if not mine_wants:
@@ -117,6 +204,7 @@ async def suggested_swaps(db: AsyncSession, club: Organisation, snap: dict, me: 
         return []
     everyone = await swaps._rows_by_card(db, club.id)
     held_me = everyone.get(me, {})
+    dismissed = await _dismissed(db, club, me)
     # Cards already in a live request between me and each other player.
     busy: dict[str, set[Card]] = {}
     live = (await db.execute(text(
@@ -154,9 +242,12 @@ async def suggested_swaps(db: AsyncSession, club: Organisation, snap: dict, me: 
             return (not spare(g_), abs((gave[g_].get("rarity") or 0) - (got[w_].get("rarity") or 0)), -(got[w_].get("rarity") or 0),
                     swaps.key_of(*g_), swaps.key_of(*w_))
 
-        g, w = min(((g_, w_) for g_ in can_give for w_ in can_get), key=rank)
+        pairs = [(g_, w_) for g_ in can_give for w_ in can_get if (other, g_, w_) not in dismissed]
+        if not pairs:
+            continue
+        g, w = min(pairs, key=rank)
         picks.append(((not spare(g), abs((gave[g].get("rarity") or 0) - (got[w].get("rarity") or 0)), snap["people"][other]["display_name"].lower()),
-                      other, g, w, gave[g], got[w], len(can_give) * len(can_get)))
+                      other, g, w, gave[g], got[w], len(pairs)))
     picks.sort(key=lambda p: p[0])
     out = []
     for _rank, other, g, w, gp, wp, combos in picks[:MAX_SUGGESTIONS]:
@@ -168,8 +259,8 @@ async def suggested_swaps(db: AsyncSession, club: Organisation, snap: dict, me: 
 # ── Spares and "open to offers" ───────────────────────────────────────────────────────────────────────────────
 
 async def spares(db: AsyncSession, club: Organisation, snap: dict, me: str) -> dict:
-    """The cards the player holds more of than they keep, each with how many spares, whether they are open to offers, and,
-    when they are, how many other players want it."""
+    """The cards the player holds more of than they keep, each with how many spares, whether they are open to offers, and how many
+    other players have it on their wish list (a count for every spare, whether or not they are open to offers)."""
     held = (await swaps._rows_by_card(db, club.id, me)).get(me, {})
     spare_n = {c: (n if c == (me, None) else n - 1) for c, n in held.items()}
     spare_n = {c: n for c, n in spare_n.items() if n >= 1}
@@ -179,21 +270,14 @@ async def spares(db: AsyncSession, club: Organisation, snap: dict, me: str) -> d
         "WHERE organisation_id = CAST(:o AS UUID) AND player_id = CAST(:me AS UUID)"
     ), {"o": str(club.id), "me": me})).fetchall()
     open_set = {(r[0], r[1]) for r in open_rows}
-    wanters = {}
-    if open_set:
-        for r in (await db.execute(text(
-            "SELECT subject_player_id::text, special_id::text, COUNT(*) FROM player_card_wants "
-            "WHERE organisation_id = CAST(:o AS UUID) AND player_id <> CAST(:me AS UUID) "
-            "GROUP BY subject_player_id, special_id"), {"o": str(club.id), "me": me})).fetchall():
-            wanters[(r[0], r[1])] = int(r[2])
+    wanters = await wanted_counts(db, club, snap, me, set(spare_n))
     out = []
     for card, n in spare_n.items():
         payload = swaps._payload(snap, card, specials)
         if payload is None:
             continue
         is_open = card in open_set
-        out.append({**payload, "key": swaps.key_of(*card), "spare": n, "tradeable": n, "open": is_open,
-                    **({"wanted_by": wanters.get(card, 0)} if is_open else {})})
+        out.append({**payload, "key": swaps.key_of(*card), "spare": n, "tradeable": n, "open": is_open, "wanted_by": wanters.get(card, 0)})
     out.sort(key=lambda c: (c["kind"] != "special", (c.get("name") or "").lower(), c.get("title") or ""))
     return {"cards": out, "total": sum(c["spare"] for c in out)}
 
@@ -226,7 +310,11 @@ async def card_detail(db: AsyncSession, club: Organisation, snap: dict, me: str,
         "SELECT 1 FROM player_card_wants WHERE organisation_id = CAST(:o AS UUID) AND player_id = CAST(:me AS UUID) "
         "AND special_id IS NOT DISTINCT FROM CAST(:sp AS UUID) AND subject_player_id = CAST(:s AS UUID)"
     ), {"o": str(club.id), "me": me, "sp": card[1], "s": out["card"].get("player_id") or card[0]})).first()
-    return {**out, "wanted": bool(row)}
+    wanted_by = None
+    if out.get("mine_copies", 0) > 0:   # only a card the asker holds says how many others are after it
+        subject = out["card"].get("player_id") or card[0]
+        wanted_by = (await wanted_counts(db, club, snap, me, {(subject, card[1])})).get((subject, card[1]), 0)
+    return {**out, "wanted": bool(row), **({"wanted_by": wanted_by} if wanted_by is not None else {})}
 
 
 # ── Alert settings ────────────────────────────────────────────────────────────────────────────────────────────

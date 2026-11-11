@@ -44,6 +44,32 @@ class Settings(BaseSettings):
     # reads the release notes and writes the club-facing summary.
     product_blast_changelog_url: str = ""
     product_blast_model: str = "claude-sonnet-4-6"
+
+    # ─── Support chat (Chatwoot) — services/support_chat.py ────────────────────
+    # The admin app's help window is Chatwoot's website widget. Everything here is
+    # off until set: an unset value hides the window and turns the bot off, and a
+    # conversation with no bot goes straight to a person. Nothing is stored in
+    # our database, Chatwoot keeps the conversations.
+    #   chatwoot_base_url        public address of Chatwoot, e.g. https://help.betterat.cricket
+    #   chatwoot_internal_url    address the backend uses to call its API (the
+    #                            compose service, http://chatwoot-rails:3000). Empty = base_url.
+    #   chatwoot_website_token   the website inbox's token (the widget script needs it)
+    #   chatwoot_hmac_token      the inbox's "identity validation" secret. The widget
+    #                            only trusts who a person is when we sign it.
+    #   chatwoot_account_id      the Chatwoot account number (1 on a fresh install)
+    #   chatwoot_bot_token       the agent bot's access token (replies and hand-offs)
+    #   chatwoot_webhook_secret  random string in the bot's webhook URL path
+    #   chatwoot_mentions        optional "Jack:3,Elton:4" (name:agent id). A hand-off
+    #                            note @mentions each, which pings them in Chatwoot.
+    chatwoot_base_url: str = ""
+    chatwoot_internal_url: str = ""
+    chatwoot_website_token: str = ""
+    chatwoot_hmac_token: str = ""
+    chatwoot_account_id: str = ""
+    chatwoot_bot_token: str = ""
+    chatwoot_webhook_secret: str = ""
+    chatwoot_mentions: str = ""
+    support_chat_model: str = "claude-sonnet-4-6"
     cors_origins: str = "http://localhost:3000"
 
     # ─── KlubPro → BetterStats migration tooling (super-admin onboarding only) ──

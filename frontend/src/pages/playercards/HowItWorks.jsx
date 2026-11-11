@@ -53,8 +53,9 @@ export default function HowItWorks() {
       <Section id="wishlist" title="Wish list, spares and emails">
         <ul>
           <li>Put any card on your wish list from Club cards. Only you can see the list. It shows who could swap you each card now, and you can ask them from there. A card comes off the list as soon as you get it, from a pack or a swap.</li>
-          <li>If someone holds a card on your list and wants a card you hold, Swaps suggests that swap to both of you. It shows the two cards and nothing else from either list, and one tap asks them.</li>
-          <li>A spare is a copy beyond the one you keep. The Spares page gathers them so you can offer several at once. If you switch a spare to open to offers, you will see how many players want that card, as a number, never as names.</li>
+          <li>If someone holds a card on your list and wants a card you hold, Swaps suggests that swap to both of you. It shows the two cards and nothing else from either list, and one tap asks them. Dismiss a suggestion you do not want. That hides it for you only, and Undo brings it straight back.</li>
+          <li>A spare is a copy beyond the one you keep. The Spares page gathers them so you can offer several at once. </li>
+          <li>Any card you hold shows how many other players have it on their wish list: a "Wanted" tag in My cards, the same count on the card page, and on each spare. It is a number, never names, and a player who already holds the card is not counted.</li>
           <li>No emails are sent unless you ask for them. In Settings you can switch on an email for when someone asks you for a swap and for when a card on your wish list becomes available, and your club can switch the emails off for everyone.</li>
         </ul>
       </Section>
@@ -77,7 +78,7 @@ export default function HowItWorks() {
       </Section>
       <Section id="privacy" title="Who sees what">
         <ul>
-          <li>Other players can see the cards you could swap and nothing else: not your packs, not your wish list (apart from a suggested swap, which shows the one card of yours they want and the one of theirs you want), and not how many of a card you hold beyond what you could give.</li>
+          <li>Other players can see the cards you could swap and nothing else: not your packs, not your wish list (apart from a suggested swap, which shows the one card of yours they want and the one of theirs you want, and the count of wishes on a card they hold, which is a number and never your name), and not how many of a card you hold beyond what you could give.</li>
           <li>Club cards shows every card in the club and how many other players could swap you a copy. It never shows a person's whole collection.</li>
           <li>If you would rather not be in the cards, ask your club to hide you.</li>
         </ul>

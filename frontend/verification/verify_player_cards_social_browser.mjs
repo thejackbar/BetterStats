@@ -36,7 +36,7 @@ const reset = () => {
     { ...BRAVO, holders: [{ player_id: 'p7', name: 'Dave, Dan', tradeable: 2 }, { player_id: 'p9', name: 'Smith, Sue', tradeable: 1 }], others: 2, mine_copies: 0, added_at: '2026-10-25T00:00:00Z' },
     { ...DUNN, holders: [], others: 0, mine_copies: 0, added_at: '2026-10-24T00:00:00Z' },
   ]
-  spares = { cards: [tr(CARDS[1], 2, { key: 'p:p2', spare: 2, open: false }), tr(COLE, 1, { spare: 1, open: true, wanted_by: 3 })], total: 3 }
+  spares = { cards: [tr(CARDS[1], 2, { key: 'p:p2', spare: 2, open: false, wanted_by: 2 }), tr(COLE, 1, { spare: 1, open: true, wanted_by: 3 })], total: 3 }
   const incoming = { id: 'w1', direction: 'in', status: 'pending', other: { player_id: 'p7', name: 'Dave, Dan' }, created_at: new Date().toISOString(), resolved_at: null, note: 'Fancy a swap, mate?', parent_id: null,
     give: [{ ...tr(BRAVO, 1), qty: 1 }, { ...tr(COLE, 1), qty: 1 }], want: [{ ...tr(CARDS[1], 2), qty: 2 }] }
   board = { incoming: [incoming], outgoing: [], recent: [{ ...incoming, id: 'h1', status: 'countered', direction: 'out', resolved_at: new Date().toISOString() }], mine: [tr(CARDS[1], 2), tr(COLE, 1)], people: [{ player_id: 'p7', name: 'Dave, Dan', tradeable: 3 }], expires_days: 14, max_open: 10 }
@@ -65,7 +65,7 @@ const run = async () => {
         if (method === 'POST') { wants = [...wants, { ...COLE, holders: [], others: 0, mine_copies: 0, added_at: 'x' }]; return json({ ok: true }) }
         const key = new URL(url).searchParams.get('key'); wants = wants.filter((w) => w.key !== key); return json({ ok: true })
       }
-      if (/\/me\/cards\/spares\/open/.test(url)) { calls.push({ method, path, body }); spares.cards = spares.cards.map((c) => (c.key === body.key ? { ...c, open: body.open, ...(body.open ? { wanted_by: 1 } : {}) } : c)); return json({ ok: true }) }
+      if (/\/me\/cards\/spares\/open/.test(url)) { calls.push({ method, path, body }); spares.cards = spares.cards.map((c) => (c.key === body.key ? { ...c, open: body.open, } : c)); return json({ ok: true }) }
       if (/\/me\/cards\/spares/.test(url)) return json(spares)
       if (/\/me\/cards\/card\?/.test(url) && /not-a-card/.test(url)) return json({ detail: 'That card could not be found.' }, 422)
       if (/\/me\/cards\/card\?/.test(url)) return json({ card: { ...BRAVO, key: new URL(url).searchParams.get('key') }, holders: [{ player_id: 'p7', name: 'Dave, Dan', tradeable: 2 }], mine_copies: 0, wanted: wants.some((w) => w.key === 'p:p3') })
@@ -152,14 +152,14 @@ const run = async () => {
     reset()
     const { ctx, page } = await open(390, '/spares', { wait: '[data-screen="spares"] [data-spares-total]' })
     check('the total and the cards', /3 spares across 2 cards/.test(await page.locator('[data-spares-total]').textContent()))
-    check('open to offers shows the demand as a number for cards that are open, and nothing for the rest', /3 players want this card/.test(await page.locator('[data-open-row="p:p4"] [data-open-note]').textContent()) && !/want/.test(await page.locator('[data-open-row="p:p2"] [data-open-note]').textContent()))
+    check('every spare shows how many wish lists it is on, as a number, whether or not it is open to offers', /on 3 wish lists/.test(await page.locator('[data-open-row="p:p4"] [data-open-note]').textContent()) && /on 2 wish lists/.test(await page.locator('[data-open-row="p:p2"] [data-open-note]').textContent()))
     check('no horizontal scroll', (await overflow(page)) <= 0)
     if (SHOT) await page.screenshot({ path: `${SHOT}/social-spares-390.png`, fullPage: true })
     calls.length = 0
     await page.locator('[data-open-toggle="p:p2"]').click()
     await page.waitForTimeout(400)
     check('switching a card to open sends that card and open true', calls.some((c) => c.path.endsWith('/spares/open') && c.body.key === 'p:p2' && c.body.open === true), JSON.stringify(calls))
-    check('...and then shows the demand', /1 player wants this card/.test(await page.locator('[data-open-row="p:p2"] [data-open-note]').textContent()))
+    check('...and switching one to open changes nothing about the count', /on 2 wish lists/.test(await page.locator('[data-open-row="p:p2"] [data-open-note]').textContent()))
     await page.locator('[data-quick-pick]').first().click()
     await page.locator('[data-quick-pick]').nth(1).click()
     await page.waitForSelector('[data-spares-offer]')

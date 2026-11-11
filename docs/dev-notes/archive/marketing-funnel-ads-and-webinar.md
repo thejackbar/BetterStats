@@ -1627,7 +1627,7 @@ Jack, on v9.143.0: the default should be close to what it was (all traffic), and
 - Proof: `verify_meta_ads_kpi_browser.mjs` is now 95 and asserts the first load sends `scope=all` for every panel and nothing at campaign scope until it is chosen. The control on the page from v9.143.0 fails 13, all of them the default and the column. The streams browser suite is unchanged at 57.
 
 
-## v9.143.1: where each club came from
+## v9.143.4: where each club came from
 
 Jack, after v9.143.0.1: five clubs showed Completed in the list but Free trial signups read 0 (so no cost per trial), all five said "Other", and "can you use UTMs to see where these are from? Is it a link being shared? Email?".
 
