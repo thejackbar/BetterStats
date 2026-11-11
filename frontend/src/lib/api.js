@@ -2653,6 +2653,8 @@ export const api = {
     request('/club-admin/broadcasts/seen', { method: 'POST', body: JSON.stringify({ ids }) }),
   dismissAdminBroadcast: (id) =>
     request(`/club-admin/broadcasts/${id}/dismiss`, { method: 'POST' }),
+  // The admin help window (routers/support_chat.py): who to open Chatwoot as, or { enabled: false }.
+  getSupportChatIdentity: () => request('/club-admin/support-chat/identity'),
   // The posted daily updates, for the What's New page (any club admin).
   getProductUpdates: () => request('/club-admin/product-updates'),
   // Daily product update (routers/product_updates.py): the Stop switch, a preview

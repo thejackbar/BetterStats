@@ -12,6 +12,7 @@ import NotificationModal from '../NotificationModal'
 import ClubSwitcher from './ClubSwitcher'
 import LinkedClubSwitcher from './LinkedClubSwitcher'
 import TrialBanner from './TrialBanner'
+import SupportChat from './SupportChat'
 import BrandLogo from '../BrandLogo'
 import { SUPER_OVERVIEW, SUPER_SECTIONS, SALES_MANAGEMENT_ITEMS, visibleSectionItems, sectionBadgeCount } from '../../lib/superNav'
 
@@ -695,6 +696,8 @@ export default function AdminLayout({ children }) {
           separately is how a lifted gate half-works: the bell renders, it opens
           nothing, and the click reads as broken. */}
       <NotificationModal isOpen={bellOpen} summary={bellSummary} error={bellError} onClose={closeBell} onClear={clearBell} />
+      {/* The help window (Chatwoot). Draws nothing unless the server says it is set up. */}
+      <SupportChat />
     </div>
   )
 }

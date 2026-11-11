@@ -17,6 +17,7 @@ from app.auth.modules import require_module
 from app.routers import instructional_videos
 from app.routers import audit as audit_router
 from app.routers import admin_broadcasts
+from app.routers import support_chat as support_chat_router
 from app.routers import product_updates
 from app.routers import club_links as club_links_router
 from app.routers import privacy_requests as privacy_requests_router
@@ -6687,6 +6688,8 @@ app.include_router(sales_commissions.router)  # Sales Commissions — forecast +
 app.include_router(usage.router)
 app.include_router(login_attempts.router)
 app.include_router(admin_broadcasts.router)  # Super-admin messages on the club admin dashboard
+app.include_router(support_chat_router.admin_router)   # Help window identity (Chatwoot)
+app.include_router(support_chat_router.public_router)  # Chatwoot agent bot webhook (secret in the path)
 app.include_router(product_updates.router)  # Super-admin: daily product update (Stop switch, log)
 app.include_router(club_links_router.router)  # Super Admin: link clubs so Club Admins can switch between them
 app.include_router(privacy_requests_router.router)  # Super Admin: find a person, download the PDF of what we hold about them

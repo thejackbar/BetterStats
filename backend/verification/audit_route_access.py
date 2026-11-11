@@ -56,6 +56,7 @@ OPEN_TO_ANY_CLUB_USER: dict[tuple[str, str], str] = {
     ("GET", "/club-admin/bookmarks"): PERSONAL,
     ("POST", "/club-admin/bookmarks"): PERSONAL,
     ("GET", "/club-admin/broadcasts"): PERSONAL,
+    ("GET", "/club-admin/support-chat/identity"): "the help window opens as the caller: their own name, email and club, signed so the chat cannot be attributed to someone else",
     ("POST", "/club-admin/broadcasts/seen"): PERSONAL,
     ("POST", "/club-admin/broadcasts/{broadcast_id}/dismiss"): PERSONAL,
     ("POST", "/club-admin/coupons/redeem"): PLAN_INLINE,

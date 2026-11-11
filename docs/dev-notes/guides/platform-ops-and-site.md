@@ -6,6 +6,7 @@
 - Domain, brand or contact-address changes (`betterat.cricket`, `support@bettersports.com.au`, `cloudflare-worker/`, `og_preview.py`, `seo.py`, `marketing.js`).
 - Blog posts, the Contact form (`public_contact.py`), public pricing (`pricing.js`).
 - Module entitlement (`module_overrides`, `MODULE_TOGGLES`), tiers, changelog files or `version.js`.
+- The admin Help window, the Chatwoot bot, `services/support_chat.py`, `routers/support_chat.py` or anything under `ops/support/` (Chatwoot, Cap, Open Higgsfield).
 - Writing any user-facing prose.
 
 **Archive** (verbatim history, do not load whole): `docs/dev-notes/archive/platform-ops-and-site.md`. Grep hints: `Writing Voice`, `Server Deploy Command`, `compose project split`, `NPM can't resolve`, `Public Domain`, `social-share cards`, `onboarding requests`, `Club name is a search`, `Public Marketing Pricing`, `tiers retired`, `Version Numbers`, `Active development branch`, `Architecture`, `Key Notes`.
@@ -62,6 +63,8 @@
 34. House style for the public pages: the screenshots are the hook, so copy stays short and history and leaderboards come first. A showcase entry is a headline, one or two sentences and three points; a feature is a title and one line. Do not add a text-only section to a marketing page. The home page Aurora (`components/marketing/Aurora.jsx`, React Bits, MIT plus Commons Clause) keeps its copyright header and stays masked to the top of the hero.
 
 35. The "Trusted by clubs at" strip names customers on a public page. It lists every club with an `active` Core subscription (`routers/public_trusted_clubs.py`), after the curated clubs in `data/trustedClubs.js`. Keep a club off with `TRUSTED_CLUBS_EXCLUDE` (comma-separated slugs). `active` includes a free grant a Super Admin set by hand, so look at the list after any change to the filter. Never widen what the route returns beyond `slug`, `name` and the crest path.
+
+36. Support chat (v9.143.1): the admin Help window is Chatwoot's website widget, self-hosted at `help.betterat.cricket` from `ops/support/` (snippets to merge into the central compose, never a stack of their own; Cap and Open Higgsfield live there too and are not wired into BetterStats). `services/support_chat.py` holds the whole backend side and stores nothing. The window shows only when `chatwoot_base_url`, `chatwoot_website_token` and `chatwoot_hmac_token` are all set (`GET /club-admin/support-chat/identity` returns `{enabled: false}` otherwise), and it opens as the signed-in person with an HMAC-signed identifier, never unsigned. The bot (`POST /public/support-chat/webhook/{secret}`, secret in the path, a wrong or unset one is a 404) acts only on an incoming, public message in a `pending` conversation; handing off flips it to `open`, after which the bot stays out. It fails towards a person: no API key, a model error, an empty reply, six bot replies or a request for a human all hand off. The model has two tools (reply, hand_off) and no access to club data. Its knowledge is `content/support_faq.json`, a copy of the FAQ page's questions: re-extract it when `pages/marketing/FAQ.jsx` changes (`verify_support_chat.py` fails if the counts differ).
 
 ## Traps and failure signatures
 

@@ -23,6 +23,16 @@ services:
       PLAYHQ_BASE_URL: https://grassrootsapiproxy.cricket.com.au
       PLAYHQ_API_KEY: ${PLAYHQ_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Support chat (Chatwoot). All empty = the admin help window is hidden and
+      # the bot is off. See ops/support/README.md.
+      CHATWOOT_BASE_URL: ${CHATWOOT_BASE_URL:-}
+      CHATWOOT_INTERNAL_URL: ${CHATWOOT_INTERNAL_URL:-}
+      CHATWOOT_WEBSITE_TOKEN: ${CHATWOOT_WEBSITE_TOKEN:-}
+      CHATWOOT_HMAC_TOKEN: ${CHATWOOT_HMAC_TOKEN:-}
+      CHATWOOT_ACCOUNT_ID: ${CHATWOOT_ACCOUNT_ID:-}
+      CHATWOOT_BOT_TOKEN: ${CHATWOOT_BOT_TOKEN:-}
+      CHATWOOT_WEBHOOK_SECRET: ${CHATWOOT_WEBHOOK_SECRET:-}
+      CHATWOOT_MENTIONS: ${CHATWOOT_MENTIONS:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3002}
       # KlubPro migration tooling — empty unless an operator is onboarding clubs.
       # On the box, ensure this backend shares a Docker network with klubpro-postgres.

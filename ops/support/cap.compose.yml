@@ -1,0 +1,148 @@
+# Cap (https://github.com/CapSoftware/Cap), self-hosted web app for screen
+# recording share links. The recorder itself is the Cap desktop app on each
+# person's computer; this stack is only the web dashboard, the share pages, the
+# database and the video storage. Cap Desktop is pointed at it under
+# Settings > Cap Server URL.
+#
+# NOT a standalone stack. Merge into /srv/docker/docker-compose.yaml like
+# chatwoot.compose.yml. Based on the upstream docker-compose.yml, with these
+# changes: every secret is required (upstream ships guessable defaults, which
+# must never face the internet), container_name lines removed, MinIO and MySQL
+# are not published on the host, and cap-web joins docker-shared-net.
+#
+# The media server image is built from the Cap source, so the repo has to be
+# cloned once on the box (see README). Pin CAP_REF to a tag or commit you have
+# read, and keep the cap-web image tag in step with it.
+#
+# Cap needs TWO public hostnames: the app (CAP_URL) and the storage that the
+# browser uploads to and plays from (S3_PUBLIC_URL, which is MinIO's port 9000).
+# Both go through nginx-proxy-manager. See README.
+
+services:
+  cap-web:
+    image: ghcr.io/capsoftware/cap-web:latest
+    restart: unless-stopped
+    depends_on:
+      cap-mysql:
+        condition: service_healthy
+      cap-minio:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: mysql://cap:${CAP_MYSQL_PASSWORD:?}@cap-mysql:3306/cap
+      WEB_URL: ${CAP_URL:?}
+      NEXTAUTH_URL: ${CAP_URL:?}
+      DATABASE_ENCRYPTION_KEY: ${CAP_DATABASE_ENCRYPTION_KEY:?needs 64 hex characters from openssl rand -hex 32}
+      NEXTAUTH_SECRET: ${CAP_NEXTAUTH_SECRET:?openssl rand -hex 32}
+      MEDIA_SERVER_WEBHOOK_SECRET: ${CAP_MEDIA_SERVER_WEBHOOK_SECRET:?openssl rand -hex 32}
+      CAP_AWS_ACCESS_KEY: ${CAP_MINIO_ROOT_USER:?}
+      CAP_AWS_SECRET_KEY: ${CAP_MINIO_ROOT_PASSWORD:?}
+      CAP_AWS_BUCKET: cap
+      CAP_AWS_REGION: us-east-1
+      S3_PUBLIC_ENDPOINT: ${CAP_S3_PUBLIC_URL:?}
+      S3_INTERNAL_ENDPOINT: http://cap-minio:9000
+      S3_PATH_STYLE: "true"
+      # Sign-in links are emailed. With no key set they appear in the container
+      # log instead (docker compose logs cap-web), fine for the first login.
+      RESEND_API_KEY: ${CAP_RESEND_API_KEY:-}
+      RESEND_FROM_DOMAIN: ${CAP_RESEND_FROM_DOMAIN:-}
+      MEDIA_SERVER_URL: http://cap-media-server:3456
+      MEDIA_SERVER_WEBHOOK_URL: http://cap-web:3000
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - cap-net
+      - docker-shared-net   # NPM routes CAP_URL to cap-web:3000
+
+  cap-media-server:
+    build:
+      context: /srv/docker/cap-src/apps/media-server   # git clone of CapSoftware/Cap, see README
+      dockerfile: Dockerfile.standalone
+    restart: unless-stopped
+    environment:
+      PORT: 3456
+      MEDIA_SERVER_WEBHOOK_SECRET: ${CAP_MEDIA_SERVER_WEBHOOK_SECRET:?}
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3456/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - cap-net
+
+  cap-mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: cap
+      MYSQL_USER: cap
+      MYSQL_PASSWORD: ${CAP_MYSQL_PASSWORD:?}
+      MYSQL_ROOT_PASSWORD: ${CAP_MYSQL_ROOT_PASSWORD:?}
+    command:
+      - --max_connections=1000
+      - --default-authentication-plugin=mysql_native_password
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - cap_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u cap -p\"$$MYSQL_PASSWORD\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - cap-net
+
+  cap-minio:
+    # Same image upstream pins by digest. Copy the current line from upstream's
+    # docker-compose.yml when you bump CAP_REF; do not leave it on a floating tag.
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${CAP_MINIO_ROOT_USER:?}
+      MINIO_ROOT_PASSWORD: ${CAP_MINIO_ROOT_PASSWORD:?}
+    volumes:
+      - cap_minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - cap-net
+      - docker-shared-net   # NPM routes CAP_S3_PUBLIC_URL to cap-minio:9000
+
+  cap-minio-setup:
+    image: pgsty/mc:RELEASE.2026-09-16T00-00-00Z@sha256:cfc83108c3abb371f8fb84d99c1fdc88f8c237e022409b0081fb7c0a3be634dd
+    depends_on:
+      cap-minio:
+        condition: service_healthy
+    restart: "no"
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set capminio http://cap-minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD};
+      mc mb capminio/cap --ignore-existing;
+      exit 0;
+      "
+    environment:
+      MINIO_ROOT_USER: ${CAP_MINIO_ROOT_USER:?}
+      MINIO_ROOT_PASSWORD: ${CAP_MINIO_ROOT_PASSWORD:?}
+    networks:
+      - cap-net
+
+volumes:
+  cap_mysql_data:
+  cap_minio_data:
+
+networks:
+  cap-net:
+    driver: bridge
+  docker-shared-net:
+    external: true   # already defined in the central file, do NOT add a second definition
