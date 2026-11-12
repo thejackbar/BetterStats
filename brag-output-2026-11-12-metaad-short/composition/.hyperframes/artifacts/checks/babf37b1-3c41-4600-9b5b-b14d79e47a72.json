@@ -1,0 +1,2975 @@
+{
+  "ok": false,
+  "strict": false,
+  "browserSkipped": false,
+  "lint": {
+    "ok": true,
+    "errorCount": 0,
+    "warningCount": 1,
+    "infoCount": 0,
+    "findings": [
+      {
+        "code": "timeline_track_too_dense",
+        "severity": "warning",
+        "message": "Track 1 has 8 timed elements in this HTML file. Smaller sub-compositions keep timelines easier to read, iterate on, and diff.",
+        "selector": "[data-composition-id]",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-11-12-metaad-short/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move coherent scene groups into separate .html files under compositions/ and mount them from the parent with data-composition-src so the timeline stays easier to inspect, revise, and validate."
+      }
+    ],
+    "filesScanned": 1
+  },
+  "runtime": {
+    "ok": true,
+    "errorCount": 0,
+    "warningCount": 0,
+    "infoCount": 0,
+    "findings": []
+  },
+  "layout": {
+    "ok": false,
+    "errorCount": 5,
+    "warningCount": 0,
+    "infoCount": 19,
+    "findings": [
+      {
+        "code": "text_occluded",
+        "severity": "error",
+        "time": 3.056,
+        "selector": "div.fc > div:nth-of-type(10)",
+        "message": "Text is hidden beneath an opaque element.",
+        "rect": {
+          "left": 217.26,
+          "top": 812.04,
+          "right": 267.45,
+          "bottom": 841.45,
+          "width": 50.19,
+          "height": 29.41
+        },
+        "containerSelector": "#s1 > div:nth-of-type(3)",
+        "text": "8,115",
+        "fixHint": "Give the text its own zone, raise its stacking order above the covering element, or mark intentional layering with data-layout-allow-occlusion.",
+        "coveredFraction": 0.15,
+        "lifetime": {
+          "start": 0,
+          "end": 7.6
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 217.26,
+          "y": 812.04,
+          "width": 50.19,
+          "height": 29.41
+        },
+        "firstSeen": 3.056,
+        "lastSeen": 3.056,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          3.056
+        ]
+      },
+      {
+        "code": "text_occluded",
+        "severity": "error",
+        "time": 3.056,
+        "selector": "div.fc > div:nth-of-type(13)",
+        "message": "Text is hidden beneath an opaque element.",
+        "rect": {
+          "left": 221.98,
+          "top": 859.25,
+          "right": 273.24,
+          "bottom": 888.79,
+          "width": 51.26,
+          "height": 29.54
+        },
+        "containerSelector": "#s1 > div:nth-of-type(3)",
+        "text": "7,671",
+        "fixHint": "Give the text its own zone, raise its stacking order above the covering element, or mark intentional layering with data-layout-allow-occlusion.",
+        "coveredFraction": 0.22,
+        "lifetime": {
+          "start": 0,
+          "end": 7.6
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 221.98,
+          "y": 859.25,
+          "width": 51.26,
+          "height": 29.54
+        },
+        "firstSeen": 3.056,
+        "lastSeen": 3.056,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          3.056
+        ]
+      },
+      {
+        "code": "text_occluded",
+        "severity": "error",
+        "time": 3.056,
+        "selector": "div.fc > div:nth-of-type(16)",
+        "message": "Text is hidden beneath an opaque element.",
+        "rect": {
+          "left": 220.86,
+          "top": 906.45,
+          "right": 279.04,
+          "bottom": 936.84,
+          "width": 58.18,
+          "height": 30.39
+        },
+        "containerSelector": "#s1 > div:nth-of-type(3)",
+        "text": "7,450",
+        "fixHint": "Give the text its own zone, raise its stacking order above the covering element, or mark intentional layering with data-layout-allow-occlusion.",
+        "coveredFraction": 0.33,
+        "lifetime": {
+          "start": 0,
+          "end": 7.6
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 220.86,
+          "y": 906.45,
+          "width": 58.18,
+          "height": 30.39
+        },
+        "firstSeen": 3.056,
+        "lastSeen": 3.056,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          3.056
+        ]
+      },
+      {
+        "code": "content_overlap",
+        "severity": "error",
+        "time": 3.056,
+        "selector": "#s1 > div:nth-of-type(5) > div:nth-of-type(2)",
+        "message": "Two text blocks overlap and may render unreadable.",
+        "rect": {
+          "left": 805.65,
+          "top": 729.79,
+          "right": 943.49,
+          "bottom": 802.82,
+          "width": 137.84,
+          "height": 73.03
+        },
+        "containerSelector": "#s1 > div:nth-of-type(5) > div:nth-of-type(3)",
+        "text": "4,061",
+        "fixHint": "Give each block its own zone, or put data-layout-allow-overlap on the text or on a container inside the scene. A marker on the scene root does not apply. Decoration nobody needs to read can take data-layout-ignore.",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 805.65,
+          "y": 729.79,
+          "width": 137.84,
+          "height": 73.03
+        },
+        "firstSeen": 0.922,
+        "lastSeen": 7.067,
+        "occurrences": 22,
+        "heldMs": 6145.000000000001,
+        "times": [
+          0.922,
+          1.229,
+          1.536,
+          1.844,
+          2.151,
+          2.458,
+          2.765,
+          3.056,
+          3.073,
+          3.38,
+          3.687,
+          3.994,
+          4.302,
+          4.609,
+          4.916,
+          5.223,
+          5.531,
+          5.838,
+          6.145,
+          6.453,
+          6.76,
+          7.067
+        ]
+      },
+      {
+        "code": "content_overlap",
+        "severity": "error",
+        "time": 3.056,
+        "selector": "#s1 > div:nth-of-type(5) > div:nth-of-type(4)",
+        "message": "Two text blocks overlap and may render unreadable.",
+        "rect": {
+          "left": 795.25,
+          "top": 814.43,
+          "right": 930.44,
+          "bottom": 887.14,
+          "width": 135.19,
+          "height": 72.71
+        },
+        "containerSelector": "#s1 > div:nth-of-type(5) > div:nth-of-type(5)",
+        "text": "1,653",
+        "fixHint": "Give each block its own zone, or put data-layout-allow-overlap on the text or on a container inside the scene. A marker on the scene root does not apply. Decoration nobody needs to read can take data-layout-ignore.",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 795.25,
+          "y": 814.43,
+          "width": 135.19,
+          "height": 72.71
+        },
+        "firstSeen": 0.922,
+        "lastSeen": 7.067,
+        "occurrences": 22,
+        "heldMs": 6145.000000000001,
+        "times": [
+          0.922,
+          1.229,
+          1.536,
+          1.844,
+          2.151,
+          2.458,
+          2.765,
+          3.056,
+          3.073,
+          3.38,
+          3.687,
+          3.994,
+          4.302,
+          4.609,
+          4.916,
+          5.223,
+          5.531,
+          5.838,
+          6.145,
+          6.453,
+          6.76,
+          7.067
+        ]
+      },
+      {
+        "code": "content_overlap",
+        "severity": "info",
+        "time": 2.151,
+        "selector": "#s1 > div:nth-of-type(6) > div:nth-of-type(2)",
+        "message": "Two text blocks overlap and may render unreadable.",
+        "rect": {
+          "left": 218,
+          "top": 1174,
+          "right": 672.39,
+          "bottom": 1234,
+          "width": 454.39,
+          "height": 60
+        },
+        "containerSelector": "#s1 > div:nth-of-type(6) > div:nth-of-type(3) > span:nth-of-type(1) > i:nth-of-type(1)",
+        "text": "Search your club…",
+        "fixHint": "Give each block its own zone, or put data-layout-allow-overlap on the text or on a container inside the scene. A marker on the scene root does not apply. Decoration nobody needs to read can take data-layout-ignore.",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 218,
+          "y": 1174,
+          "width": 454.39,
+          "height": 60
+        },
+        "firstSeen": 2.151,
+        "lastSeen": 2.151,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          2.151
+        ]
+      },
+      {
+        "code": "content_overlap",
+        "severity": "info",
+        "time": 30.419,
+        "selector": "#s5 > div:nth-of-type(9) > div:nth-of-type(1)",
+        "message": "Two text blocks overlap and may render unreadable.",
+        "rect": {
+          "left": 90,
+          "top": 1003,
+          "right": 232.44,
+          "bottom": 1044,
+          "width": 142.44,
+          "height": 41
+        },
+        "containerSelector": "#s5 > div:nth-of-type(14) > div:nth-of-type(1)",
+        "text": "R. Pulley",
+        "fixHint": "Give each block its own zone, or put data-layout-allow-overlap on the text or on a container inside the scene. A marker on the scene root does not apply. Decoration nobody needs to read can take data-layout-ignore.",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 90,
+          "y": 1003,
+          "width": 142.44,
+          "height": 41
+        },
+        "firstSeen": 30.419,
+        "lastSeen": 30.419,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          30.419
+        ]
+      },
+      {
+        "code": "content_overlap",
+        "severity": "info",
+        "time": 31.955,
+        "selector": "#s5 > div:nth-of-type(6) > div:nth-of-type(1)",
+        "message": "Two text blocks overlap and may render unreadable.",
+        "rect": {
+          "left": 90,
+          "top": 1267,
+          "right": 239.05,
+          "bottom": 1308,
+          "width": 149.05,
+          "height": 41
+        },
+        "containerSelector": "#s5 > div:nth-of-type(11) > div:nth-of-type(1)",
+        "text": "R. Wilton",
+        "fixHint": "Give each block its own zone, or put data-layout-allow-overlap on the text or on a container inside the scene. A marker on the scene root does not apply. Decoration nobody needs to read can take data-layout-ignore.",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 90,
+          "y": 1267,
+          "width": 149.05,
+          "height": 41
+        },
+        "firstSeen": 31.955,
+        "lastSeen": 31.955,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          31.955
+        ]
+      },
+      {
+        "code": "content_overlap",
+        "severity": "info",
+        "time": 31.955,
+        "selector": "#s5 > div:nth-of-type(6) > div:nth-of-type(4)",
+        "message": "Two text blocks overlap and may render unreadable.",
+        "rect": {
+          "left": 850,
+          "top": 1267,
+          "right": 919.44,
+          "bottom": 1308,
+          "width": 69.44,
+          "height": 41
+        },
+        "containerSelector": "#s5 > div:nth-of-type(11) > div:nth-of-type(3)",
+        "text": "490",
+        "fixHint": "Give each block its own zone, or put data-layout-allow-overlap on the text or on a container inside the scene. A marker on the scene root does not apply. Decoration nobody needs to read can take data-layout-ignore.",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 850,
+          "y": 1267,
+          "width": 69.44,
+          "height": 41
+        },
+        "firstSeen": 31.955,
+        "lastSeen": 31.955,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          31.955
+        ]
+      },
+      {
+        "code": "content_overlap",
+        "severity": "info",
+        "time": 31.955,
+        "selector": "#s5 > div:nth-of-type(7) > div:nth-of-type(1)",
+        "message": "Two text blocks overlap and may render unreadable.",
+        "rect": {
+          "left": 90,
+          "top": 915,
+          "right": 259.55,
+          "bottom": 956,
+          "width": 169.55,
+          "height": 41
+        },
+        "containerSelector": "#s5 > div:nth-of-type(9) > div:nth-of-type(1)",
+        "text": "A. Castley",
+        "fixHint": "Give each block its own zone, or put data-layout-allow-overlap on the text or on a container inside the scene. A marker on the scene root does not apply. Decoration nobody needs to read can take data-layout-ignore.",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 90,
+          "y": 915,
+          "width": 169.55,
+          "height": 41
+        },
+        "firstSeen": 31.955,
+        "lastSeen": 31.955,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          31.955
+        ]
+      },
+      {
+        "code": "content_overlap",
+        "severity": "info",
+        "time": 31.955,
+        "selector": "#s5 > div:nth-of-type(7) > div:nth-of-type(3)",
+        "message": "Two text blocks overlap and may render unreadable.",
+        "rect": {
+          "left": 850,
+          "top": 915,
+          "right": 947.61,
+          "bottom": 956,
+          "width": 97.61,
+          "height": 41
+        },
+        "containerSelector": "#s5 > div:nth-of-type(9) > div:nth-of-type(4)",
+        "text": "9,027",
+        "fixHint": "Give each block its own zone, or put data-layout-allow-overlap on the text or on a container inside the scene. A marker on the scene root does not apply. Decoration nobody needs to read can take data-layout-ignore.",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 850,
+          "y": 915,
+          "width": 97.61,
+          "height": 41
+        },
+        "firstSeen": 31.955,
+        "lastSeen": 31.955,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          31.955
+        ]
+      },
+      {
+        "code": "content_overlap",
+        "severity": "info",
+        "time": 31.955,
+        "selector": "#s5 > div:nth-of-type(8) > div:nth-of-type(1)",
+        "message": "Two text blocks overlap and may render unreadable.",
+        "rect": {
+          "left": 90,
+          "top": 1003,
+          "right": 250.81,
+          "bottom": 1044,
+          "width": 160.81,
+          "height": 41
+        },
+        "containerSelector": "#s5 > div:nth-of-type(14) > div:nth-of-type(1)",
+        "text": "D. Stirling",
+        "fixHint": "Give each block its own zone, or put data-layout-allow-overlap on the text or on a container inside the scene. A marker on the scene root does not apply. Decoration nobody needs to read can take data-layout-ignore.",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 90,
+          "y": 1003,
+          "width": 160.81,
+          "height": 41
+        },
+        "firstSeen": 31.955,
+        "lastSeen": 31.955,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          31.955
+        ]
+      },
+      {
+        "code": "content_overlap",
+        "severity": "info",
+        "time": 31.955,
+        "selector": "#s5 > div:nth-of-type(8) > div:nth-of-type(3)",
+        "message": "Two text blocks overlap and may render unreadable.",
+        "rect": {
+          "left": 850,
+          "top": 1003,
+          "right": 932.33,
+          "bottom": 1044,
+          "width": 82.33,
+          "height": 41
+        },
+        "containerSelector": "#s5 > div:nth-of-type(14) > div:nth-of-type(4)",
+        "text": "8,115",
+        "fixHint": "Give each block its own zone, or put data-layout-allow-overlap on the text or on a container inside the scene. A marker on the scene root does not apply. Decoration nobody needs to read can take data-layout-ignore.",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 850,
+          "y": 1003,
+          "width": 82.33,
+          "height": 41
+        },
+        "firstSeen": 31.955,
+        "lastSeen": 31.955,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          31.955
+        ]
+      },
+      {
+        "code": "content_overlap",
+        "severity": "info",
+        "time": 31.955,
+        "selector": "#s5 > div:nth-of-type(10) > div:nth-of-type(1)",
+        "message": "Two text blocks overlap and may render unreadable.",
+        "rect": {
+          "left": 90,
+          "top": 1179,
+          "right": 297.52,
+          "bottom": 1220,
+          "width": 207.52,
+          "height": 41
+        },
+        "containerSelector": "#s5 > div:nth-of-type(16) > div:nth-of-type(1)",
+        "text": "M. Campbell",
+        "fixHint": "Give each block its own zone, or put data-layout-allow-overlap on the text or on a container inside the scene. A marker on the scene root does not apply. Decoration nobody needs to read can take data-layout-ignore.",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 90,
+          "y": 1179,
+          "width": 207.52,
+          "height": 41
+        },
+        "firstSeen": 31.955,
+        "lastSeen": 31.955,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          31.955
+        ]
+      },
+      {
+        "code": "content_overlap",
+        "severity": "info",
+        "time": 31.955,
+        "selector": "#s5 > div:nth-of-type(10) > div:nth-of-type(3)",
+        "message": "Two text blocks overlap and may render unreadable.",
+        "rect": {
+          "left": 850,
+          "top": 1179,
+          "right": 946.22,
+          "bottom": 1220,
+          "width": 96.22,
+          "height": 41
+        },
+        "containerSelector": "#s5 > div:nth-of-type(16) > div:nth-of-type(4)",
+        "text": "7,450",
+        "fixHint": "Give each block its own zone, or put data-layout-allow-overlap on the text or on a container inside the scene. A marker on the scene root does not apply. Decoration nobody needs to read can take data-layout-ignore.",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 850,
+          "y": 1179,
+          "width": 96.22,
+          "height": 41
+        },
+        "firstSeen": 31.955,
+        "lastSeen": 31.955,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          31.955
+        ]
+      },
+      {
+        "code": "content_overlap",
+        "severity": "info",
+        "time": 31.955,
+        "selector": "#s5 > div:nth-of-type(12) > div:nth-of-type(1)",
+        "message": "Two text blocks overlap and may render unreadable.",
+        "rect": {
+          "left": 90,
+          "top": 1355,
+          "right": 238.11,
+          "bottom": 1396,
+          "width": 148.11,
+          "height": 41
+        },
+        "containerSelector": "#s5 > div:nth-of-type(17) > div:nth-of-type(1)",
+        "text": "L. Blakey",
+        "fixHint": "Give each block its own zone, or put data-layout-allow-overlap on the text or on a container inside the scene. A marker on the scene root does not apply. Decoration nobody needs to read can take data-layout-ignore.",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 90,
+          "y": 1355,
+          "width": 148.11,
+          "height": 41
+        },
+        "firstSeen": 31.955,
+        "lastSeen": 31.955,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          31.955
+        ]
+      },
+      {
+        "code": "content_overlap",
+        "severity": "info",
+        "time": 31.955,
+        "selector": "#s5 > div:nth-of-type(12) > div:nth-of-type(3)",
+        "message": "Two text blocks overlap and may render unreadable.",
+        "rect": {
+          "left": 850,
+          "top": 1355,
+          "right": 946.98,
+          "bottom": 1396,
+          "width": 96.98,
+          "height": 41
+        },
+        "containerSelector": "#s5 > div:nth-of-type(17) > div:nth-of-type(4)",
+        "text": "5,267",
+        "fixHint": "Give each block its own zone, or put data-layout-allow-overlap on the text or on a container inside the scene. A marker on the scene root does not apply. Decoration nobody needs to read can take data-layout-ignore.",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 850,
+          "y": 1355,
+          "width": 96.98,
+          "height": 41
+        },
+        "firstSeen": 31.955,
+        "lastSeen": 31.955,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          31.955
+        ]
+      },
+      {
+        "code": "content_overlap",
+        "severity": "info",
+        "time": 39.33,
+        "selector": "#sel0 > span:nth-of-type(1)",
+        "message": "Two text blocks overlap and may render unreadable.",
+        "rect": {
+          "left": 145,
+          "top": 801,
+          "right": 569.89,
+          "bottom": 845,
+          "width": 424.89,
+          "height": 44
+        },
+        "containerSelector": "#s6 > div:nth-of-type(7) > div:nth-of-type(2) > div:nth-of-type(1)",
+        "text": "Runs by batting position",
+        "fixHint": "Give each block its own zone, or put data-layout-allow-overlap on the text or on a container inside the scene. A marker on the scene root does not apply. Decoration nobody needs to read can take data-layout-ignore.",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 145,
+          "y": 801,
+          "width": 424.89,
+          "height": 44
+        },
+        "firstSeen": 39.33,
+        "lastSeen": 39.33,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          39.33
+        ]
+      },
+      {
+        "code": "content_overlap",
+        "severity": "info",
+        "time": 40.866,
+        "selector": "#s6 > div:nth-of-type(7) > div:nth-of-type(4) > div:nth-of-type(1)",
+        "message": "Two text blocks overlap and may render unreadable.",
+        "rect": {
+          "left": 770.55,
+          "top": 802,
+          "right": 909.44,
+          "bottom": 833,
+          "width": 138.89,
+          "height": 31
+        },
+        "containerSelector": "#s6 > div:nth-of-type(7) > div:nth-of-type(4) > div:nth-of-type(2)",
+        "text": "All formats",
+        "fixHint": "Give each block its own zone, or put data-layout-allow-overlap on the text or on a container inside the scene. A marker on the scene root does not apply. Decoration nobody needs to read can take data-layout-ignore.",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 770.55,
+          "y": 802,
+          "width": 138.89,
+          "height": 31
+        },
+        "firstSeen": 40.866,
+        "lastSeen": 40.866,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          40.866
+        ]
+      },
+      {
+        "code": "escaped_container",
+        "severity": "info",
+        "time": 45.833,
+        "selector": "#s7 > div:nth-of-type(2) > div:nth-of-type(2)",
+        "message": "Positioned element renders far outside its offset parent — its coordinates were likely computed in a different frame (canvas/viewport pixels).",
+        "rect": {
+          "left": 410,
+          "top": 1142,
+          "right": 670,
+          "bottom": 1172.8,
+          "width": 260,
+          "height": 30.8
+        },
+        "containerSelector": "#s7 > div:nth-of-type(2)",
+        "text": "BetterStats",
+        "fixHint": "Compute left/top in the offset parent's frame (subtract its rect), or mark intentional placement with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 450,
+          "top": 950,
+          "right": 630,
+          "bottom": 1150,
+          "width": 180,
+          "height": 200
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 410,
+          "y": 1142,
+          "width": 260,
+          "height": 30.8
+        },
+        "firstSeen": 45.833,
+        "lastSeen": 45.833,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          45.833
+        ]
+      },
+      {
+        "code": "escaped_container",
+        "severity": "info",
+        "time": 45.833,
+        "selector": "#s7 > div:nth-of-type(3) > div:nth-of-type(2)",
+        "message": "Positioned element renders far outside its offset parent — its coordinates were likely computed in a different frame (canvas/viewport pixels).",
+        "rect": {
+          "left": 410,
+          "top": 812,
+          "right": 670,
+          "bottom": 842.8,
+          "width": 260,
+          "height": 30.8
+        },
+        "containerSelector": "#s7 > div:nth-of-type(3)",
+        "text": "BetterSelect",
+        "fixHint": "Compute left/top in the offset parent's frame (subtract its rect), or mark intentional placement with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 450,
+          "top": 620,
+          "right": 630,
+          "bottom": 820,
+          "width": 180,
+          "height": 200
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 410,
+          "y": 812,
+          "width": 260,
+          "height": 30.8
+        },
+        "firstSeen": 45.833,
+        "lastSeen": 45.833,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          45.833
+        ]
+      },
+      {
+        "code": "escaped_container",
+        "severity": "info",
+        "time": 45.833,
+        "selector": "#s7 > div:nth-of-type(5) > div:nth-of-type(2)",
+        "message": "Positioned element renders far outside its offset parent — its coordinates were likely computed in a different frame (canvas/viewport pixels).",
+        "rect": {
+          "left": 723.5,
+          "top": 1043,
+          "right": 983.5,
+          "bottom": 1073.8,
+          "width": 260,
+          "height": 30.8
+        },
+        "containerSelector": "#s7 > div:nth-of-type(5)",
+        "text": "BetterSocials",
+        "fixHint": "Compute left/top in the offset parent's frame (subtract its rect), or mark intentional placement with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 763.5,
+          "top": 851,
+          "right": 943.5,
+          "bottom": 1051,
+          "width": 180,
+          "height": 200
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 723.5,
+          "y": 1043,
+          "width": 260,
+          "height": 30.8
+        },
+        "firstSeen": 45.833,
+        "lastSeen": 45.833,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          45.833
+        ]
+      },
+      {
+        "code": "escaped_container",
+        "severity": "info",
+        "time": 45.833,
+        "selector": "#s7 > div:nth-of-type(7) > div:nth-of-type(2)",
+        "message": "Positioned element renders far outside its offset parent — its coordinates were likely computed in a different frame (canvas/viewport pixels).",
+        "rect": {
+          "left": 608,
+          "top": 1422.5,
+          "right": 868,
+          "bottom": 1453.3,
+          "width": 260,
+          "height": 30.8
+        },
+        "containerSelector": "#s7 > div:nth-of-type(7)",
+        "text": "BetterAdmin",
+        "fixHint": "Compute left/top in the offset parent's frame (subtract its rect), or mark intentional placement with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 648,
+          "top": 1230.5,
+          "right": 828,
+          "bottom": 1430.5,
+          "width": 180,
+          "height": 200
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 608,
+          "y": 1422.5,
+          "width": 260,
+          "height": 30.8
+        },
+        "firstSeen": 45.833,
+        "lastSeen": 45.833,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          45.833
+        ]
+      },
+      {
+        "code": "escaped_container",
+        "severity": "info",
+        "time": 45.833,
+        "selector": "#s7 > div:nth-of-type(9) > div:nth-of-type(2)",
+        "message": "Positioned element renders far outside its offset parent — its coordinates were likely computed in a different frame (canvas/viewport pixels).",
+        "rect": {
+          "left": 214.38,
+          "top": 1420.82,
+          "right": 469.62,
+          "bottom": 1451.05,
+          "width": 255.24,
+          "height": 30.23
+        },
+        "containerSelector": "#s7 > div:nth-of-type(9)",
+        "text": "BetterIQ",
+        "fixHint": "Compute left/top in the offset parent's frame (subtract its rect), or mark intentional placement with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 253.65,
+          "top": 1232.33,
+          "right": 430.35,
+          "bottom": 1428.67,
+          "width": 176.71,
+          "height": 196.34
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 214.38,
+          "y": 1420.82,
+          "width": 255.24,
+          "height": 30.23
+        },
+        "firstSeen": 45.833,
+        "lastSeen": 45.833,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          45.833
+        ]
+      }
+    ],
+    "duration": 55,
+    "samples": [
+      3.056,
+      9.167,
+      15.278,
+      21.389,
+      27.5,
+      33.611,
+      39.722,
+      45.833,
+      51.944
+    ],
+    "transitionSamples": [],
+    "transitionSamplesDropped": 0,
+    "tolerance": 2,
+    "totalIssueCount": 24,
+    "truncated": false
+  },
+  "motion": {
+    "ok": true,
+    "errorCount": 0,
+    "warningCount": 0,
+    "infoCount": 0,
+    "findings": [],
+    "enabled": false,
+    "samples": 0
+  },
+  "contrast": {
+    "ok": true,
+    "errorCount": 0,
+    "warningCount": 0,
+    "infoCount": 0,
+    "findings": [],
+    "enabled": true,
+    "samples": [
+      3.056,
+      15.278,
+      27.5,
+      39.722,
+      51.944
+    ],
+    "checked": 104,
+    "passed": 104
+  },
+  "craft": {
+    "ok": true,
+    "errorCount": 0,
+    "warningCount": 19,
+    "infoCount": 0,
+    "findings": [
+      {
+        "code": "line_unread",
+        "severity": "warning",
+        "message": "\"8,115\" (2 words) is on screen 0.10 s (±0.01 s), under its 0.40 s floor: hold it about 0.5 s + 0.3 s a word (1.10 s here) before it leaves or changes; see references/motion.md.",
+        "text": "8,115",
+        "selector": "div.fc > div:nth-of-type(10)",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 215.12,
+          "y": 876.9,
+          "width": 49.44,
+          "height": 30.289999999999964
+        },
+        "time": 0.469,
+        "words": 2,
+        "seconds": 0.102,
+        "floorSeconds": 0.4,
+        "measured": [
+          {
+            "time": 0.125,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 0.25,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 0.375,
+            "opacity": 0.09,
+            "heightPx": 31
+          },
+          {
+            "time": 0.5,
+            "opacity": 0.62,
+            "heightPx": 30
+          },
+          {
+            "time": 0.625,
+            "opacity": 0.83,
+            "heightPx": 30
+          },
+          {
+            "time": 0.75,
+            "opacity": 0.96,
+            "heightPx": 30
+          },
+          {
+            "time": 0.875,
+            "opacity": 1,
+            "heightPx": 29
+          }
+        ]
+      },
+      {
+        "code": "line_unread",
+        "severity": "warning",
+        "message": "\"7,671\" (2 words) is on screen 0.13 s (±0.01 s), under its 0.40 s floor: hold it about 0.5 s + 0.3 s a word (1.10 s here) before it leaves or changes; see references/motion.md.",
+        "text": "7,671",
+        "selector": "div.fc > div:nth-of-type(13)",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 221.55,
+          "y": 922.53,
+          "width": 50.46999999999997,
+          "height": 30.460000000000036
+        },
+        "time": 0.469,
+        "words": 2,
+        "seconds": 0.133,
+        "floorSeconds": 0.4,
+        "measured": [
+          {
+            "time": 0.125,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 0.25,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 0.375,
+            "opacity": 0.09,
+            "heightPx": 31
+          },
+          {
+            "time": 0.5,
+            "opacity": 0.62,
+            "heightPx": 30
+          },
+          {
+            "time": 0.625,
+            "opacity": 0.83,
+            "heightPx": 30
+          },
+          {
+            "time": 0.75,
+            "opacity": 0.96,
+            "heightPx": 30
+          },
+          {
+            "time": 0.875,
+            "opacity": 1,
+            "heightPx": 30
+          }
+        ]
+      },
+      {
+        "code": "text_below_floor",
+        "severity": "warning",
+        "message": "Type floor is 28 px (2.6% of the 1080 px short side, what a phone can read) and 58 text elements stay under it for 0.5 s or more, the smallest \"LEGENDARY\" at 14 px: set reading text to at least 28 px, or put data-layout-ignore on text that is texture rather than reading; see references/look.md.",
+        "text": "LEGENDARY",
+        "selector": "#s1 > div:nth-of-type(3) > div:nth-of-type(4)",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 382.33,
+          "y": 732.96,
+          "width": 89.08,
+          "height": 24.03
+        },
+        "time": 0.625,
+        "times": [
+          0.5,
+          0.5,
+          0.5,
+          0.5,
+          0.5,
+          0.5,
+          0.5,
+          0.5,
+          0.5,
+          0.5,
+          0.5,
+          0.625,
+          0.625,
+          0.75,
+          0.75,
+          0.75,
+          0.875,
+          0.875,
+          0.875,
+          0.875,
+          9,
+          9,
+          9,
+          9,
+          14.25,
+          14.375,
+          14.375,
+          25.625,
+          32.375,
+          32.375,
+          32.375,
+          32.375,
+          34.375,
+          34.5,
+          34.75,
+          39.375,
+          39.375,
+          39.375,
+          39.5,
+          39.5,
+          39.625,
+          39.625,
+          39.625,
+          39.875,
+          40.375,
+          40.875,
+          48,
+          48,
+          48,
+          48,
+          48,
+          48,
+          48,
+          48,
+          48,
+          48,
+          48,
+          48
+        ],
+        "fontPx": 14.35,
+        "floorPx": 28,
+        "seconds": 6.625,
+        "elements": [
+          {
+            "selector": "#s1 > div:nth-of-type(3) > div:nth-of-type(4)",
+            "text": "LEGENDARY",
+            "fontPx": 14.35,
+            "time": 0.625,
+            "seconds": 6.625
+          },
+          {
+            "selector": "#s1 > div:nth-of-type(3) > div:nth-of-type(3)",
+            "text": "149 games · 1,500 runs · 192 wkts",
+            "fontPx": 15.14,
+            "time": 0.625,
+            "seconds": 6.625
+          },
+          {
+            "selector": "#s1 > div:nth-of-type(5) > div:nth-of-type(3)",
+            "text": "Games",
+            "fontPx": 16.13,
+            "time": 0.875,
+            "seconds": 6.375
+          },
+          {
+            "selector": "#s1 > div:nth-of-type(5) > div:nth-of-type(5)",
+            "text": "Players",
+            "fontPx": 16.13,
+            "time": 0.875,
+            "seconds": 6.375
+          },
+          {
+            "selector": "#s1 > div:nth-of-type(5) > div:nth-of-type(7)",
+            "text": "Seasons",
+            "fontPx": 16.13,
+            "time": 0.875,
+            "seconds": 6.375
+          },
+          {
+            "selector": "#s1 > div:nth-of-type(2) > div:nth-of-type(1)",
+            "text": "Most runs",
+            "fontPx": 17.54,
+            "time": 0.5,
+            "seconds": 6.75
+          },
+          {
+            "selector": "#s1 > div:nth-of-type(4) > div:nth-of-type(1)",
+            "text": "Highest score",
+            "fontPx": 17.65,
+            "time": 0.75,
+            "seconds": 6.5
+          },
+          {
+            "selector": "#s1 > div:nth-of-type(5) > div:nth-of-type(1)",
+            "text": "Applecross",
+            "fontPx": 17.74,
+            "time": 0.875,
+            "seconds": 6.375
+          },
+          {
+            "selector": "#s1 > div:nth-of-type(2) > div:nth-of-type(2)",
+            "text": "R. Wilton",
+            "fontPx": 19.13,
+            "time": 0.5,
+            "seconds": 6.75
+          },
+          {
+            "selector": "#s1 > div:nth-of-type(2) > div:nth-of-type(4)",
+            "text": "9,261",
+            "fontPx": 19.13,
+            "time": 0.5,
+            "seconds": 6.75
+          },
+          {
+            "selector": "#s1 > div:nth-of-type(2) > div:nth-of-type(5)",
+            "text": "A. Castley",
+            "fontPx": 19.13,
+            "time": 0.5,
+            "seconds": 6.75
+          },
+          {
+            "selector": "#s1 > div:nth-of-type(2) > div:nth-of-type(7)",
+            "text": "9,027",
+            "fontPx": 19.13,
+            "time": 0.5,
+            "seconds": 6.75
+          },
+          {
+            "selector": "div.fc > div:nth-of-type(8)",
+            "text": "D. Stirling",
+            "fontPx": 19.13,
+            "time": 0.5,
+            "seconds": 6.75
+          },
+          {
+            "selector": "div.fc > div:nth-of-type(10)",
+            "text": "8,115",
+            "fontPx": 19.13,
+            "time": 0.5,
+            "seconds": 6.75
+          },
+          {
+            "selector": "div.fc > div:nth-of-type(11)",
+            "text": "R. Pulley",
+            "fontPx": 19.13,
+            "time": 0.5,
+            "seconds": 6.75
+          },
+          {
+            "selector": "div.fc > div:nth-of-type(13)",
+            "text": "7,671",
+            "fontPx": 19.13,
+            "time": 0.5,
+            "seconds": 6.75
+          },
+          {
+            "selector": "div.fc > div:nth-of-type(14)",
+            "text": "M. Campbell",
+            "fontPx": 19.13,
+            "time": 0.5,
+            "seconds": 6.75
+          },
+          {
+            "selector": "div.fc > div:nth-of-type(16)",
+            "text": "7,450",
+            "fontPx": 19.13,
+            "time": 0.5,
+            "seconds": 6.75
+          },
+          {
+            "selector": "#s1 > div:nth-of-type(4) > div:nth-of-type(3)",
+            "text": "A. Batter · this week",
+            "fontPx": 19.25,
+            "time": 0.75,
+            "seconds": 6.5
+          },
+          {
+            "selector": "#s1 > div:nth-of-type(4) > div:nth-of-type(4)",
+            "text": "NEW RECORD",
+            "fontPx": 20.86,
+            "time": 0.75,
+            "seconds": 6.5
+          },
+          {
+            "selector": "#s7 > div:nth-of-type(2) > div:nth-of-type(2)",
+            "text": "Better",
+            "fontPx": 21.84,
+            "time": 48,
+            "seconds": 1.375
+          },
+          {
+            "selector": "#s7 > div:nth-of-type(2) > div:nth-of-type(2) > span:nth-of-type(1)",
+            "text": "Stats",
+            "fontPx": 21.84,
+            "time": 48,
+            "seconds": 1.375
+          },
+          {
+            "selector": "#s7 > div:nth-of-type(3) > div:nth-of-type(2)",
+            "text": "Better",
+            "fontPx": 21.84,
+            "time": 48,
+            "seconds": 1.375
+          },
+          {
+            "selector": "#s7 > div:nth-of-type(3) > div:nth-of-type(2) > span:nth-of-type(1)",
+            "text": "Select",
+            "fontPx": 21.84,
+            "time": 48,
+            "seconds": 1.375
+          },
+          {
+            "selector": "#s7 > div:nth-of-type(5) > div:nth-of-type(2)",
+            "text": "Better",
+            "fontPx": 21.84,
+            "time": 48,
+            "seconds": 1.375
+          },
+          {
+            "selector": "#s7 > div:nth-of-type(5) > div:nth-of-type(2) > span:nth-of-type(1)",
+            "text": "Socials",
+            "fontPx": 21.84,
+            "time": 48,
+            "seconds": 1.375
+          },
+          {
+            "selector": "#s7 > div:nth-of-type(7) > div:nth-of-type(2)",
+            "text": "Better",
+            "fontPx": 21.84,
+            "time": 48,
+            "seconds": 1.375
+          },
+          {
+            "selector": "#s7 > div:nth-of-type(7) > div:nth-of-type(2) > span:nth-of-type(1)",
+            "text": "Admin",
+            "fontPx": 21.84,
+            "time": 48,
+            "seconds": 1.375
+          },
+          {
+            "selector": "#s7 > div:nth-of-type(9) > div:nth-of-type(2)",
+            "text": "Better",
+            "fontPx": 21.84,
+            "time": 48,
+            "seconds": 1.375
+          },
+          {
+            "selector": "#s7 > div:nth-of-type(9) > div:nth-of-type(2) > span:nth-of-type(1)",
+            "text": "IQ",
+            "fontPx": 21.84,
+            "time": 48,
+            "seconds": 1.375
+          },
+          {
+            "selector": "#s7 > div:nth-of-type(11) > div:nth-of-type(2)",
+            "text": "Better",
+            "fontPx": 21.84,
+            "time": 48,
+            "seconds": 1.375
+          },
+          {
+            "selector": "#s7 > div:nth-of-type(11) > div:nth-of-type(2) > span:nth-of-type(1)",
+            "text": "Fantasy",
+            "fontPx": 21.84,
+            "time": 48,
+            "seconds": 1.375
+          },
+          {
+            "selector": "#s2 > div:nth-of-type(4) > div:nth-of-type(3)",
+            "text": "Your name",
+            "fontPx": 24,
+            "time": 9,
+            "seconds": 3.5
+          },
+          {
+            "selector": "#s2 > div:nth-of-type(4) > div:nth-of-type(5)",
+            "text": "Email",
+            "fontPx": 24,
+            "time": 9,
+            "seconds": 3.5
+          },
+          {
+            "selector": "#s2 > div:nth-of-type(4) > div:nth-of-type(7)",
+            "text": "4-digit code from your email",
+            "fontPx": 24,
+            "time": 9,
+            "seconds": 3.5
+          },
+          {
+            "selector": "#s5 > div:nth-of-type(19) > div:nth-of-type(4) > div:nth-of-type(1)",
+            "text": "Games",
+            "fontPx": 24,
+            "time": 32.375,
+            "seconds": 4.75
+          },
+          {
+            "selector": "#s5 > div:nth-of-type(19) > div:nth-of-type(5) > div:nth-of-type(1)",
+            "text": "Runs",
+            "fontPx": 24,
+            "time": 32.375,
+            "seconds": 4.75
+          },
+          {
+            "selector": "#s5 > div:nth-of-type(19) > div:nth-of-type(6) > div:nth-of-type(1)",
+            "text": "Wickets",
+            "fontPx": 24,
+            "time": 32.375,
+            "seconds": 4.75
+          },
+          {
+            "selector": "#s5 > div:nth-of-type(19) > div:nth-of-type(7)",
+            "text": "Career by season",
+            "fontPx": 24,
+            "time": 32.375,
+            "seconds": 4.75
+          },
+          {
+            "selector": "#s5 > div:nth-of-type(19) > div:nth-of-type(3) > div:nth-of-type(2)",
+            "text": "★ 1,000 runs",
+            "fontPx": 25.74,
+            "time": 34.5,
+            "seconds": 2.625
+          },
+          {
+            "selector": "#s5 > div:nth-of-type(19) > div:nth-of-type(3) > div:nth-of-type(3)",
+            "text": "★ 100 wickets",
+            "fontPx": 25.88,
+            "time": 34.75,
+            "seconds": 2.375
+          },
+          {
+            "selector": "#s5 > div:nth-of-type(19) > div:nth-of-type(3) > div:nth-of-type(1)",
+            "text": "★ 100 games",
+            "fontPx": 25.95,
+            "time": 34.375,
+            "seconds": 2.75
+          },
+          {
+            "selector": "#s2 > div:nth-of-type(4) > div:nth-of-type(2)",
+            "text": "Gisborne Cricket Club",
+            "fontPx": 26,
+            "time": 9,
+            "seconds": 3.5
+          },
+          {
+            "selector": "#s3 > div:nth-of-type(7) > div:nth-of-type(1)",
+            "text": "Games",
+            "fontPx": 26,
+            "time": 14.25,
+            "seconds": 5.875
+          },
+          {
+            "selector": "#s3 > div:nth-of-type(8) > div:nth-of-type(1)",
+            "text": "Players",
+            "fontPx": 26,
+            "time": 14.375,
+            "seconds": 5.75
+          },
+          {
+            "selector": "#s3 > div:nth-of-type(9) > div:nth-of-type(1)",
+            "text": "Seasons",
+            "fontPx": 26,
+            "time": 14.375,
+            "seconds": 5.75
+          },
+          {
+            "selector": "#s4 > div:nth-of-type(12) > div:nth-of-type(1)",
+            "text": "Bannockburn · Scorecard",
+            "fontPx": 26,
+            "time": 25.625,
+            "seconds": 2.25
+          },
+          {
+            "selector": "#s6 > div:nth-of-type(7) > div:nth-of-type(2) > div:nth-of-type(1)",
+            "text": "All seasons",
+            "fontPx": 26,
+            "time": 39.375,
+            "seconds": 0.5
+          },
+          {
+            "selector": "#s6 > div:nth-of-type(7) > div:nth-of-type(3) > div:nth-of-type(1)",
+            "text": "All grades",
+            "fontPx": 26,
+            "time": 39.375,
+            "seconds": 1
+          },
+          {
+            "selector": "#s6 > div:nth-of-type(7) > div:nth-of-type(4) > div:nth-of-type(1)",
+            "text": "All formats",
+            "fontPx": 26,
+            "time": 39.375,
+            "seconds": 1.5
+          },
+          {
+            "selector": "#s6 > div:nth-of-type(7) > div:nth-of-type(5) > div:nth-of-type(1)",
+            "text": "Pos 1–2",
+            "fontPx": 26,
+            "time": 39.5,
+            "seconds": 2.125
+          },
+          {
+            "selector": "#s6 > div:nth-of-type(7) > div:nth-of-type(6) > div:nth-of-type(1)",
+            "text": "Pos 3–4",
+            "fontPx": 26,
+            "time": 39.5,
+            "seconds": 2.125
+          },
+          {
+            "selector": "#s6 > div:nth-of-type(7) > div:nth-of-type(7) > div:nth-of-type(1)",
+            "text": "Pos 5–6",
+            "fontPx": 26,
+            "time": 39.625,
+            "seconds": 2
+          },
+          {
+            "selector": "#s6 > div:nth-of-type(7) > div:nth-of-type(8) > div:nth-of-type(1)",
+            "text": "Pos 7–8",
+            "fontPx": 26,
+            "time": 39.625,
+            "seconds": 2
+          },
+          {
+            "selector": "#s6 > div:nth-of-type(7) > div:nth-of-type(9) > div:nth-of-type(1)",
+            "text": "Pos 9–11",
+            "fontPx": 26,
+            "time": 39.625,
+            "seconds": 2
+          },
+          {
+            "selector": "#s6 > div:nth-of-type(7) > div:nth-of-type(2) > div:nth-of-type(2)",
+            "text": "2025/26",
+            "fontPx": 26,
+            "time": 39.875,
+            "seconds": 1.75
+          },
+          {
+            "selector": "#s6 > div:nth-of-type(7) > div:nth-of-type(3) > div:nth-of-type(2)",
+            "text": "1st XI",
+            "fontPx": 26,
+            "time": 40.375,
+            "seconds": 1.25
+          },
+          {
+            "selector": "#s6 > div:nth-of-type(7) > div:nth-of-type(4) > div:nth-of-type(2)",
+            "text": "T20",
+            "fontPx": 26,
+            "time": 40.875,
+            "seconds": 0.75
+          }
+        ]
+      },
+      {
+        "code": "line_unread",
+        "severity": "warning",
+        "message": "\"Search your club…\" (3 words) is on screen 0.50 s (±0.01 s), under its 1.05 s floor: hold it about 0.5 s + 0.3 s a word (1.40 s here) before it leaves or changes; see references/motion.md.",
+        "text": "Search your club…",
+        "selector": "#s1 > div:nth-of-type(6) > div:nth-of-type(2)",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 218,
+          "y": 1177.95,
+          "width": 454.39,
+          "height": 60
+        },
+        "time": 1.672,
+        "words": 3,
+        "seconds": 0.5,
+        "floorSeconds": 1.05,
+        "measured": [
+          {
+            "time": 1.375,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 1.5,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 1.625,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 1.75,
+            "opacity": 0.8,
+            "heightPx": 60
+          },
+          {
+            "time": 1.875,
+            "opacity": 0.99,
+            "heightPx": 60
+          },
+          {
+            "time": 2,
+            "opacity": 1,
+            "heightPx": 60
+          },
+          {
+            "time": 2.125,
+            "opacity": 0.71,
+            "heightPx": 60
+          },
+          {
+            "time": 2.25,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 2.375,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 2.5,
+            "opacity": null,
+            "heightPx": null
+          }
+        ]
+      },
+      {
+        "code": "line_unread",
+        "severity": "warning",
+        "message": "\"Start at betterat.cricket/trial\" (5 words) is on screen 1.33 s (±0.01 s), under its 1.50 s floor: hold it about 0.5 s + 0.3 s a word (2.00 s here) before it leaves or changes; see references/motion.md.",
+        "text": "Start at betterat.cricket/trial",
+        "selector": "#s1 > div:nth-of-type(7)",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 255.05,
+          "y": 1609.78,
+          "width": 143.32999999999998,
+          "height": 49
+        },
+        "time": 6.273,
+        "words": 5,
+        "seconds": 1.328,
+        "floorSeconds": 1.5,
+        "measured": [
+          {
+            "time": 6,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 6.125,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 6.25,
+            "opacity": 0.29,
+            "heightPx": 49
+          },
+          {
+            "time": 6.375,
+            "opacity": 0.88,
+            "heightPx": 49
+          },
+          {
+            "time": 6.5,
+            "opacity": 1,
+            "heightPx": 49
+          },
+          {
+            "time": 6.625,
+            "opacity": 1,
+            "heightPx": 49
+          },
+          {
+            "time": 6.75,
+            "opacity": 1,
+            "heightPx": 49
+          },
+          {
+            "time": 7.125,
+            "opacity": 1,
+            "heightPx": 49
+          },
+          {
+            "time": 7.25,
+            "opacity": 1,
+            "heightPx": 49
+          },
+          {
+            "time": 7.375,
+            "opacity": 1,
+            "heightPx": 49
+          },
+          {
+            "time": 7.5,
+            "opacity": 1,
+            "heightPx": 49
+          },
+          {
+            "time": 7.625,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 7.75,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 7.875,
+            "opacity": null,
+            "heightPx": null
+          }
+        ]
+      },
+      {
+        "code": "line_unread",
+        "severity": "warning",
+        "message": "\"A FEW DETAILS AND A 4-DIGIT EMAIL CODE.\" (9 words) is on screen 2.23 s (±0.01 s), under its 2.40 s floor: hold it about 0.5 s + 0.3 s a word (3.20 s here) before it leaves or changes; see references/motion.md.",
+        "text": "A FEW DETAILS AND A 4-DIGIT EMAIL CODE.",
+        "selector": "#s2 > div:nth-of-type(2)",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 60,
+          "y": 370.77,
+          "width": 840.67,
+          "height": 147.11
+        },
+        "time": 9.305,
+        "words": 9,
+        "seconds": 2.234,
+        "floorSeconds": 2.4,
+        "measured": [
+          {
+            "time": 9,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 9.125,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 9.25,
+            "opacity": 0.27,
+            "heightPx": 147
+          },
+          {
+            "time": 9.375,
+            "opacity": 0.84,
+            "heightPx": 147
+          },
+          {
+            "time": 9.5,
+            "opacity": 0.99,
+            "heightPx": 147
+          },
+          {
+            "time": 9.625,
+            "opacity": 1,
+            "heightPx": 147
+          },
+          {
+            "time": 9.75,
+            "opacity": 1,
+            "heightPx": 147
+          },
+          {
+            "time": 11.125,
+            "opacity": 1,
+            "heightPx": 147
+          },
+          {
+            "time": 11.25,
+            "opacity": 1,
+            "heightPx": 147
+          },
+          {
+            "time": 11.375,
+            "opacity": 0.99,
+            "heightPx": 147
+          },
+          {
+            "time": 11.5,
+            "opacity": 0.59,
+            "heightPx": 147
+          },
+          {
+            "time": 11.625,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 11.75,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 11.875,
+            "opacity": null,
+            "heightPx": null
+          }
+        ]
+      },
+      {
+        "code": "line_unread",
+        "severity": "warning",
+        "message": "\"✓ You’re in. No card needed.\" (5 words) is on screen 1.34 s (±0.01 s), under its 1.50 s floor: hold it about 0.5 s + 0.3 s a word (2.00 s here) before it leaves or changes; see references/motion.md.",
+        "text": "✓ You’re in. No card needed.",
+        "selector": "#s2 > div:nth-of-type(7)",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 264.24,
+          "y": 984.32,
+          "width": 551.52,
+          "height": 48.360000000000014
+        },
+        "time": 12.57,
+        "words": 5,
+        "seconds": 1.336,
+        "floorSeconds": 1.5,
+        "measured": [
+          {
+            "time": 12.25,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 12.375,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 12.5,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 12.625,
+            "opacity": 0.74,
+            "heightPx": 48
+          },
+          {
+            "time": 12.75,
+            "opacity": 0.99,
+            "heightPx": 49
+          },
+          {
+            "time": 12.875,
+            "opacity": 1,
+            "heightPx": 49
+          },
+          {
+            "time": 13,
+            "opacity": 1,
+            "heightPx": 51
+          },
+          {
+            "time": 13.5,
+            "opacity": 1,
+            "heightPx": 49
+          },
+          {
+            "time": 13.625,
+            "opacity": 1,
+            "heightPx": 49
+          },
+          {
+            "time": 13.75,
+            "opacity": 1,
+            "heightPx": 49
+          },
+          {
+            "time": 13.875,
+            "opacity": 0.79,
+            "heightPx": 49
+          },
+          {
+            "time": 14,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 14.125,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 14.25,
+            "opacity": null,
+            "heightPx": null
+          }
+        ]
+      },
+      {
+        "code": "line_unread",
+        "severity": "warning",
+        "message": "\"Runs by batting position\" (4 words) is on screen 0.70 s (±0.01 s), under its 1.27 s floor: hold it about 0.5 s + 0.3 s a word (1.70 s here) before it leaves or changes; see references/motion.md.",
+        "text": "Runs by batting position",
+        "selector": "#sel0 > span:nth-of-type(1)",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 145,
+          "y": 808.9,
+          "width": 424.89,
+          "height": 44
+        },
+        "time": 37.367,
+        "words": 4,
+        "seconds": 0.703,
+        "floorSeconds": 1.275,
+        "measured": [
+          {
+            "time": 37,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 37.125,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 37.25,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 37.375,
+            "opacity": 0.56,
+            "heightPx": 44
+          },
+          {
+            "time": 37.5,
+            "opacity": 0.98,
+            "heightPx": 44
+          },
+          {
+            "time": 37.625,
+            "opacity": 1,
+            "heightPx": 44
+          },
+          {
+            "time": 37.75,
+            "opacity": 1,
+            "heightPx": 44
+          },
+          {
+            "time": 37.875,
+            "opacity": 1,
+            "heightPx": 44
+          },
+          {
+            "time": 38,
+            "opacity": 1,
+            "heightPx": 44
+          },
+          {
+            "time": 38.125,
+            "opacity": 1,
+            "heightPx": 8
+          },
+          {
+            "time": 38.25,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 38.375,
+            "opacity": null,
+            "heightPx": null
+          }
+        ]
+      },
+      {
+        "code": "line_unread",
+        "severity": "warning",
+        "message": "\"Bowling by over\" (3 words) is on screen 0.83 s (±0.01 s), under its 1.05 s floor: hold it about 0.5 s + 0.3 s a word (1.40 s here) before it leaves or changes; see references/motion.md.",
+        "text": "Bowling by over",
+        "selector": "#s6 > div:nth-of-type(5) > div:nth-of-type(1) > div:nth-of-type(2) > span:nth-of-type(1)",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 145,
+          "y": 911.59,
+          "width": 279.92,
+          "height": 44
+        },
+        "time": 37.406,
+        "words": 3,
+        "seconds": 0.828,
+        "floorSeconds": 1.05,
+        "measured": [
+          {
+            "time": 37.125,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 37.25,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 37.375,
+            "opacity": 0.36,
+            "heightPx": 44
+          },
+          {
+            "time": 37.5,
+            "opacity": 0.96,
+            "heightPx": 44
+          },
+          {
+            "time": 37.625,
+            "opacity": 1,
+            "heightPx": 44
+          },
+          {
+            "time": 37.75,
+            "opacity": 1,
+            "heightPx": 44
+          },
+          {
+            "time": 37.875,
+            "opacity": 1,
+            "heightPx": 44
+          },
+          {
+            "time": 38,
+            "opacity": 1,
+            "heightPx": 44
+          },
+          {
+            "time": 38.125,
+            "opacity": 1,
+            "heightPx": 44
+          },
+          {
+            "time": 38.25,
+            "opacity": 1,
+            "heightPx": 17
+          },
+          {
+            "time": 38.375,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 38.5,
+            "opacity": null,
+            "heightPx": null
+          }
+        ]
+      },
+      {
+        "code": "line_unread",
+        "severity": "warning",
+        "message": "\"Partnerships by wicket\" (3 words) is on screen 1.00 s (±0.01 s), under its 1.05 s floor: hold it about 0.5 s + 0.3 s a word (1.40 s here) before it leaves or changes; see references/motion.md.",
+        "text": "Partnerships by wicket",
+        "selector": "#s6 > div:nth-of-type(5) > div:nth-of-type(1) > div:nth-of-type(3) > span:nth-of-type(1)",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 145,
+          "y": 1022.23,
+          "width": 403.03,
+          "height": 44
+        },
+        "time": 37.438,
+        "words": 3,
+        "seconds": 1,
+        "floorSeconds": 1.05,
+        "measured": [
+          {
+            "time": 37.125,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 37.25,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 37.375,
+            "opacity": 0.08,
+            "heightPx": 44
+          },
+          {
+            "time": 37.5,
+            "opacity": 0.92,
+            "heightPx": 44
+          },
+          {
+            "time": 37.625,
+            "opacity": 1,
+            "heightPx": 44
+          },
+          {
+            "time": 37.75,
+            "opacity": 1,
+            "heightPx": 44
+          },
+          {
+            "time": 37.875,
+            "opacity": 1,
+            "heightPx": 44
+          },
+          {
+            "time": 38,
+            "opacity": 1,
+            "heightPx": 44
+          },
+          {
+            "time": 38.125,
+            "opacity": 1,
+            "heightPx": 44
+          },
+          {
+            "time": 38.25,
+            "opacity": 1,
+            "heightPx": 44
+          },
+          {
+            "time": 38.375,
+            "opacity": 1,
+            "heightPx": 44
+          },
+          {
+            "time": 38.5,
+            "opacity": 1,
+            "heightPx": 15
+          },
+          {
+            "time": 38.625,
+            "opacity": 1,
+            "heightPx": 6
+          },
+          {
+            "time": 38.75,
+            "opacity": 1,
+            "heightPx": 6
+          }
+        ]
+      },
+      {
+        "code": "line_unread",
+        "severity": "warning",
+        "message": "\"Results by opposition\" (3 words) is on screen 0.77 s (±0.01 s), under its 1.05 s floor: hold it about 0.5 s + 0.3 s a word (1.40 s here) before it leaves or changes; see references/motion.md.",
+        "text": "Results by opposition",
+        "selector": "#s6 > div:nth-of-type(5) > div:nth-of-type(1) > div:nth-of-type(7) > span:nth-of-type(1)",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 145,
+          "y": 1282.96,
+          "width": 378.25,
+          "height": 44
+        },
+        "time": 38.172,
+        "words": 3,
+        "seconds": 0.766,
+        "floorSeconds": 1.05,
+        "measured": [
+          {
+            "time": 37.875,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 38,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 38.125,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 38.25,
+            "opacity": 1,
+            "heightPx": 44
+          },
+          {
+            "time": 38.375,
+            "opacity": 1,
+            "heightPx": 44
+          },
+          {
+            "time": 38.5,
+            "opacity": 1,
+            "heightPx": 44
+          },
+          {
+            "time": 38.625,
+            "opacity": 1,
+            "heightPx": 44
+          },
+          {
+            "time": 38.75,
+            "opacity": 1,
+            "heightPx": 44
+          },
+          {
+            "time": 38.875,
+            "opacity": 1,
+            "heightPx": 44
+          },
+          {
+            "time": 39,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 39.125,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 39.25,
+            "opacity": null,
+            "heightPx": null
+          }
+        ]
+      },
+      {
+        "code": "line_unread",
+        "severity": "warning",
+        "message": "\"Home v away\" (3 words) is on screen 0.56 s (±0.01 s), under its 1.05 s floor: hold it about 0.5 s + 0.3 s a word (1.40 s here) before it leaves or changes; see references/motion.md.",
+        "text": "Home v away",
+        "selector": "#s6 > div:nth-of-type(5) > div:nth-of-type(1) > div:nth-of-type(8) > span:nth-of-type(1)",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 145,
+          "y": 1315.44,
+          "width": 235.3,
+          "height": 44
+        },
+        "time": 38.305,
+        "words": 3,
+        "seconds": 0.563,
+        "floorSeconds": 1.05,
+        "measured": [
+          {
+            "time": 38,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 38.125,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 38.25,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 38.375,
+            "opacity": 1,
+            "heightPx": 44
+          },
+          {
+            "time": 38.5,
+            "opacity": 1,
+            "heightPx": 44
+          },
+          {
+            "time": 38.625,
+            "opacity": 1,
+            "heightPx": 44
+          },
+          {
+            "time": 38.75,
+            "opacity": 1,
+            "heightPx": 44
+          },
+          {
+            "time": 38.875,
+            "opacity": 1,
+            "heightPx": 22
+          },
+          {
+            "time": 39,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 39.125,
+            "opacity": null,
+            "heightPx": null
+          }
+        ]
+      },
+      {
+        "code": "line_unread",
+        "severity": "warning",
+        "message": "\"ONCE STATS IS LOADED, ADD WHAT YOU NEED.\" (8 words) is on screen 0.70 s (±0.01 s), under its 2.17 s floor: hold it about 0.5 s + 0.3 s a word (2.90 s here) before it leaves or changes; see references/motion.md.",
+        "text": "ONCE STATS IS LOADED, ADD WHAT YOU NEED.",
+        "selector": "#s7 > div:nth-of-type(1)",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 60,
+          "y": 371.74,
+          "width": 809.47,
+          "height": 147.11
+        },
+        "time": 41.539,
+        "words": 8,
+        "seconds": 0.695,
+        "floorSeconds": 2.175,
+        "measured": [
+          {
+            "time": 41.25,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 41.375,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 41.5,
+            "opacity": 0.37,
+            "heightPx": 147
+          },
+          {
+            "time": 41.625,
+            "opacity": 0.8,
+            "heightPx": 147
+          },
+          {
+            "time": 41.75,
+            "opacity": 0.98,
+            "heightPx": 147
+          },
+          {
+            "time": 41.875,
+            "opacity": 1,
+            "heightPx": 147
+          },
+          {
+            "time": 42,
+            "opacity": 1,
+            "heightPx": 147
+          },
+          {
+            "time": 42.125,
+            "opacity": 0.95,
+            "heightPx": 147
+          },
+          {
+            "time": 42.25,
+            "opacity": 0.41,
+            "heightPx": 147
+          },
+          {
+            "time": 42.375,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 42.5,
+            "opacity": null,
+            "heightPx": null
+          }
+        ]
+      },
+      {
+        "code": "line_unread",
+        "severity": "warning",
+        "message": "\"AVAILABILITY AND TEAM SELECTION.\" (4 words) is on screen 1.00 s (±0.01 s), under its 1.27 s floor: hold it about 0.5 s + 0.3 s a word (1.70 s here) before it leaves or changes; see references/motion.md.",
+        "text": "AVAILABILITY AND TEAM SELECTION.",
+        "selector": "#s7 > div:nth-of-type(4)",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 60,
+          "y": 373.96,
+          "width": 833.41,
+          "height": 147.10999999999996
+        },
+        "time": 42.57,
+        "words": 4,
+        "seconds": 1,
+        "floorSeconds": 1.275,
+        "measured": [
+          {
+            "time": 42.25,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 42.375,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 42.5,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 42.625,
+            "opacity": 0.68,
+            "heightPx": 147
+          },
+          {
+            "time": 42.75,
+            "opacity": 0.97,
+            "heightPx": 147
+          },
+          {
+            "time": 42.875,
+            "opacity": 1,
+            "heightPx": 147
+          },
+          {
+            "time": 43,
+            "opacity": 1,
+            "heightPx": 147
+          },
+          {
+            "time": 43.125,
+            "opacity": 1,
+            "heightPx": 147
+          },
+          {
+            "time": 43.25,
+            "opacity": 1,
+            "heightPx": 147
+          },
+          {
+            "time": 43.375,
+            "opacity": 1,
+            "heightPx": 147
+          },
+          {
+            "time": 43.5,
+            "opacity": 0.71,
+            "heightPx": 147
+          },
+          {
+            "time": 43.625,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 43.75,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 43.875,
+            "opacity": null,
+            "heightPx": null
+          }
+        ]
+      },
+      {
+        "code": "line_unread",
+        "severity": "warning",
+        "message": "\"POSTS THAT FILL FROM YOUR MATCH DATA.\" (7 words) is on screen 1.00 s (±0.01 s), under its 1.95 s floor: hold it about 0.5 s + 0.3 s a word (2.60 s here) before it leaves or changes; see references/motion.md.",
+        "text": "POSTS THAT FILL FROM YOUR MATCH DATA.",
+        "selector": "#s7 > div:nth-of-type(6)",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 60,
+          "y": 371.35,
+          "width": 785.34,
+          "height": 147.11
+        },
+        "time": 43.672,
+        "words": 7,
+        "seconds": 1,
+        "floorSeconds": 1.95,
+        "measured": [
+          {
+            "time": 43.375,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 43.5,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 43.625,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 43.75,
+            "opacity": 0.8,
+            "heightPx": 147
+          },
+          {
+            "time": 43.875,
+            "opacity": 0.99,
+            "heightPx": 147
+          },
+          {
+            "time": 44,
+            "opacity": 1,
+            "heightPx": 147
+          },
+          {
+            "time": 44.125,
+            "opacity": 1,
+            "heightPx": 147
+          },
+          {
+            "time": 44.25,
+            "opacity": 1,
+            "heightPx": 147
+          },
+          {
+            "time": 44.375,
+            "opacity": 1,
+            "heightPx": 147
+          },
+          {
+            "time": 44.5,
+            "opacity": 1,
+            "heightPx": 147
+          },
+          {
+            "time": 44.625,
+            "opacity": 0.71,
+            "heightPx": 147
+          },
+          {
+            "time": 44.75,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 44.875,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 45,
+            "opacity": null,
+            "heightPx": null
+          }
+        ]
+      },
+      {
+        "code": "line_unread",
+        "severity": "warning",
+        "message": "\"FEES, EMAIL, ROSTERS AND MEETINGS.\" (5 words) is on screen 1.00 s (±0.01 s), under its 1.50 s floor: hold it about 0.5 s + 0.3 s a word (2.00 s here) before it leaves or changes; see references/motion.md.",
+        "text": "FEES, EMAIL, ROSTERS AND MEETINGS.",
+        "selector": "#s7 > div:nth-of-type(8)",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 60,
+          "y": 369.55,
+          "width": 924.64,
+          "height": 147.11000000000007
+        },
+        "time": 44.773,
+        "words": 5,
+        "seconds": 1,
+        "floorSeconds": 1.5,
+        "measured": [
+          {
+            "time": 44.5,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 44.625,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 44.75,
+            "opacity": 0.29,
+            "heightPx": 147
+          },
+          {
+            "time": 44.875,
+            "opacity": 0.88,
+            "heightPx": 147
+          },
+          {
+            "time": 45,
+            "opacity": 1,
+            "heightPx": 147
+          },
+          {
+            "time": 45.125,
+            "opacity": 1,
+            "heightPx": 147
+          },
+          {
+            "time": 45.25,
+            "opacity": 1,
+            "heightPx": 147
+          },
+          {
+            "time": 45.375,
+            "opacity": 1,
+            "heightPx": 147
+          },
+          {
+            "time": 45.5,
+            "opacity": 1,
+            "heightPx": 147
+          },
+          {
+            "time": 45.625,
+            "opacity": 1,
+            "heightPx": 147
+          },
+          {
+            "time": 45.75,
+            "opacity": 0.5,
+            "heightPx": 147
+          },
+          {
+            "time": 45.875,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 46,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 46.125,
+            "opacity": null,
+            "heightPx": null
+          }
+        ]
+      },
+      {
+        "code": "line_unread",
+        "severity": "warning",
+        "message": "\"KNOW THE OPPOSITION.\" (3 words) is on screen 1.00 s (±0.01 s), under its 1.05 s floor: hold it about 0.5 s + 0.3 s a word (1.40 s here) before it leaves or changes; see references/motion.md.",
+        "text": "KNOW THE OPPOSITION.",
+        "selector": "#s7 > div:nth-of-type(10)",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 60,
+          "y": 377.61,
+          "width": 832.45,
+          "height": 78
+        },
+        "time": 45.867,
+        "words": 3,
+        "seconds": 1,
+        "floorSeconds": 1.05,
+        "measured": [
+          {
+            "time": 45.5,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 45.625,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 45.75,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 45.875,
+            "opacity": 0.52,
+            "heightPx": 78
+          },
+          {
+            "time": 46,
+            "opacity": 0.94,
+            "heightPx": 78
+          },
+          {
+            "time": 46.125,
+            "opacity": 1,
+            "heightPx": 78
+          },
+          {
+            "time": 46.25,
+            "opacity": 1,
+            "heightPx": 78
+          },
+          {
+            "time": 46.375,
+            "opacity": 1,
+            "heightPx": 78
+          },
+          {
+            "time": 46.5,
+            "opacity": 1,
+            "heightPx": 78
+          },
+          {
+            "time": 46.625,
+            "opacity": 1,
+            "heightPx": 78
+          },
+          {
+            "time": 46.75,
+            "opacity": 0.97,
+            "heightPx": 78
+          },
+          {
+            "time": 46.875,
+            "opacity": 0.26,
+            "heightPx": 78
+          },
+          {
+            "time": 47,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 47.125,
+            "opacity": null,
+            "heightPx": null
+          }
+        ]
+      },
+      {
+        "code": "line_unread",
+        "severity": "warning",
+        "message": "\"A CLUB FANTASY COMP.\" (4 words) is on screen 1.00 s (±0.01 s), under its 1.27 s floor: hold it about 0.5 s + 0.3 s a word (1.70 s here) before it leaves or changes; see references/motion.md.",
+        "text": "A CLUB FANTASY COMP.",
+        "selector": "#s7 > div:nth-of-type(12)",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 60,
+          "y": 373.96,
+          "width": 807.81,
+          "height": 78
+        },
+        "time": 46.969,
+        "words": 4,
+        "seconds": 1,
+        "floorSeconds": 1.275,
+        "measured": [
+          {
+            "time": 46.625,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 46.75,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 46.875,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 47,
+            "opacity": 0.68,
+            "heightPx": 78
+          },
+          {
+            "time": 47.125,
+            "opacity": 0.94,
+            "heightPx": 78
+          },
+          {
+            "time": 47.25,
+            "opacity": 1,
+            "heightPx": 78
+          },
+          {
+            "time": 47.375,
+            "opacity": 1,
+            "heightPx": 78
+          },
+          {
+            "time": 47.5,
+            "opacity": 1,
+            "heightPx": 78
+          },
+          {
+            "time": 47.625,
+            "opacity": 1,
+            "heightPx": 78
+          },
+          {
+            "time": 47.75,
+            "opacity": 1,
+            "heightPx": 78
+          },
+          {
+            "time": 47.875,
+            "opacity": 0.87,
+            "heightPx": 78
+          },
+          {
+            "time": 48,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 48.125,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 48.25,
+            "opacity": null,
+            "heightPx": null
+          }
+        ]
+      },
+      {
+        "code": "line_unread",
+        "severity": "warning",
+        "message": "\"ONE CLUB. SIX MODULES.\" (4 words) is on screen 1.03 s (±0.01 s), under its 1.27 s floor: hold it about 0.5 s + 0.3 s a word (1.70 s here) before it leaves or changes; see references/motion.md.",
+        "text": "ONE CLUB. SIX MODULES.",
+        "selector": "#s7 > div:nth-of-type(13)",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 160.83,
+          "y": 1237.85,
+          "width": 749.37,
+          "height": 68
+        },
+        "time": 48.273,
+        "words": 4,
+        "seconds": 1.031,
+        "floorSeconds": 1.275,
+        "measured": [
+          {
+            "time": 48,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 48.125,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 48.25,
+            "opacity": 0.29,
+            "heightPx": 68
+          },
+          {
+            "time": 48.375,
+            "opacity": 0.88,
+            "heightPx": 68
+          },
+          {
+            "time": 48.5,
+            "opacity": 1,
+            "heightPx": 68
+          },
+          {
+            "time": 48.625,
+            "opacity": 1,
+            "heightPx": 68
+          },
+          {
+            "time": 48.75,
+            "opacity": 1,
+            "heightPx": 68
+          },
+          {
+            "time": 48.875,
+            "opacity": 1,
+            "heightPx": 68
+          },
+          {
+            "time": 49,
+            "opacity": 1,
+            "heightPx": 68
+          },
+          {
+            "time": 49.125,
+            "opacity": 1,
+            "heightPx": 68
+          },
+          {
+            "time": 49.25,
+            "opacity": 0.89,
+            "heightPx": 68
+          },
+          {
+            "time": 49.375,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 49.5,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 49.625,
+            "opacity": null,
+            "heightPx": null
+          }
+        ]
+      }
+    ],
+    "enabled": true,
+    "step": 0.125,
+    "samples": 440
+  },
+  "audio": {
+    "ok": true,
+    "errorCount": 0,
+    "warningCount": 0,
+    "infoCount": 0,
+    "findings": []
+  },
+  "hdr": {
+    "autoPromotion": null,
+    "inspection": "available"
+  },
+  "snapshots": {
+    "enabled": false,
+    "files": [],
+    "times": [],
+    "findingFiles": []
+  }
+}
