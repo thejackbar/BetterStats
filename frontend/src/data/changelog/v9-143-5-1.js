@@ -1,8 +1,8 @@
 export default {
-  version: 'v9.143.4.1',
+  version: 'v9.143.5.1',
   date: '2026-11-12',
-  // Above v9.143.4's sortKey (2026-11-19T22:00:00Z). Check origin/main at merge time.
-  sortKey: '2026-11-19T23:00:00Z',
+  // Above v9.143.5's sortKey (2026-11-19T23:00:00Z). Check origin/main at merge time.
+  sortKey: '2026-11-20T00:00:00Z',
   title: 'Meta Ads HQ funnel says whose number each step is',
   items: [
     "Each step of the trial funnel now says where its number comes from: Meta for impressions, link clicks and landing page views, our own count for club selected and signups.",

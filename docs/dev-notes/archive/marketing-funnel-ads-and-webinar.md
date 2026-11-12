@@ -1642,7 +1642,7 @@ Why they were not counted, and why that is right: the trial count is registratio
 - Proof: `verify_meta_ads_club_origin.py` (28; the control on the previous code fails 26 with no crash) seeds the shape of the report (five finished from outside the campaign: our email, direct, a Facebook share, Google, an old campaign's ad) and asserts each channel and an outside count of 5. `verify_meta_ads_kpi_browser.mjs` 107 (control fails 12). Other suites unchanged: campaign scope 20, snapshot fixes 18, tags end to end 32, new campaign 20, streams browser 57, capture 20, and `verify_meta_ads_streams.py` at its old baseline of 71 passed and 2 date-rot failures.
 
 
-## v9.143.4.1: the funnel says whose number each step is
+## v9.143.5.1: the funnel says whose number each step is
 
 Jack: "we have 28 landing page views (Meta-reported) and 3 clubs selected from Meta ads, but the funnel shows 9 clubs selected with Meta counting 10 lead events for the same step. I'm confused? Also `self_serve_trial` is throwing me off." And whether /trial should be split by source (Meta, Google, AI, email) to track better.
 
