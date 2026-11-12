@@ -14,6 +14,44 @@ const SUGGESTIONS = [
   'Who are our most economical bowlers this season?',
 ]
 
+// The backend ends a question at 240s (iq_ask.ANSWER_DEADLINE_SEC) with a readable
+// message. This is a little longer, so that message wins when it can; it only fires
+// when no reply came at all, so the page never sits locked behind a bar.
+const ASK_TIMEOUT_MS = 250000
+
+const SLOW_MESSAGE = 'That question took too long to work out. Try it again, or ask something more specific (one grade, one opponent or one player).'
+// A 502, 503 or 504 on this route is a proxy giving up on a slow answer, not the
+// site being down, so it gets its own words instead of the site-wide "System refreshing".
+const CUT_OFF_MESSAGE = 'The connection dropped before the answer came back, which happens with long questions. Try again, or ask something more specific (one grade, one opponent or one player).'
+
+// What the wait looks like. Time on screen drives the words, so a long question
+// says it is still going instead of freezing at 94%. Module level on purpose:
+// declared inside a render it would remount every tick.
+function AskWaiting() {
+  const [secs, setSecs] = useState(0)
+  useEffect(() => {
+    const started = Date.now()
+    const id = setInterval(() => setSecs(Math.floor((Date.now() - started) / 1000)), 1000)
+    return () => clearInterval(id)
+  }, [])
+  const label = secs < 15
+    ? 'Reading your data…'
+    : secs < 45
+      ? 'Still working. Bigger questions chain a few lookups together.'
+      : 'This one is taking a while. Some run a few minutes, so keep this page open.'
+  return (
+    <div className="max-w-[80%]" role="status" aria-live="polite">
+      <div className="px-3.5 py-3" style={{ borderRadius: 14, background: 'color-mix(in srgb, var(--pb-accent) 8%, transparent)' }}>
+        {/* The bar is a timer, not a measure of progress, so it is paced over a
+            minute and the seconds beside it are the honest part. */}
+        <LoadingBar label={label} expectedMs={45000} />
+        <div className="font-mono tabular-nums text-[11px] text-pb-faint mt-1.5">{secs}s</div>
+      </div>
+    </div>
+  )
+}
+AskWaiting.displayName = 'AskWaiting'
+
 // Render **bold** as actual bold (the model uses markdown bold for its picks).
 // Plain text + <strong> only, so it's injection-safe; newlines are kept by the
 // pre-wrap container around it.
@@ -81,13 +119,17 @@ export default function AskIQ() {
     setQ(''); setBusy(true)
     setThread(t => [...t, { question: display || text, sent: text, loading: true }])
     const finish = (patch) => setThread(t => t.map((x, i) => (i === t.length - 1 ? { question: display || text, sent: text, ...patch } : x)))
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), ASK_TIMEOUT_MS)
     try {
-      const r = await api.iqAsk(text, history)
+      const r = await api.iqAsk(text, history, controller.signal)
       if (r?.available) finish({ answer: r.answer, clarify: r.clarify || null })
       else finish({ error: r?.message || 'Natural-language answers aren\'t available right now.' })
     } catch (e) {
-      finish({ error: e?.message || 'Something went wrong getting an answer.' })
-    } finally { setBusy(false) }
+      if (e?.name === 'AbortError') finish({ error: SLOW_MESSAGE })
+      else if (e?.status === 502 || e?.status === 503 || e?.status === 504) finish({ error: CUT_OFF_MESSAGE })
+      else finish({ error: e?.message || 'Something went wrong getting an answer.' })
+    } finally { clearTimeout(timer); setBusy(false) }
   }
 
   const onKey = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ask() } }
@@ -116,7 +158,7 @@ export default function AskIQ() {
             <div key={i} className="space-y-3">
               <Bubble side="q">{x.question}</Bubble>
               {x.loading
-                ? <div className="max-w-[80%]"><div className="px-3.5 py-3" style={{ borderRadius: 14, background: 'color-mix(in srgb, var(--pb-accent) 8%, transparent)' }}><LoadingBar label="Reading your data…" expectedMs={7000} /></div></div>
+                ? <AskWaiting />
                 : x.error
                   ? <Bubble side="a"><span style={{ color: 'var(--pb-amber)' }}>{x.error}</span></Bubble>
                   : <Bubble side="a">

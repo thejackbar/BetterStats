@@ -15,6 +15,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 import uuid
 
 from sqlalchemy import text
@@ -1130,6 +1131,19 @@ def _answer_from(resp, *, empty_msg: str) -> dict:
     return {"available": True, "answer": text or empty_msg}
 
 
+SLOW_STEP_SEC = 20  # a model call or tool call slower than this is logged at WARNING
+
+
+def _note_step(trace: dict | None, what: str, started: float) -> None:
+    """Log how long one model call or tool call took, and keep the running total
+    on ``trace`` so a question that hits the deadline can say where its time went."""
+    took = time.monotonic() - started
+    if trace is not None:
+        trace.setdefault("steps", []).append((what, round(took, 1)))
+    level = logging.WARNING if took >= SLOW_STEP_SEC else logging.INFO
+    logger.log(level, "iq_ask: %s took %.1fs", what, took)
+
+
 async def _run_tool(org_id: str, name: str, args: dict) -> dict:
     fn = _DISPATCH.get(name)
     if not fn:
@@ -1156,13 +1170,23 @@ async def answer(
     on a slow reply and the page then reads "System refreshing", which says the
     site is down when it was one long question; ending it here returns a message
     the user can act on while the connection is still open."""
+    trace: dict = {}
+    started = time.monotonic()
     try:
-        return await asyncio.wait_for(
-            _answer(session, org_id, club_name, question, history=history),
+        result = await asyncio.wait_for(
+            _answer(session, org_id, club_name, question, history=history, trace=trace),
             timeout=ANSWER_DEADLINE_SEC,
         )
+        logger.info("iq_ask: answered in %.1fs (%d steps) for org %s",
+                    time.monotonic() - started, len(trace.get("steps", [])), org_id)
+        return result
     except asyncio.TimeoutError:
-        logger.warning("iq_ask: no answer inside %ss for org %s", ANSWER_DEADLINE_SEC, org_id)
+        # `doing` is the step that was still running when the deadline hit, `steps`
+        # the ones that had finished: together they say whether it was one hung
+        # call or several slow ones.
+        logger.warning("iq_ask: no answer inside %ss for org %s, still in %s, finished steps %s, question %r",
+                       ANSWER_DEADLINE_SEC, org_id, trace.get("doing", "start"), trace.get("steps", []),
+                       question[:200])
         return {"available": False, "message": "That question took too long to work out. Try it again, or ask something more specific (one grade, one opponent or one player)."}
 
 
@@ -1172,6 +1196,7 @@ async def _answer(
     club_name: str,
     question: str,
     history: list | None = None,
+    trace: dict | None = None,
 ) -> dict:
     if not settings.anthropic_api_key:
         return {"available": False, "message": "Natural-language answers aren't switched on for this server yet."}
@@ -1205,7 +1230,10 @@ async def _answer(
 
     tools = [t for t in TOOLS if t["name"] != "ask_user"] if last_clarified else TOOLS
     try:
-        for _ in range(MAX_STEPS):
+        for step in range(MAX_STEPS):
+            if trace is not None:
+                trace["doing"] = f"model call {step + 1}"
+            call_started = time.monotonic()
             resp = await client.messages.create(
                 model=MODEL,
                 max_tokens=MAX_TOKENS,
@@ -1213,6 +1241,7 @@ async def _answer(
                 tools=tools,
                 messages=messages,
             )
+            _note_step(trace, f"model call {step + 1}", call_started)
             if resp.stop_reason != "tool_use":
                 return _answer_from(resp, empty_msg="I couldn't put an answer together, try rephrasing.")
 
@@ -1232,14 +1261,22 @@ async def _answer(
                         # Reached only when the question wasn't usable (see above).
                         out = {"error": "That wasn't a usable question. Answer with your best reading and say what you assumed."}
                     else:
+                        if trace is not None:
+                            trace["doing"] = f"tool {block.name}"
+                        tool_started = time.monotonic()
                         out = await _run_tool(org_id, block.name, block.input)
+                        _note_step(trace, f"tool {block.name}", tool_started)
                     results.append({"type": "tool_result", "tool_use_id": block.id, "content": json.dumps(out, default=str)})
             messages.append({"role": "user", "content": results})
 
         # Ran out of steps — ask for a final answer with no more tools.
+        if trace is not None:
+            trace["doing"] = "final model call"
+        call_started = time.monotonic()
         final = await client.messages.create(
             model=MODEL, max_tokens=MAX_TOKENS, system=_SYSTEM_BLOCKS, messages=messages,
         )
+        _note_step(trace, "final model call", call_started)
         return _answer_from(final, empty_msg="That one took too many steps, try a more specific question.")
     except Exception as e:
         logger.exception("iq_ask: model call failed")
