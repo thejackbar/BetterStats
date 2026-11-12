@@ -3707,6 +3707,7 @@ export const api = {
   fanLanding: (token) => request(`/public/fantasy/${token}`),
   fanRegister: (token, data) => request(`/public/fantasy/${token}/register`, { method: 'POST', body: JSON.stringify(data) }),
   fanLogin: (token, data) => request(`/public/fantasy/${token}/login`, { method: 'POST', body: JSON.stringify(data) }),
+  fanForgotPin: (token, data) => request(`/public/fantasy/${token}/forgot-pin`, { method: 'POST', body: JSON.stringify(data) }),
   fanLogout: (token) => request(`/public/fantasy/${token}/logout`, { method: 'POST' }),
   fanPool: (token) => request(`/public/fantasy/${token}/pool`),
   fanMe: (token) => request(`/public/fantasy/${token}/me`),
