@@ -322,7 +322,7 @@ Asked for: see if a card you have is on somebody else's wish list, and be able t
 - Not done: a way to list and bring back older dismissals (Undo only covers the last one on screen); dismissing every suggestion with one player in one tap.
 - Verified: `verify_player_cards.py` (704; the control on the previous app code fails the one check that now says a closed spare shows its count, and the new function checks skip there, as the suite does for any missing function), browser `_suggested_` (21: the exact dismiss and restore bodies, the tag, the 390px layout) and `_social_` (39, the spares text changed), `verify_merge_carry.py` (31).
 
-## v9.143.4 (2026-11-12): the Market, and filters by Wanted and role
+## v9.143.5 (2026-11-12): the Market, and filters by Wanted and role
 
 Asked for: a card marketplace where you can see what cards other players have on their wish list and, if you have that card, it is highlighted; a count of "On 1 wish list" is useless without whose list and what they hold. Also a Wanted filter and a duplicates filter for your own cards, and filters by the club's own role information (batsmen, bowlers, wicketkeepers) so more challenges can be built on it.
 

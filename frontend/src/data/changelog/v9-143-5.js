@@ -1,8 +1,8 @@
 export default {
-  version: 'v9.143.4',
+  version: 'v9.143.5',
   date: '2026-11-12',
-  // Above v9.143.3's sortKey (2026-11-19T21:00:00Z). Check origin/main at merge time.
-  sortKey: '2026-11-19T22:00:00Z',
+  // Above v9.143.4's sortKey (2026-11-19T22:00:00Z). Check origin/main at merge time.
+  sortKey: '2026-11-19T23:00:00Z',
   title: 'Player Cards: the Market, and filters by Wanted and role',
   items: [
     'There is a Market in Player Cards. It lists your cards that other players want, and who wants them, then every player with a visible wish list. The players whose list lines up with your cards come first, with how many of your cards they want and how many of theirs you want.',
