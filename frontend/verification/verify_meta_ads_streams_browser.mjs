@@ -313,8 +313,13 @@ ck('no combined 53 registrations total anywhere', !/\b53\b/.test(body))
 // passed against the old page for the wrong reason.
 ck('the old unqualified "Free trial registrations" heading is gone',
    !/free trial registrations/i.test(bodyRaw))
-ck('each stream names the pixel content_category that separates the two',
-   lower.includes('self_serve_trial') && lower.includes('webinar'))
+// The pixel's content_category is what separates the two streams INSIDE Meta, but it is plumbing: it
+// read as a stray internal label on the card. It is in the tooltip, not on the page.
+ck('the pixel content_category is not printed on the page',
+   !lower.includes('self_serve_trial'), 'found self_serve_trial in the visible text')
+ck('but each stream still carries it in its tooltip, so the two can be told apart in Meta',
+   (await page.locator('[title*="content_category: self_serve_trial"]').count()) >= 1
+   && (await page.locator('[title*="content_category: webinar"]').count()) >= 1)
 
 // 3. VALUE EXCLUDES THE WEBINAR.
 const webinarText = await textOf(webinarCard)

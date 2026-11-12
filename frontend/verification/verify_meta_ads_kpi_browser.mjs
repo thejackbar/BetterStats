@@ -136,11 +136,11 @@ const browser = await chromium.launch(existsSync(EXECUTABLE) ? { executablePath:
 
 const SELECTED = {
   clubs: [
-    { name: 'Applegrove CC', key: 'applegrove cc', slug: null, via_meta: true, furthest_step: 'Registration completed', email: 'sec@applegrove.example', last_at: '2026-11-10T09:00:00Z',
+    { name: 'Applegrove CC', key: 'applegrove cc', slug: null, via_meta: true, furthest_step: 'Registration completed', email: 'sec@applegrove.example', last_at: '2026-11-10T09:00:00Z', visitors: 1,
       origin: { channel: 'email', label: 'Email (our outreach)', detail: 'utm_source=bettercricket, utm_medium=email, utm_id=APPLE1' } },
-    { name: 'Bayview CC', key: 'bayview cc', slug: null, via_meta: true, furthest_step: 'Reached Terms & privacy', email: 'bayview@club.example', last_at: '2026-11-10T08:00:00Z',
+    { name: 'Bayview CC', key: 'bayview cc', slug: null, via_meta: true, furthest_step: 'Reached Terms & privacy', email: 'bayview@club.example', last_at: '2026-11-10T08:00:00Z', visitors: 2,
       origin: { channel: 'meta', label: 'Meta ad', detail: 'utm_source=meta, utm_campaign=BC_AU_Trial_CBO_Sep2026, click=facebook' } },
-    { name: 'Cresthill CC', key: 'cresthill cc', slug: null, via_meta: true, furthest_step: 'Club selected', email: null, last_at: '2026-11-09T08:00:00Z',
+    { name: 'Cresthill CC', key: 'cresthill cc', slug: null, via_meta: true, furthest_step: 'Club selected', email: null, last_at: '2026-11-09T08:00:00Z', visitors: 3,
       origin: { channel: 'direct', label: 'Direct', detail: 'no UTM tags and no referrer' } },
   ],
   hidden_clubs: [], identified: 3, hidden_count: 0, anonymous: 2, outside_campaign: 2, scope: 'campaign',
@@ -149,7 +149,7 @@ const SELECTED = {
 const SELECTED_ALL = {
   ...SELECTED,
   clubs: [...SELECTED.clubs,
-    { name: 'Organic CC', key: 'organic cc', slug: null, via_meta: false, furthest_step: 'Reached Terms & privacy', email: 'org@club.example', last_at: '2026-11-08T08:00:00Z',
+    { name: 'Organic CC', key: 'organic cc', slug: null, via_meta: false, furthest_step: 'Reached Terms & privacy', email: 'org@club.example', last_at: '2026-11-08T08:00:00Z', visitors: 3,
       origin: { channel: 'social', label: 'Shared on Facebook', detail: 'referrer=l.facebook.com' } }],
   identified: 4, outside_campaign: 0, scope: 'all',
 }
@@ -352,7 +352,12 @@ const money = (n) => `A$${n.toFixed(2)}`
   ck('the name search narrows it', (await page.locator('[data-testid="club-row"]').count()) === 1 && (await page.locator('[data-testid="club-row"]').first().innerText()).includes('Cresthill'))
   await page.locator('input[type="search"]').first().fill('')
   ck('it opens on all traffic, so nothing is hidden and no "left out" note shows', !(await has(page.locator('[data-testid="clubs-outside"]'))))
-  ck('selections that could not be named are counted', /2 club selections in this period could not be named/i.test(await textOf(page.locator('[data-testid="clubs-unnamed"]'))))
+  const recon = await textOf(page.locator('[data-testid="clubs-reconcile"]'))
+  ck('the list says it counts named clubs while the funnel counts visitors, so the two can differ', /counts named clubs; the funnel above counts visitors/i.test(recon), recon.slice(0, 160))
+  ck('and gives the reconciliation: clubs picked, visitor picks on them, picks that could not be named',
+     /4 clubs picked here, 9 visitor picks on them/i.test(recon) && /2 more picks could not be named/i.test(recon), recon)
+  ck('the pixel category is not printed on the stream card', !/self_serve_trial/i.test(await page.locator('body').innerText()))
+
   ck('no empty or failed message when there is data', !(await has(page.locator('[data-testid="clubs-empty"], [data-testid="lists-failed"]'))))
   ck('the wizard funnel and the traffic card are on screen too',
      /wizard: where visitors drop off \(7 days\)/i.test(bodyNow) && await has(page.locator('[data-testid="traffic-card"]')))

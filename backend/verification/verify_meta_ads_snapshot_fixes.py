@@ -123,8 +123,16 @@ async def main() -> int:
     check("Club selected carries Meta's lead count as a note on the same step", cs.get("meta_leads") == 275 and "275" in (cs.get("note") or ""), str(cs))
     res = next((x for x in stages if x["key"] == "results"), {})
     check("signups are measured against Club selected, so no 23200% appears", res.get("pct_of_prev") == 15.0 and all(x["pct_of_prev"] <= 100 for x in stages), str([x["pct_of_prev"] for x in stages]))
+    labels = {x["key"]: x["label"] for x in stages}
+    check("each stage says whose number it is: Meta's for the top three, ours for the last two",
+          labels.get("impressions", "").endswith("(Meta)") and labels.get("link_clicks", "").endswith("(Meta)")
+          and labels.get("landing_page_views", "").endswith("(Meta)") and labels.get("club_selected", "").endswith("(our visitors)")
+          and labels.get("results", "").endswith("(ours)"), str(labels))
+    check("the note says what each side counts: our distinct visitors, Meta's events",
+          all(t in (cs.get("note") or "") for t in ("20 distinct visitors", "275 Lead events", "events, not people")), str(cs.get("note")))
     check("the webinar funnel (no club-selected step) is unchanged",
-          [x["key"] for x in m.compute_stream_funnel(bucket, 3)] == ["impressions", "link_clicks", "landing_page_views", "results"])
+          [x["key"] for x in m.compute_stream_funnel(bucket, 3)] == ["impressions", "link_clicks", "landing_page_views", "results"]
+          and m.compute_stream_funnel(bucket, 3)[-1]["label"] == "Free trial signups (ours)")
 
     # ── 4. the headline ──────────────────────────────────────────────────────
     print("the efficiency headline")

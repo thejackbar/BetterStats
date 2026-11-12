@@ -570,6 +570,8 @@ function ClubsPanel({ selected, searched, scope, onScope, period, failed, busyKe
   const loading = !failed && (selected == null || searched == null)
   const outside = selected?.outside_campaign || 0
   const unnamed = selected?.anonymous || 0
+  const pickedClubs = (selected?.clubs || []).length
+  const namedPicks = (selected?.clubs || []).reduce((n, c) => n + (c.visitors || 0), 0)
   return (
     <div data-testid="clubs-panel" className="pb-card p-4 mb-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
@@ -672,14 +674,14 @@ function ClubsPanel({ selected, searched, scope, onScope, period, failed, busyKe
           <button type="button" onClick={() => onScope('all')} className="text-pb-accent hover:underline">Show all traffic</button>
         </p>
       )}
-      {unnamed > 0 && (
-        <p data-testid="clubs-unnamed" className="font-mono text-[9px] text-pb-faintest mt-1">
-          {unnamed} club selection{unnamed === 1 ? '' : 's'} in this period could not be named (picked before the club was captured on the beacon).
-        </p>
-      )}
+      <p data-testid="clubs-reconcile" className="font-mono text-[9px] text-pb-faintest mt-1">
+        This list counts named clubs; the funnel above counts visitors, so it can be higher.
+        {namedPicks > 0 && <> {pickedClubs} club{pickedClubs === 1 ? '' : 's'} picked here, {namedPicks} visitor pick{namedPicks === 1 ? '' : 's'} on them (several visitors can pick one club).</>}
+        {unnamed > 0 && <> {unnamed} more pick{unnamed === 1 ? '' : 's'} could not be named (made before the club was captured on the beacon).</>}
+      </p>
       <p className="font-mono text-[9px] text-pb-faintest mt-3">
-        One row per club, with the furthest stage it reached and where it came from, read from its UTM tags, ad click id and
-        referrer. &ldquo;Direct&rdquo; means none of those: a typed address, a bookmark, or an app that hides the referrer (a shared
+        One row per club, with the furthest stage it reached and where it came from: the first tagged visit we saw from that
+        visitor (UTM tags, ad click id, outreach code or referrer), so a returning visitor shows how they FIRST arrived. &ldquo;Direct&rdquo; means none of those: a typed address, a bookmark, or an app that hides the referrer (a shared
         link can sit here). &ldquo;Reached terms, not finished&rdquo; is the list worth a call. &ldquo;Flag as test&rdquo; hides a row here and doesn&rsquo;t touch the Sales Pipeline.
       </p>
     </div>
@@ -768,7 +770,7 @@ function FunnelChart({ stages, title = 'Funnel: impressions to a completed regis
                 </div>
               )}
               <div className="flex items-center gap-3">
-                <div className="w-40 sm:w-52 shrink-0 text-xs text-pb-text truncate" title={s.label}>{s.label}</div>
+                <div className="w-40 sm:w-56 shrink-0 text-xs text-pb-text leading-tight" title={s.label}>{s.label}</div>
                 <div className="flex-1 h-5 bg-pb-surface2 rounded overflow-hidden">
                   <div
                     className="h-full bg-pb-accent rounded"
@@ -786,7 +788,7 @@ function FunnelChart({ stages, title = 'Funnel: impressions to a completed regis
         })}
       </div>
       <div className="flex items-center gap-3 mt-1.5 font-mono text-[9px] text-pb-faintest">
-        <div className="w-40 sm:w-52 shrink-0" />
+        <div className="w-40 sm:w-56 shrink-0" />
         <div className="flex-1" />
         <div className="w-16 shrink-0 text-right">count</div>
         <div className="w-14 shrink-0 text-right">of top</div>
@@ -1086,13 +1088,14 @@ function StreamCard({ stream, children }) {
       style={{ borderLeftColor: style.accent }}
     >
       <div className="flex items-baseline justify-between gap-2">
-        <div className="font-mono text-[9px] uppercase tracking-wide text-pb-faint">{stream.label}</div>
-        <span
-          className={`shrink-0 px-1.5 py-0.5 rounded-full border font-mono text-[9px] uppercase ${style.chip}`}
-          title={`Pixel content_category: ${stream.content_category}`}
+        {/* The pixel's content_category (self_serve_trial, webinar) is what tells the two streams apart
+            inside Meta. It is plumbing, so it lives in the tooltip and not on the card. */}
+        <div
+          className="font-mono text-[9px] uppercase tracking-wide text-pb-faint"
+          title={`Meta pixel content_category: ${stream.content_category}`}
         >
-          {stream.content_category}
-        </span>
+          {stream.label}
+        </div>
       </div>
       <div className="flex items-baseline gap-2 mt-0.5">
         <div data-testid="stream-results" className="font-display text-2xl text-pb-text">{fmtNum(stream.results)}</div>

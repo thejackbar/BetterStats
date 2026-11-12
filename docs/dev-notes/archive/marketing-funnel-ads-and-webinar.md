@@ -1640,3 +1640,21 @@ Why they were not counted, and why that is right: the trial count is registratio
 - Limits, said plainly: Direct is where evidence runs out (a typed address, a bookmark, and any app that hides the referrer, such as WhatsApp, iMessage and most mail clients, look the same), so a shared link can hide in it. First touch is stored for good, so a club that clicked an old ad months ago and registered today is classified by that old click. `other_traffic` counts only for a restarted campaign (0 otherwise).
 - Not answered here: where the five clubs in that report came from. That needs production data, which this environment cannot read. The list now says.
 - Proof: `verify_meta_ads_club_origin.py` (28; the control on the previous code fails 26 with no crash) seeds the shape of the report (five finished from outside the campaign: our email, direct, a Facebook share, Google, an old campaign's ad) and asserts each channel and an outside count of 5. `verify_meta_ads_kpi_browser.mjs` 107 (control fails 12). Other suites unchanged: campaign scope 20, snapshot fixes 18, tags end to end 32, new campaign 20, streams browser 57, capture 20, and `verify_meta_ads_streams.py` at its old baseline of 71 passed and 2 date-rot failures.
+
+
+## v9.143.4.1: the funnel says whose number each step is
+
+Jack: "we have 28 landing page views (Meta-reported) and 3 clubs selected from Meta ads, but the funnel shows 9 clubs selected with Meta counting 10 lead events for the same step. I'm confused? Also `self_serve_trial` is throwing me off." And whether /trial should be split by source (Meta, Google, AI, email) to track better.
+
+What the numbers are (each correct, none comparable without the label):
+- Landing page views (Meta): Meta's pixel `landing_page_view`, windowed from the restart.
+- Club selected in the funnel: OUR count of distinct visitors (`visitor_id`) who fired `club_prepared`, belonging to the campaign (`_campaign_visitor_exists`), from the restart, not the toolbar period.
+- Meta's Lead events: Meta's `lead` action count: EVENTS (the same person picking twice counts twice), credited to the ad click day, deduplicated pixel plus server. 9 against 10 is people against events; close is normal.
+- The club list: distinct NAMED clubs (`club_prepared` beacons that carried a club name), in the toolbar's period and scope. Fewer than visitors because several visitors pick one club and some picks carry no name (`anonymous`).
+- A different third thing: the "Where from" badge is the visitor's FIRST tagged visit, while campaign membership is ANY visit carrying the campaign's tags. A returning visitor who first came by email and later clicked an ad is a campaign visitor in the funnel and "Email" in the list. Both are right; the footnote now says so.
+
+What changed: funnel stages say "(Meta)" or "(ours)", the Club selected note compares our visitors with Meta's events in plain words, the club list prints a reconciliation line (clubs picked, visitor picks on them, unnamed picks), and the `self_serve_trial` pill is a tooltip. `content_category` still separates the two streams inside Meta; it was never meant to be read.
+
+On separate /trial pages by source: not recommended, and nothing here needed them. The source is read from the URL's tags and the referrer, not from which page the visitor lands on, so a page per source adds the same data at the cost of duplicated pages and the four reserved top-level slug lists (rule 47). A separate page earns its keep when the MESSAGE differs (a club-specific deep link such as `/trial?club=<name>` from outreach email; `/demo` is already separate because the product differs). What would track better: tag every outbound link (a link builder for email and social posts), store `utm_id` and a last-touch record beside first-touch, and keep the labels honest.
+
+Proof: `verify_meta_ads_snapshot_fixes.py` 20 (control on the previous labels fails 3), `verify_meta_ads_kpi_browser.mjs` 109, streams browser 58, the other Meta suites unchanged.

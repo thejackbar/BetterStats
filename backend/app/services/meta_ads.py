@@ -2517,17 +2517,20 @@ def compute_stream_funnel(bucket: dict, results: int, club_selected: float | Non
     registration wizard), so the webinar funnel goes straight from a landing
     page view to a registration — which is what that page actually asks for."""
     stages_raw = [
-        ("impressions", "Impressions", bucket.get("impressions") or 0),
-        ("link_clicks", "Link clicks", bucket.get("link_clicks") or 0),
-        ("landing_page_views", "Landing page views", bucket.get("landing_page_views") or 0),
+        # Each stage says WHOSE number it is. The top three are Meta's (its pixel and ad delivery),
+        # the last two are ours (visitors we saw, registrations in our database). Three instruments
+        # counting different things in different units sat in one list with nothing to tell them apart.
+        ("impressions", "Impressions (Meta)", bucket.get("impressions") or 0),
+        ("link_clicks", "Link clicks (Meta)", bucket.get("link_clicks") or 0),
+        ("landing_page_views", "Landing page views (Meta)", bucket.get("landing_page_views") or 0),
     ]
     if club_selected is not None:
         # Meta's Lead fires the moment a club is picked, which is the same moment as our
         # `club_prepared` beacon. They are two measures of ONE step, so they are not two
         # stages in a row: the Lead count rides on this stage as a note (it used to be its
         # own stage, which read as a 23,200% "continued" between them).
-        stages_raw.append(("club_selected", "Club selected", club_selected or 0))
-    stages_raw.append(("results", bucket.get("result_label") or "Results", results or 0))
+        stages_raw.append(("club_selected", "Club selected (our visitors)", club_selected or 0))
+    stages_raw.append(("results", f"{bucket.get('result_label') or 'Results'} (ours)", results or 0))
 
     top = stages_raw[0][2] or 0
     stages: list[dict] = []
@@ -2541,8 +2544,10 @@ def compute_stream_funnel(bucket: dict, results: int, club_selected: float | Non
         }
         if key == "club_selected":
             leads = int(bucket.get("leads") or 0)
-            stage["note"] = (f"Meta counted {leads} Lead event{'' if leads == 1 else 's'} for the same step "
-                             "(its own count, so it can differ from ours).")
+            seen = int(club_selected or 0)
+            stage["note"] = (f"We saw {seen} distinct visitor{'' if seen == 1 else 's'} pick a club. Meta counted {leads} "
+                             f"Lead event{'' if leads == 1 else 's'} for the same step: events, not people (the same person "
+                             "picking twice counts twice), credited to the ad click. Expect them to be close, not equal.")
             stage["meta_leads"] = leads
         stages.append(stage)
         prev = value
