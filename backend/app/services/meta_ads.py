@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextvars
 import json
 import logging
+import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
@@ -1250,7 +1251,8 @@ async def get_selected_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS,
                MAX(created_at)          AS last_at,
                COUNT(DISTINCT visitor_id) AS visitors,
                bool_or({_META_VISITOR_EXISTS_PLAIN_BOUND}) AS via_meta,
-               bool_or({_campaign_visitor_exists(_SINCE_LOWER_BOUND)}) AS via_campaign
+               bool_or({_campaign_visitor_exists(_SINCE_LOWER_BOUND)}) AS via_campaign,
+               {_VISITOR_ORIGIN_SQL} AS origins
         FROM usage_events ue
         WHERE event_type = 'self_serve_step'
           AND route = 'club_prepared'
@@ -1300,19 +1302,21 @@ async def get_selected_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS,
     clubs: dict[str, dict] = {}
 
     def _upsert(name, rank, *, first_at=None, last_at=None, org_id=None,
-                slug=None, email=None, visitors=0, via_meta=False, via_campaign=False):
+                slug=None, email=None, visitors=0, via_meta=False, via_campaign=False, origin=None):
         key = (name or "").strip().lower()
         if not key:
             return
         c = clubs.setdefault(key, {
             "name": (name or "").strip(), "furthest_rank": 0, "furthest_step": "",
             "first_at": None, "last_at": None, "org_id": None, "slug": None,
-            "email": None, "visitors": 0, "via_meta": False, "via_campaign": False,
+            "email": None, "visitors": 0, "via_meta": False, "via_campaign": False, "origin": None,
         })
         if via_meta:
             c["via_meta"] = True
         if via_campaign:
             c["via_campaign"] = True
+        if origin:
+            c["origin"] = pick_origin([c["origin"], origin])
         if rank > c["furthest_rank"]:
             c["furthest_rank"] = rank
             c["furthest_step"] = _SELECTED_STEP_LABEL[rank]
@@ -1333,7 +1337,8 @@ async def get_selected_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS,
         _upsert(r["club_name"], _SELECTED_STEP_RANK["selected"],
                 first_at=r["first_at"], last_at=r["last_at"],
                 org_id=r["org_id"], visitors=int(r["visitors"] or 0),
-                via_meta=bool(r["via_meta"]), via_campaign=bool(r["via_campaign"]))
+                via_meta=bool(r["via_meta"]), via_campaign=bool(r["via_campaign"]),
+                origin=pick_origin([origin_from_event(ev) for ev in (r["origins"] or [])]))
     # Terms-step acknowledgements carry no Meta signal of their own, so they
     # enrich the furthest step (and email) of whatever club they name without
     # changing its source tag.
@@ -1346,7 +1351,8 @@ async def get_selected_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS,
                 via_meta=((r["utm_content"] in utm_contents)
                           or ((r["utm_source"] or "").strip().lower() in _META_SOURCES)),
                 # The registration is classified by the SAME rule as the headline count.
-                via_campaign=_attribution_matches_campaign(r["attribution"]))
+                via_campaign=_attribution_matches_campaign(r["attribution"]),
+                origin=origin_from_attribution(r["attribution"]))
 
     # Newest selection first; a club with no timestamp (shouldn't happen — every
     # source supplies one) sinks to the bottom without tripping the aware/naive
@@ -1425,6 +1431,7 @@ async def get_searched_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS,
                COUNT(*)                   AS searches,
                bool_or({_META_VISITOR_EXISTS_PLAIN_BOUND}) AS via_meta,
                bool_or({_campaign_visitor_exists(_SINCE_LOWER_BOUND)}) AS via_campaign,
+               {_VISITOR_ORIGIN_SQL} AS origins,
                (array_agg(DISTINCT NULLIF(TRIM(metadata->>'search_query'), ''))
                   FILTER (WHERE NULLIF(TRIM(metadata->>'search_query'), '') IS NOT NULL)
                )[1:5] AS queries
@@ -1464,6 +1471,7 @@ async def get_searched_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS,
             "queries": list(r["queries"] or []),
             "via_meta": bool(r["via_meta"]),
             "via_campaign": bool(r["via_campaign"]),
+            "origin": pick_origin([origin_from_event(ev) for ev in (r["origins"] or [])]),
             "selected": key in selected_keys,
             "first_at": r["first_at"].isoformat() if r["first_at"] else None,
             "last_at": r["last_at"].isoformat() if r["last_at"] else None,
@@ -1919,6 +1927,151 @@ def _attribution_matches_campaign(attribution: dict | None) -> bool:
     return click_source in {"facebook", "instagram"}
 
 
+# ── Where did a club come from? ──────────────────────────────────────────────
+# `_attribution_matches_campaign` answers ONE question: is this the selected Meta campaign's?
+# Everything else read as "Other", which is the answer nobody wanted when five clubs finished
+# registering and none of them was an ad. This reads the same UTM and referrer evidence and
+# says WHAT it was: our own email, a Meta ad (this campaign or another), Google, a link shared
+# on social or in a chat, a link from another site, or nothing at all (direct).
+#
+# The order matters and is the whole logic: our email first (it carries utm_id or an email
+# marker, and its links can ALSO carry a utm_source), then Meta, then Google, then AI assistants,
+# then a social or chat referrer, then any other campaign tag, then any other referrer, then
+# direct. "Direct" is honest about its limit: a typed address, a bookmark, and any app that
+# strips the referrer (WhatsApp, iMessage, most email clients) all look identical, so a shared
+# link can hide in it.
+_EMAIL_SOURCES = {"email", "e-mail", "newsletter", "edm", "brevo", "mailchimp", "sendgrid", "mailgun"}
+_OWN_HOSTS = ("betterat.cricket", "betterstats.cricket", "localhost", "127.0.0.1")
+# domain -> how the page names it. A host matches its domain or any subdomain of it.
+_SOCIAL_HOSTS = {
+    "facebook.com": "Facebook", "fb.me": "Facebook", "instagram.com": "Instagram",
+    "whatsapp.com": "WhatsApp", "wa.me": "WhatsApp", "messenger.com": "Messenger",
+    "linkedin.com": "LinkedIn", "lnkd.in": "LinkedIn", "t.co": "X", "twitter.com": "X", "x.com": "X",
+    "reddit.com": "Reddit", "tiktok.com": "TikTok", "youtube.com": "YouTube",
+}
+ORIGIN_CHANNELS = ("email", "meta", "google", "ai", "social", "referral", "campaign_other", "direct")
+
+
+def _referrer_host(referrer: str | None) -> str:
+    """The referring site's host, lowercased, or '' when there is none or it is us."""
+    from urllib.parse import urlparse
+    raw = (referrer or "").strip()
+    if not raw:
+        return ""
+    host = (urlparse(raw if "//" in raw else "//" + raw).hostname or "").lower()
+    if not host or any(host == o or host.endswith("." + o) for o in _OWN_HOSTS):
+        return ""
+    return host
+
+
+def _host_is(host: str, domain: str) -> bool:
+    return host == domain or host.endswith("." + domain)
+
+
+def classify_origin(*, utm_source: str | None = None, utm_medium: str | None = None,
+                    utm_campaign: str | None = None, utm_id: str | None = None,
+                    click_source: str | None = None, landing_path: str | None = None,
+                    referrer: str | None = None) -> dict:
+    """{'channel', 'label', 'detail'} for one visit or one registration.
+
+    `landing_path` is the stored landing URL WITH its query string, which is where a value the
+    structured fields dropped still lives: a registration's stored attribution has no `utm_id`
+    (the per-club code on our outreach email links), but its landing_path does."""
+    from urllib.parse import parse_qs, urlparse
+    q = parse_qs(urlparse(landing_path or "").query)
+    first = lambda k: (q.get(k) or [""])[0].strip()  # noqa: E731
+    src = (utm_source or first("utm_source")).strip().lower()
+    med = (utm_medium or first("utm_medium")).strip().lower()
+    cam = (utm_campaign or first("utm_campaign")).strip()
+    uid = (utm_id or first("utm_id")).strip()
+    click = (click_source or "").strip().lower()
+    host = _referrer_host(referrer)
+    path_has = lambda needle: needle in (landing_path or "").lower()  # noqa: E731
+
+    detail_parts = [f"{k}={v}" for k, v in (("utm_source", src), ("utm_medium", med), ("utm_campaign", cam),
+                                             ("utm_id", uid)) if v]
+    if click:
+        detail_parts.append(f"click={click}")
+    if host:
+        detail_parts.append(f"referrer={host}")
+    detail = ", ".join(detail_parts) or "no UTM tags and no referrer"
+
+    def out(channel: str, label: str) -> dict:
+        return {"channel": channel, "label": label, "detail": detail}
+
+    if uid or cam.lower() == "edm" or med in ("email", "e-mail", "edm") or src in _EMAIL_SOURCES:
+        return out("email", "Email (our outreach)" if uid else "Email")
+    if src in _META_ATTRIBUTION_SOURCES or click in ("facebook", "instagram") or path_has("fbclid=") or path_has("igshid="):
+        return out("meta", "Meta ad")
+    if src in ("google", "adwords") or click == "google" or path_has("gclid=") or path_has("gbraid=") or path_has("wbraid="):
+        return out("google", "Google ad" if (click == "google" or path_has("gclid=")) else "Google")
+    if any(_host_is(host, h) for h in _AI_ASSISTANT_HOSTS):
+        return out("ai", f"AI assistant ({host})")
+    for domain, name in _SOCIAL_HOSTS.items():
+        if _host_is(host, domain):
+            return out("social", f"Shared on {name}")
+    if med in ("social", "share", "social_organic") or src in ("whatsapp", "linkedin", "twitter", "x", "reddit", "tiktok"):
+        return out("social", f"Shared ({src or med})")
+    if re.search(r"(^|\.)google\.", host):
+        return out("google", "Google")
+    if host:
+        return out("referral", f"Link from {host}")
+    if src or cam:
+        return out("campaign_other", f"Campaign: {src or cam}")
+    return out("direct", "Direct")
+
+
+_AI_ASSISTANT_HOSTS = (
+    "chatgpt.com", "chat.openai.com", "perplexity.ai", "claude.ai",
+    "gemini.google.com", "copilot.microsoft.com", "you.com",
+)
+
+
+def origin_from_attribution(attribution: dict | None) -> dict:
+    """The origin of a COMPLETED registration, from the first-touch record stored on it
+    (organisations.signup_attribution). An organic registration stores none, which is Direct."""
+    a = attribution or {}
+    return classify_origin(
+        utm_source=a.get("utm_source"), utm_medium=a.get("utm_medium"), utm_campaign=a.get("utm_campaign"),
+        click_source=a.get("click_source"), landing_path=a.get("landing_path"), referrer=a.get("landing_referrer"),
+    )
+
+
+def origin_from_event(ev: dict | None) -> dict | None:
+    """The origin of a visitor, from the first page view of theirs that carried any signal
+    (keys as the SQL below builds them). None when the visitor has no page view on record."""
+    if not ev:
+        return None
+    bucket = (ev.get("k") or "").lower()
+    return classify_origin(
+        utm_source=ev.get("s"), utm_medium=ev.get("m"), utm_campaign=ev.get("c"), utm_id=ev.get("i"),
+        click_source=bucket if bucket in ("facebook", "instagram", "google") else None,
+        landing_path=ev.get("p"), referrer=ev.get("r"),
+    )
+
+
+def pick_origin(origins: list[dict | None]) -> dict | None:
+    """One origin for a club that several visitors touched: the most specific channel wins,
+    and Direct only when nothing better is known, because Direct is where evidence runs out."""
+    known = [o for o in origins if o]
+    if not known:
+        return None
+    return min(known, key=lambda o: ORIGIN_CHANNELS.index(o["channel"]))
+
+
+# One scalar subquery per beacon row: the visitor's earliest page view that carried a signal
+# (a UTM, an outreach code, a bucketed source or a referrer), else their earliest page view.
+_VISITOR_ORIGIN_SQL = """(array_agg(DISTINCT (
+    SELECT jsonb_build_object('s', mv.utm_source, 'm', mv.utm_medium, 'c', mv.utm_campaign, 'i', mv.utm_id,
+                              'k', mv.traffic_source, 'r', mv.referer, 'p', mv.path)
+      FROM usage_events mv
+     WHERE mv.visitor_id = ue.visitor_id AND mv.event_type = 'page_view'
+     ORDER BY (mv.utm_source IS NULL AND mv.utm_id IS NULL AND mv.traffic_source IS NULL AND mv.referer IS NULL),
+              mv.created_at
+     LIMIT 1
+)))[1:5]"""
+
+
 async def attributed_registrations(db: AsyncSession) -> list[dict]:
     """Every non-archived self-serve registration attributed to the CURRENT
     campaign, each with its signup time and where it sits against the campaign's
@@ -1948,6 +2101,25 @@ async def attributed_registrations(db: AsyncSession) -> list[dict]:
          "scope": registration_scope(r["signed_up_at"])}
         for r in rows if _attribution_matches_campaign(r["attribution"])
     ]
+
+
+async def get_registrations_outside_campaign(db: AsyncSession) -> int:
+    """Self-serve registrations dated from the campaign's restart on that are NOT this
+    campaign's: they finished registering, they are real, and they are not in its trial count
+    (organic, our email, another campaign's tags). Only meaningful for a restarted campaign
+    (0 otherwise), where it answers "why did 5 finish and the trial count say 0?"."""
+    start = _counts_from()
+    if start is None:
+        return 0
+    rows = (await db.execute(text("""
+        SELECT o.signup_attribution AS attribution
+          FROM organisations o
+          JOIN self_serve_idempotency_keys k ON k.org_id = o.id
+         WHERE o.signup_source IS NOT NULL AND o.archived_at IS NULL
+         GROUP BY o.id, o.signup_attribution
+        HAVING MIN(k.created_at) >= CAST(:start AS timestamptz)
+    """), {"start": start})).mappings().all()
+    return sum(1 for r in rows if not _attribution_matches_campaign(r["attribution"]))
 
 
 async def get_registration_scope(db: AsyncSession) -> dict:
@@ -2472,7 +2644,7 @@ async def get_latest_summary(db: AsyncSession) -> dict:
                 "attribution_window_days": ATTRIBUTION_WINDOW_DAYS,
                 "counting_since": _since().isoformat() if _since() else None,
                 "counts_from": _counts_from().isoformat() if _counts_from() else None,
-                "registrations_excluded": {"before_restart": 0, "undated": 0}}
+                "registrations_excluded": {"before_restart": 0, "undated": 0, "other_traffic": 0}}
 
     latest_date = campaign_row["snapshot_date"]
     ad_rows = (await db.execute(text("""
@@ -2497,6 +2669,7 @@ async def get_latest_summary(db: AsyncSession) -> dict:
 
     registration_scope_counts = await get_registration_scope(db)
     registrations = registration_scope_counts["count"]
+    other_traffic = await get_registrations_outside_campaign(db)
     webinar_counts = await get_webinar_registration_counts(db)
 
     campaign = _row_to_dict(campaign_row)
@@ -2601,6 +2774,9 @@ async def get_latest_summary(db: AsyncSession) -> dict:
         "registrations_excluded": {
             "before_restart": registration_scope_counts["before"],
             "undated": registration_scope_counts["undated"],
+            # Finished registering since the restart but not this campaign's (organic, our email,
+            # another campaign): real, and deliberately not in the trial count or cost per trial.
+            "other_traffic": other_traffic,
         },
     }
 

@@ -311,7 +311,10 @@ async def main() -> int:
     print("the restart date also drives Meta's window, adjustments and the summary")
     check("the summary says where counting starts and what it left out",
           summary.get("counts_from") and summary.get("counts_from", "").startswith("2026-11-10")
-          and (summary.get("registrations_excluded") or {}) == {"before_restart": 1, "undated": 1}, str(summary.get("registrations_excluded")))
+          # other_traffic: finished since the restart but not this campaign's: the old-tag, the returning
+          # and the organic registration seeded above.
+          and (summary.get("registrations_excluded") or {}) == {"before_restart": 1, "undated": 1, "other_traffic": 3},
+          str(summary.get("registrations_excluded")))
     window = getattr(meta_ads, "_window_start", None)
     check("Meta's window starts at the restart date with no manual cutoff set",
           bool(window) and window() is not None and window().date().isoformat() == "2026-11-10", str(window and window()))

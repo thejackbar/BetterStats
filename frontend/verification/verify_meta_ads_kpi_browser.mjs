@@ -36,6 +36,8 @@ async function textOf(locator) {
 const has = async (locator) => (await locator.count()) > 0
 // A click on something this change adds would time out on the control build.
 const clickIf = async (locator) => { if (await locator.count()) await locator.first().click() }
+// Same for a <select> this change adds: absent on the control build, so skip rather than time out.
+const selectIf = async (locator, value) => { if (await locator.count()) await locator.first().selectOption(value) }
 
 const CAMPAIGN_ID = '120251284365570121'
 const TRIAL_SPEND = 1700.49
@@ -134,9 +136,12 @@ const browser = await chromium.launch(existsSync(EXECUTABLE) ? { executablePath:
 
 const SELECTED = {
   clubs: [
-    { name: 'Applegrove CC', key: 'applegrove cc', slug: null, via_meta: true, furthest_step: 'Registration completed', email: 'sec@applegrove.example', last_at: '2026-11-10T09:00:00Z' },
-    { name: 'Bayview CC', key: 'bayview cc', slug: null, via_meta: true, furthest_step: 'Reached Terms & privacy', email: 'bayview@club.example', last_at: '2026-11-10T08:00:00Z' },
-    { name: 'Cresthill CC', key: 'cresthill cc', slug: null, via_meta: true, furthest_step: 'Club selected', email: null, last_at: '2026-11-09T08:00:00Z' },
+    { name: 'Applegrove CC', key: 'applegrove cc', slug: null, via_meta: true, furthest_step: 'Registration completed', email: 'sec@applegrove.example', last_at: '2026-11-10T09:00:00Z',
+      origin: { channel: 'email', label: 'Email (our outreach)', detail: 'utm_source=bettercricket, utm_medium=email, utm_id=APPLE1' } },
+    { name: 'Bayview CC', key: 'bayview cc', slug: null, via_meta: true, furthest_step: 'Reached Terms & privacy', email: 'bayview@club.example', last_at: '2026-11-10T08:00:00Z',
+      origin: { channel: 'meta', label: 'Meta ad', detail: 'utm_source=meta, utm_campaign=BC_AU_Trial_CBO_Sep2026, click=facebook' } },
+    { name: 'Cresthill CC', key: 'cresthill cc', slug: null, via_meta: true, furthest_step: 'Club selected', email: null, last_at: '2026-11-09T08:00:00Z',
+      origin: { channel: 'direct', label: 'Direct', detail: 'no UTM tags and no referrer' } },
   ],
   hidden_clubs: [], identified: 3, hidden_count: 0, anonymous: 2, outside_campaign: 2, scope: 'campaign',
 }
@@ -144,12 +149,14 @@ const SELECTED = {
 const SELECTED_ALL = {
   ...SELECTED,
   clubs: [...SELECTED.clubs,
-    { name: 'Organic CC', key: 'organic cc', slug: null, via_meta: false, furthest_step: 'Reached Terms & privacy', email: 'org@club.example', last_at: '2026-11-08T08:00:00Z' }],
+    { name: 'Organic CC', key: 'organic cc', slug: null, via_meta: false, furthest_step: 'Reached Terms & privacy', email: 'org@club.example', last_at: '2026-11-08T08:00:00Z',
+      origin: { channel: 'social', label: 'Shared on Facebook', detail: 'referrer=l.facebook.com' } }],
   identified: 4, outside_campaign: 0, scope: 'all',
 }
 const SEARCHED = {
   clubs: [
-    { name: 'Dunmore CC', key: 'dunmore cc', via_meta: true, selected: false, visitors: 4, searches: 6, queries: ['dunmore', 'dunmore cricket'], last_at: '2026-11-10T07:00:00Z' },
+    { name: 'Dunmore CC', key: 'dunmore cc', via_meta: true, selected: false, visitors: 4, searches: 6, queries: ['dunmore', 'dunmore cricket'], last_at: '2026-11-10T07:00:00Z',
+      origin: { channel: 'google', label: 'Google', detail: 'referrer=www.google.com.au' } },
     { name: 'Applegrove CC', key: 'applegrove cc', via_meta: true, selected: true, visitors: 2, searches: 2, queries: ['applegrove'], last_at: '2026-11-10T06:00:00Z' },
   ],
   hidden_clubs: [], identified: 2, hidden_count: 0, searched_only_count: 1, converted_count: 1, scope: 'campaign',
@@ -393,9 +400,31 @@ const money = (n) => `A$${n.toFixed(2)}`
   await clickIf(page.locator('[data-testid="clubs-outside"] button'))
   await page.waitForTimeout(500)
   ck('that link returns to all traffic', (await page.locator('[data-testid="club-row"]', { hasText: 'Organic CC' }).count()) === 1)
-  ck('a Meta-only filter is offered for all traffic', await has(page.locator('[data-testid="club-meta-only"]')))
-  await page.locator('[data-testid="club-meta-only"]').check().catch(() => {})
-  ck('and it hides the club that did not come through Meta', (await page.locator('[data-testid="club-row"]', { hasText: 'Organic CC' }).count()) === 0)
+  // ── Where each club came from: the column, the badge, the evidence, the filter ─────
+  const originOfRow = async (name) => {
+    const row = page.locator('[data-testid="club-row"]', { hasText: name })
+    return (await row.count()) ? (await textOf(row.first().locator('[data-testid="club-origin"]'))).trim() : ''
+  }
+  ck('the column is "Where from" (it read Meta / Other)', /where from/i.test(await textOf(page.locator('[data-testid="clubs-panel"] thead'))) && !/\bsource\b/i.test(await textOf(page.locator('[data-testid="clubs-panel"] thead'))))
+  ck('a club our own outreach email brought says so', /email \(our outreach\)/i.test(await originOfRow('Applegrove')), await originOfRow('Applegrove'))
+  ck('a Meta ad says so', /meta ad/i.test(await originOfRow('Bayview')), await originOfRow('Bayview'))
+  ck('a shared link names where it was shared', /shared on facebook/i.test(await originOfRow('Organic')), await originOfRow('Organic'))
+  ck('a club with nothing to go on says Direct, not Other', /direct/i.test(await originOfRow('Cresthill')), await originOfRow('Cresthill'))
+  const tip = await page.locator('[data-testid="club-row"]', { hasText: 'Applegrove' }).first().locator('td').nth(2).getAttribute('title')
+  ck('hovering shows the raw evidence (UTMs, outreach code, referrer)', /utm_id=APPLE1/.test(tip || ''), tip || '')
+  const opts = await page.locator('[data-testid="club-origin-filter"] option').allTextContents()
+  ck('the filter lists only channels that occur, with counts', opts[0] === 'All sources (5)' && opts.includes('Email (1)') && opts.includes('Shared link (1)') && opts.includes('Google (1)') && !opts.some((o) => /^AI assistant/.test(o)), opts.join(' | '))
+  await selectIf(page.locator('[data-testid="club-origin-filter"]'), 'social')
+  ck('picking Shared link shows only that club', (await page.locator('[data-testid="club-row"]').count()) === 1 && (await page.locator('[data-testid="club-row"]').first().innerText()).includes('Organic'))
+  await selectIf(page.locator('[data-testid="club-origin-filter"]'), 'email')
+  ck('picking Email shows only the emailed club', (await page.locator('[data-testid="club-row"]').count()) === 1 && (await page.locator('[data-testid="club-row"]').first().innerText()).includes('Applegrove'))
+  await clickIf(page.locator('[data-testid="club-chip-completed"]'))
+  ck('the filters combine (Email and Completed)', (await page.locator('[data-testid="club-row"]').count()) === 1)
+  await clickIf(page.locator('[data-testid="club-chip-terms"]'))
+  ck('and an Email club that did not reach Terms is not shown under Reached terms', (await page.locator('[data-testid="club-row"]').count()) === 0)
+  await selectIf(page.locator('[data-testid="club-origin-filter"]'), 'all')
+  await clickIf(page.locator('[data-testid="club-chip-all"]'))
+  ck('clearing them brings all five back', (await page.locator('[data-testid="club-row"]').count()) === 5)
   await page.screenshot({ path: '/tmp/meta_ads_kpi_desktop.png', fullPage: true })
   ck('no page errors', errors.length === 0, errors.join(' | '))
   await ctx.close()
@@ -427,10 +456,13 @@ const money = (n) => `A$${n.toFixed(2)}`
 
 // ── A3. A restarted campaign says where counting starts and what it left out ──
 {
-  const { page, ctx } = await open({ summary: summaryFor({ countsFrom: '2026-11-09T16:00:00Z', excluded: { before_restart: 1, undated: 2 } }) })
+  const { page, ctx } = await open({ summary: summaryFor({ countsFrom: '2026-11-09T16:00:00Z', excluded: { before_restart: 1, undated: 2, other_traffic: 5 } }) })
   const note = await textOf(page.locator('[data-testid="counts-from-note"]'))
   ck('the restart date is stated on the page', /restarted/i.test(note) && /counting registrations and spend from/i.test(note), note.slice(0, 160))
   ck('the earlier registration left out is reported, singular', /1 earlier registration from this campaign is from before the restart and not counted/i.test(note), note)
+  const other = await textOf(page.locator('[data-testid="other-traffic-note"]'))
+  ck('five registrations that finished from outside the campaign are explained', /5 other registrations finished since then from outside this campaign/i.test(other), other.slice(0, 200))
+  ck('and the page says why they are not in Free trial signups or cost per trial', /not in free trial signups or cost per trial/i.test(other) && /where each came from/i.test(other), other.slice(0, 260))
   ck('registrations with no date are reported too', /2 more carry no signup date/i.test(note), note)
   await clickIf(page.getByRole('button', { name: /^log \(/ }))
   await page.waitForTimeout(400)

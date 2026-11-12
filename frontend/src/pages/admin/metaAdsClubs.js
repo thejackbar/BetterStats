@@ -23,6 +23,28 @@ export function stageOfStep(furthestStep) {
 
 const later = (a, b) => (a && b ? (a > b ? a : b) : a || b || null)
 
+// Where a club came from, as the server classifies it (meta_ads.classify_origin) from the UTMs,
+// the click id and the referrer. Most specific first: when several visitors touched one club the
+// first channel in this list wins, and Direct only when nothing better is known (it is where the
+// evidence runs out: a typed address, a bookmark and any app that strips the referrer look alike).
+export const ORIGINS = {
+  email: 'Email',
+  meta: 'Meta ad',
+  google: 'Google',
+  ai: 'AI assistant',
+  social: 'Shared link',
+  referral: 'Other site',
+  campaign_other: 'Other campaign',
+  direct: 'Direct',
+  unknown: 'Unknown',
+}
+export const ORIGIN_ORDER = Object.keys(ORIGINS)
+const betterOrigin = (a, b) => {
+  if (!a) return b || null
+  if (!b) return a
+  return ORIGIN_ORDER.indexOf(b.channel) < ORIGIN_ORDER.indexOf(a.channel) ? b : a
+}
+
 export function mergeClubs(selected, searched) {
   const out = new Map()
   const take = (c, stage, hidden) => {
@@ -32,7 +54,7 @@ export function mergeClubs(selected, searched) {
     if (!m) {
       m = {
         key, name: (c.name || '').trim(), stage, email: null, slug: null, org_id: null,
-        via_meta: false, via_campaign: false, last_at: null, hidden: false,
+        via_meta: false, via_campaign: false, origin: null, last_at: null, hidden: false,
       }
       out.set(key, m)
     }
@@ -43,6 +65,7 @@ export function mergeClubs(selected, searched) {
     m.via_meta = m.via_meta || !!c.via_meta
     m.via_campaign = m.via_campaign || !!c.via_campaign
     m.last_at = later(m.last_at, c.last_at)
+    m.origin = betterOrigin(m.origin, c.origin)
     // Flagged as test on either list is flagged: the server keys both on the same name.
     m.hidden = m.hidden || hidden
   }
@@ -55,17 +78,26 @@ export function mergeClubs(selected, searched) {
 
 // The chips. `terms` is "reached the Terms step and has NOT finished": the clubs worth a
 // call. A club that reached terms and completed is `completed`, one stage on.
+export const originOf = (row) => row.origin?.channel || 'unknown'
+
+// How many clubs each channel brought, for the filter. Only channels that occur are listed.
+export function originCounts(rows) {
+  const counts = {}
+  for (const r of rows) counts[originOf(r)] = (counts[originOf(r)] || 0) + 1
+  return counts
+}
+
 export function stageCounts(rows) {
   const counts = { all: rows.length, completed: 0, terms: 0, selected: 0, searched: 0 }
   for (const r of rows) counts[r.stage] += 1
   return counts
 }
 
-export function applyClubFilters(rows, { stage = 'all', source = 'all', q = '' } = {}) {
+export function applyClubFilters(rows, { stage = 'all', origin = 'all', q = '' } = {}) {
   const needle = q.trim().toLowerCase()
   return rows.filter((r) => {
     if (stage !== 'all' && r.stage !== stage) return false
-    if (source === 'meta' && !r.via_meta) return false
+    if (origin !== 'all' && originOf(r) !== origin) return false
     if (needle && !r.name.toLowerCase().includes(needle)) return false
     return true
   })

@@ -6,7 +6,7 @@ import {
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
 import { computeKpis, convertedByCreative, unmappedAds, creativeKey, NO_TAG } from './metaAdsKpi'
-import { mergeClubs, stageCounts, applyClubFilters, STAGES } from './metaAdsClubs'
+import { mergeClubs, stageCounts, applyClubFilters, originCounts, originOf, ORIGINS, ORIGIN_ORDER, STAGES } from './metaAdsClubs'
 
 const DEFAULT_BUDGET = 900
 const DEFAULT_LENGTH_DAYS = 30
@@ -489,6 +489,17 @@ const STAGE_BADGE = {
   selected: 'border-violet-500/40 text-violet-300 bg-violet-500/10',
   searched: 'border-sky-500/40 text-sky-300 bg-sky-500/10',
 }
+const ORIGIN_BADGE = {
+  meta: 'border-violet-500/40 text-violet-300 bg-violet-500/10',
+  email: 'border-sky-500/40 text-sky-300 bg-sky-500/10',
+  google: 'border-blue-500/40 text-blue-300 bg-blue-500/10',
+  social: 'border-pink-500/40 text-pink-300 bg-pink-500/10',
+  ai: 'border-teal-500/40 text-teal-300 bg-teal-500/10',
+  referral: 'border-pb-hairline text-pb-dim',
+  campaign_other: 'border-pb-hairline text-pb-dim',
+  direct: 'border-pb-hairline text-pb-faint',
+  unknown: 'border-pb-hairline text-pb-faintest',
+}
 // Chips, in the order a follow-up works through them. `terms` is "reached the Terms step and
 // has not finished", the clubs worth a call.
 const STAGE_CHIPS = [
@@ -510,11 +521,9 @@ function ClubRow({ c, busy, onFlag, onRestore }) {
           {STAGES[c.stage].label}
         </span>
       </td>
-      <td className="px-2 py-2">
-        <span className={`inline-block px-1.5 py-0.5 rounded-full border font-mono text-[9px] uppercase ${
-          c.via_meta ? 'border-violet-500/40 text-violet-300 bg-violet-500/10' : 'border-pb-hairline text-pb-faint'
-        }`}>
-          {c.via_meta ? 'Meta' : 'Other'}
+      <td className="px-2 py-2" title={c.origin?.detail || 'No page view of this club\'s visitor on record'}>
+        <span data-testid="club-origin" className={`inline-block px-1.5 py-0.5 rounded-full border font-mono text-[9px] whitespace-nowrap ${ORIGIN_BADGE[originOf(c)]}`}>
+          {c.origin?.label || 'Unknown'}
         </span>
       </td>
       <td className="px-2 py-2 text-pb-dim whitespace-nowrap">{c.email || '–'}</td>
@@ -547,15 +556,16 @@ function ClubRow({ c, busy, onFlag, onRestore }) {
 function ClubsPanel({ selected, searched, scope, onScope, period, failed, busyKey, onFlag, onRestore }) {
   const filter = useClubFilter()
   const [stage, setStage] = useState('all')
-  const [metaOnly, setMetaOnly] = useState(false)
+  const [origin, setOrigin] = useState('all')
   const [showHidden, setShowHidden] = useState(false)
   const [limit, setLimit] = useState(40)
   const rows = useMemo(() => mergeClubs(selected, searched), [selected, searched])
   const visible = rows.filter((r) => !r.hidden)
   const hidden = rows.filter((r) => r.hidden)
   const counts = stageCounts(visible)
+  const origins = originCounts(visible)
   const searchedRows = filter.apply(visible)
-  const shown = applyClubFilters(searchedRows, { stage, source: metaOnly ? 'meta' : 'all' })
+  const shown = applyClubFilters(searchedRows, { stage, origin })
   const shownHidden = showHidden ? filter.apply(hidden) : []
   const loading = !failed && (selected == null || searched == null)
   const outside = selected?.outside_campaign || 0
@@ -591,12 +601,20 @@ function ClubsPanel({ selected, searched, scope, onScope, period, failed, busyKe
             {chip.label} <span data-testid={`club-chip-count-${chip.key}`} className="opacity-70">{counts[chip.key]}</span>
           </button>
         ))}
-        {scope === 'all' && (
-          <label className="flex items-center gap-1.5 ml-1 font-mono text-[10px] text-pb-dim">
-            <input type="checkbox" checked={metaOnly} onChange={(e) => setMetaOnly(e.target.checked)} data-testid="club-meta-only" />
-            Meta only
-          </label>
-        )}
+        <label className="flex items-center gap-1.5 ml-1 font-mono text-[10px] text-pb-dim">
+          Where from
+          <select
+            data-testid="club-origin-filter"
+            value={origin}
+            onChange={(e) => { setOrigin(e.target.value); setLimit(40) }}
+            className="bg-pb-surface2 border border-pb-hairline rounded px-2 py-1 font-mono text-[10px] text-pb-text"
+          >
+            <option value="all">All sources ({visible.length})</option>
+            {ORIGIN_ORDER.filter((k) => origins[k]).map((k) => (
+              <option key={k} value={k}>{ORIGINS[k]} ({origins[k]})</option>
+            ))}
+          </select>
+        </label>
       </div>
 
       <ClubFilterBar filter={filter} placeholder="Search club name" />
@@ -624,7 +642,7 @@ function ClubsPanel({ selected, searched, scope, onScope, period, failed, busyKe
               <tr className="text-left font-mono text-[10px] tracking-wide2 uppercase text-pb-faint border-b pb-hairline">
                 <th className="px-2 py-2">Club</th>
                 <th className="px-2 py-2">Stage</th>
-                <th className="px-2 py-2">Source</th>
+                <th className="px-2 py-2">Where from</th>
                 <th className="px-2 py-2">Contact email</th>
                 <th className="px-2 py-2">Last seen</th>
                 <th className="px-2 py-2"></th>
@@ -660,8 +678,9 @@ function ClubsPanel({ selected, searched, scope, onScope, period, failed, busyKe
         </p>
       )}
       <p className="font-mono text-[9px] text-pb-faintest mt-3">
-        One row per club, with the furthest stage it reached: searched, picked, reached the Terms step, or finished. &ldquo;Reached terms,
-        not finished&rdquo; is the list worth a call. &ldquo;Flag as test&rdquo; hides a row here and doesn&rsquo;t touch the Sales Pipeline.
+        One row per club, with the furthest stage it reached and where it came from, read from its UTM tags, ad click id and
+        referrer. &ldquo;Direct&rdquo; means none of those: a typed address, a bookmark, or an app that hides the referrer (a shared
+        link can sit here). &ldquo;Reached terms, not finished&rdquo; is the list worth a call. &ldquo;Flag as test&rdquo; hides a row here and doesn&rsquo;t touch the Sales Pipeline.
       </p>
     </div>
   )
@@ -1527,6 +1546,11 @@ export default function SuperMetaAds() {
                 {(summary.registrations_excluded?.before_restart || 0) > 0 && (
                   <> {summary.registrations_excluded.before_restart} earlier registration{summary.registrations_excluded.before_restart === 1 ? '' : 's'} from this campaign
                   {summary.registrations_excluded.before_restart === 1 ? ' is' : ' are'} from before the restart and not counted.</>
+                )}
+                {(summary.registrations_excluded?.other_traffic || 0) > 0 && (
+                  <span data-testid="other-traffic-note"> {summary.registrations_excluded.other_traffic} other registration{summary.registrations_excluded.other_traffic === 1 ? '' : 's'} finished
+                  since then from outside this campaign (organic, our email or another campaign). {summary.registrations_excluded.other_traffic === 1 ? 'It is' : 'They are'} real but
+                  not in Free trial signups or cost per trial, because no ad brought {summary.registrations_excluded.other_traffic === 1 ? 'it' : 'them'}. The club list below says where each came from.</span>
                 )}
                 {(summary.registrations_excluded?.undated || 0) > 0 && (
                   <> {summary.registrations_excluded.undated} more carry no signup date, so cannot be placed, and are not counted.</>
