@@ -14,7 +14,7 @@ const premKey = (p) => `${p.season}|${p.grade}`
 
 const BLANK = {
   kind: 'exchange', title: '', blurb: '',
-  count: 11, kinds: 'any', tiersOnly: [], minTier: {}, minRating: '', maxPer: '', specialKinds: [],
+  count: 11, kinds: 'any', tiersOnly: [], minTier: {}, minRating: '', maxPer: '', specialKinds: [], roles: [], minRole: {},
   premiership: '', keepPlayers: null,
   selType: 'premiership', selPremiership: '', selPlayers: [], selTier: 'rare', selKind: '', need: '',
   quality: 'special', qty: 1, size: 5, packTitle: '',
@@ -32,7 +32,7 @@ function toForm(c) {
   if (c.kind === 'exchange') {
     return {
       ...f, count: r.count || 11, kinds: r.kinds || 'any', tiersOnly: r.tiers_only || [], minTier: r.min_tier || {}, minRating: r.min_rating || '',
-      maxPer: r.max_per_player || '', specialKinds: r.special_kinds || [], keepPlayers: r.players?.length ? { ids: r.players, label: r.players_label || `${r.players.length} chosen players` } : null,
+      maxPer: r.max_per_player || '', specialKinds: r.special_kinds || [], roles: r.roles || [], minRole: r.min_role || {}, keepPlayers: r.players?.length ? { ids: r.players, label: r.players_label || `${r.players.length} chosen players` } : null,
     }
   }
   const s = r.selector || {}
@@ -57,6 +57,9 @@ function toBody(f) {
     if (Number(f.minRating) > 0) rules.min_rating = Number(f.minRating)
     if (Number(f.maxPer) > 0) rules.max_per_player = Number(f.maxPer)
     if (f.specialKinds.length) rules.special_kinds = f.specialKinds
+    if (f.roles.length) rules.roles = f.roles
+    const mr = Object.fromEntries(Object.entries(f.minRole).filter(([, n]) => Number(n) > 0).map(([k, n]) => [k, Number(n)]))
+    if (Object.keys(mr).length) rules.min_role = mr
     if (f.premiership) { const [season, grade] = f.premiership.split('|'); rules.premiership = { season, grade } }
     else if (f.keepPlayers) { rules.players = f.keepPlayers.ids; rules.players_label = f.keepPlayers.label }
     body.rules = rules
@@ -181,6 +184,22 @@ function ChallengeForm({ payload, initial, editingId, onSaved, onCancel }) {
                 </Select>
               </Field>
             </div>
+            {(payload.roles || []).length > 0 && (
+              <>
+                <Field label="Only these roles, from the club's own player records (none picked means any; a player with no role recorded does not count)"><Checks name="roles" label="Roles" options={payload.roles} value={f.roles} onChange={(v) => set({ roles: v })} /></Field>
+                <Field label="At least this many of a role (0 means no minimum)">
+                  <div className="flex flex-wrap gap-3" data-min-roles>
+                    {payload.roles.map((r) => (
+                      <label key={r.key} className="inline-flex items-center gap-1.5 text-sm">
+                        <input type="number" min="0" max={f.count || 30} value={f.minRole[r.key] || ''} aria-label={`Minimum ${r.label} cards`} data-min-role={r.key}
+                          onChange={(e) => set({ minRole: { ...f.minRole, [r.key]: e.target.value } })} className="w-16 bg-pb-surface2 border border-pb-hairline2 rounded px-2 py-1 text-sm" />
+                        {r.label}
+                      </label>
+                    ))}
+                  </div>
+                </Field>
+              </>
+            )}
             {(payload.special_kinds || []).length > 0 && (
               <Field label="Special cards of these kinds only (none picked means any)"><Checks name="special-kinds" label="Special kinds" options={payload.special_kinds} value={f.specialKinds} onChange={(v) => set({ specialKinds: v })} /></Field>
             )}

@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import get_db
 from app.routers.public_availability import _club_branding, _club_for_token, _client_ip, _player_for_session
-from app.services import player_card_alerts as alerts, player_card_challenges as challenges, player_card_catalogue as catalogue, player_card_community as community, player_card_designs as pack_designs, player_card_sets as card_sets, player_card_social as social, player_card_swaps as swaps, player_cards as cards, rate_limit
+from app.services import player_card_alerts as alerts, player_card_market as market, player_card_challenges as challenges, player_card_catalogue as catalogue, player_card_community as community, player_card_designs as pack_designs, player_card_sets as card_sets, player_card_social as social, player_card_swaps as swaps, player_cards as cards, rate_limit
 from app.services.session_safety import rollback_keeping
 
 router = APIRouter(prefix="/public/availability", tags=["public-player-cards"])
@@ -164,7 +164,7 @@ async def get_my_swaps(token: str, request: Request, db: AsyncSession = Depends(
 
 @router.get("/{token}/me/cards/catalogue")
 async def get_catalogue(token: str, request: Request, filter: str = "all", sort: str = "rarity", q: str = "", offset: int = 0, limit: int = 12, have: str = "all",
-                        set: str = "", db: AsyncSession = Depends(get_db)):
+                        set: str = "", role: str = "", db: AsyncSession = Depends(get_db)):
     """The club's whole set, a window at a time, laid out like the player's own book (players, then special cards in
     stacks). Nothing needs to be held, and nothing about anyone's collection is shown beyond whether a copy could be swapped."""
     club, player, snap = await _ready(db, request, token)
@@ -172,7 +172,7 @@ async def get_catalogue(token: str, request: Request, filter: str = "all", sort:
                        detail="Slow down. Give it a few seconds and try again.")
     if sort not in catalogue.SORTS:
         sort = "rarity"
-    return await catalogue.page(db, club, snap, str(player.id), filter=filter[:20], sort=sort, q=q[:80], offset=offset, limit=limit, have=have[:12], set_key=(set[:60] or None))
+    return await catalogue.page(db, club, snap, str(player.id), filter=filter[:20], sort=sort, q=q[:80], offset=offset, limit=limit, have=have[:12], set_key=(set[:60] or None), role=role[:8])
 
 
 @router.get("/{token}/me/cards/catalogue/holders")
@@ -314,6 +314,7 @@ class PrefsBody(BaseModel):
     alert_wants: Optional[bool] = None
     board_hidden: Optional[bool] = None
     feed_hidden: Optional[bool] = None
+    wants_hidden: Optional[bool] = None
 
 
 class CardsBody(BaseModel):
@@ -362,6 +363,23 @@ async def remove_want(token: str, key: str, request: Request, db: AsyncSession =
         raise _refuse(exc)
     await db.commit()
     return {"ok": True}
+
+
+@router.get("/{token}/me/cards/market")
+async def get_market(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """What other players are after: the asker's cards in demand, and everyone with a visible wish list."""
+    club, player, snap = await _ready(db, request, token)
+    return await market.overview(db, club, snap, str(player.id))
+
+
+@router.get("/{token}/me/cards/market/{player_id}")
+async def get_market_player(token: str, player_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """One player's wish list and tradeable cards, marked against the asker's own."""
+    club, player, snap = await _ready(db, request, token)
+    try:
+        return await market.player_detail(db, club, snap, str(player.id), player_id)
+    except swaps.SwapError as exc:
+        raise _refuse(exc)
 
 
 @router.get("/{token}/me/cards/spares")

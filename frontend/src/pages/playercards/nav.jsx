@@ -17,6 +17,7 @@ export const NAV = [
   { group: 'Packs' },
   { key: 'packs', label: 'Open packs', icon: 'packs', to: '/packs', badge: 'packs' },
   { group: 'Trading' },
+  { key: 'market', label: 'Market', icon: 'market', to: '/market' },
   { key: 'swaps', label: 'Swaps', icon: 'swaps', to: '/swaps', badge: 'swaps' },
   { key: 'spares', label: 'Spares', icon: 'spares', to: '/spares' },
   { group: 'Club', feature: ['sets', 'board', 'feed'] },

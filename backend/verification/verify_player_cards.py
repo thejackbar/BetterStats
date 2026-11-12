@@ -107,6 +107,11 @@ if HAVE_SWAPS:
     except ImportError:   # the control run on the commit before the social side
         SOCIAL_DDL = []
     try:
+        from app.services.player_card_market_ddl import STATEMENTS as MARKET_DDL
+        from app.services import player_card_market as market
+    except ImportError:   # the control run on the commit before the Market
+        MARKET_DDL, market = [], None
+    try:
         from app.services.player_card_dismissed_ddl import STATEMENTS as DISMISSED_DDL
     except ImportError:   # the control run on the commit before dismissing suggested swaps
         DISMISSED_DDL = []
@@ -116,6 +121,8 @@ else:
     SWAP_DDL = []
     SOCIAL_DDL = []
     DISMISSED_DDL = []
+    MARKET_DDL = []
+    market = None
     COMMUNITY_DDL = []
     PACKS_DDL = []
     DESIGNS_DDL = []
@@ -201,7 +208,7 @@ async def build_schema() -> None:
             await conn.execute(text(sql.replace("OR REPLACE ", "")))
         for stmt in SUPERSEDED_DDL:
             await conn.execute(text(stmt))
-        for stmt in CARD_DDL + SWAP_DDL + SOCIAL_DDL + COMMUNITY_DDL + PACKS_DDL + DESIGNS_DDL + GIFTS_DDL + PHOTOS_DDL + LOOKS_DDL + CHALLENGES_DDL + WINNER_DDL + DISMISSED_DDL:
+        for stmt in CARD_DDL + SWAP_DDL + SOCIAL_DDL + COMMUNITY_DDL + PACKS_DDL + DESIGNS_DDL + GIFTS_DDL + PHOTOS_DDL + LOOKS_DDL + CHALLENGES_DDL + WINNER_DDL + DISMISSED_DDL + MARKET_DDL:
             await conn.execute(text(stmt))
 
 
@@ -1520,7 +1527,7 @@ async def main() -> None:
             await social_mod.save_prefs(db, club, a, {"feed_hidden": True}); await db.commit()
             fd2 = await community.feed(db, club, snap, d)
             check("a player who opted out is left out of it entirely (their pulls and their swaps)", not any(e["type"] in ("pull", "swap") for e in fd2["events"]))
-            check("the defaults: no email, on the board, in the feed", (await social_mod.load_prefs(db, c_)) == {"alert_swaps": False, "alert_wants": False, "board_hidden": False, "feed_hidden": False})
+            check("the defaults: no email, on the board, in the feed, wish list visible in the Market", (await social_mod.load_prefs(db, c_)) == {"alert_swaps": False, "alert_wants": False, "board_hidden": False, "feed_hidden": False, "wants_hidden": False})
             await social_mod.save_prefs(db, club, a, {"feed_hidden": False}); await db.commit()
 
             # switches and the routes
@@ -1885,6 +1892,92 @@ async def main() -> None:
                         await db.commit()
                         sg1 = await social.suggested_swaps(db, club, wl_snap, z1)
                         check("with everything restored the suggestion is back to four ways (and the rest of this section is unchanged)", len(sg1) == 1 and sg1[0]["options"] == 4, str(sg1)[:300])
+                    # The Market: other players' wish lists by name, lined up against mine.
+                    if market is not None:
+                        A_, B_, C_, D_ = str(ALPHA), str(BRAVO), str(CHARLIE), str(DELTA)
+                        ov = await market.overview(db, club, wl_snap, z1)
+                        row2 = next((p for p in ov["players"] if p["player_id"] == z2), None)
+                        check("the Market lists a player with a visible wish list, with how it lines up: Z2 wants ALPHA and BRAVO (Z1 holds both) and holds CHARLIE and DELTA (Z1 wants both)", row2 is not None and row2["they_want_mine"] == 2 and row2["i_want_theirs"] == 2 and row2["swap_possible"] is True, str(row2))
+                        check("the Market never lists the asker", all(p["player_id"] != z1 for p in ov["players"]))
+                        dem = {c["key"]: c for c in ov["demand"]}
+                        check("your cards in demand name who wants them: ALPHA is wanted by Z2, and you hold two", f"p:{ALPHA}" in dem and any(w["player_id"] == z2 for w in dem[f"p:{ALPHA}"]["wanted_by"]) and dem[f"p:{ALPHA}"]["tradeable"] == 2, str(dem.get(f"p:{ALPHA}", {}).get("wanted_by")))
+                        check("...and a card you hold that nobody wants is not in demand (Z1 holds no CHARLIE: it is not offered)", f"p:{CHARLIE}" not in dem)
+                        det = await market.player_detail(db, club, wl_snap, z1, z2)
+                        wk = {c["key"]: c for c in det["wants"]}
+                        check("a player's page lists what they want with MY copies marked: ALPHA (two) and BRAVO (one)", wk.get(f"p:{ALPHA}", {}).get("mine") is True and wk[f"p:{ALPHA}"]["tradeable"] == 2 and wk.get(f"p:{BRAVO}", {}).get("tradeable") == 1, str(wk.keys()))
+                        check("...mine come first", [c["mine"] for c in det["wants"]] == sorted([c["mine"] for c in det["wants"]], reverse=True))
+                        th = {c["key"]: c for c in det["theirs"]}
+                        check("...and what they could swap with the ones on MY list marked: CHARLIE and DELTA", th.get(f"p:{CHARLIE}", {}).get("on_my_list") is True and th.get(f"p:{DELTA}", {}).get("on_my_list") is True, str({k: v.get("on_my_list") for k, v in th.items()}))
+                        check("...and only those are marked: nothing of theirs outside CHARLIE and DELTA is on my list", all(c["on_my_list"] is False for c in det["theirs"] if swaps.parse_key(c["key"])[0] not in (C_, D_)), str({k: v["on_my_list"] for k, v in th.items()}))
+                        try:
+                            await market.player_detail(db, club, wl_snap, z1, z1); refused_me = False
+                        except Exception as exc:
+                            refused_me = isinstance(exc, swaps.SwapError)
+                        check("a player cannot open their own page, or someone outside the club", refused_me)
+                        await wl_give(Z2, ALPHA)
+                        det2 = await market.player_detail(db, club, wl_snap, z1, z2)
+                        check("a card they already hold is left out of what they want (their list is only cleaned when they read it)", f"p:{ALPHA}" not in {c["key"] for c in det2["wants"]} and f"p:{BRAVO}" in {c["key"] for c in det2["wants"]})
+                        await db.execute(text("DELETE FROM player_card_copies WHERE owner_player_id = :p AND subject_player_id = :s"), {"p": Z2, "s": ALPHA}); await db.commit()
+                        # keeping a list private
+                        check("a wish list is visible until its owner switches it off", (await social.load_prefs(db, z2)).get("wants_hidden") is False)
+                        await social.save_prefs(db, club, z2, {"wants_hidden": True}); await db.commit()
+                        ov_h = await market.overview(db, club, wl_snap, z1)
+                        check("a private list is not in the Market's players", all(p["player_id"] != z2 for p in ov_h["players"]))
+                        dem_h = {c["key"]: c for c in ov_h["demand"]}
+                        check("...is not named under the card, and is only counted ('hidden')", f"p:{ALPHA}" in dem_h and all(w["player_id"] != z2 for w in dem_h[f"p:{ALPHA}"]["wanted_by"]) and dem_h[f"p:{ALPHA}"]["hidden"] >= 1, str(dem_h.get(f"p:{ALPHA}")))
+                        try:
+                            await market.player_detail(db, club, wl_snap, z1, z2); refused_hidden = False
+                        except Exception as exc:
+                            refused_hidden = isinstance(exc, swaps.SwapError) and exc.status == 404
+                        check("...and its page is refused", refused_hidden)
+                        check("...but it still counts in the 'wanted by' numbers and still gets a suggested swap with the player it matches", (await social.wanted_counts(db, club, wl_snap, z1)).get((A_, None)) == 1 and len(await social.suggested_swaps(db, club, wl_snap, z1)) == 1)
+                        await social.save_prefs(db, club, z2, {"alert_swaps": True}); await db.commit()
+                        check("a settings change that does not mention it leaves it alone (an absent key is not a clear)", (await social.load_prefs(db, z2)).get("wants_hidden") is True)
+                        await social.save_prefs(db, club, z2, {"wants_hidden": False, "alert_swaps": False}); await db.commit()
+                        check("...and switching it back shows the list again", any(p["player_id"] == z2 for p in (await market.overview(db, club, wl_snap, z1))["players"]))
+                    # Roles: the club's own player records, as a code on every card
+                    if hasattr(cards, "role_code"):
+                        rc = cards.role_code
+                        check("role codes: Batter, Bowler, All Rounder, Wicketkeeper and Wicketkeeper-Batter (a keeper who bats is a keeper)", [rc("Batter"), rc("Bowler"), rc("All Rounder"), rc("Wicketkeeper"), rc("Wicketkeeper-Batter")] == ["BAT", "BOWL", "AR", "WK", "WK"], str([rc("Batter"), rc("Bowler"), rc("All Rounder"), rc("Wicketkeeper"), rc("Wicketkeeper-Batter")]))
+                        check("...a missing or unreadable role is None, never a guess; a keeper flag alone makes a keeper", rc(None) is None and rc("") is None and rc("Captain") is None and rc(None, True) == "WK" and rc("Bowler", True) == "BOWL")
+                        await db.execute(text("UPDATE players SET player_role = 'Bowler' WHERE id = :p"), {"p": ALPHA})
+                        await db.execute(text("UPDATE players SET player_role = 'Wicketkeeper-Batter' WHERE id = :p"), {"p": BRAVO}); await db.commit()
+                        cards.forget(ORG)
+                        rs = await cards.club_snapshot(db, club, fresh=True)
+                        check("a card carries the club's role for the player", cards.regular_card(rs, A_)["role"] == "BOWL" and cards.regular_card(rs, B_)["role"] == "WK" and cards.regular_card(rs, C_)["role"] is None, str((cards.regular_card(rs, A_)["role"], cards.regular_card(rs, C_)["role"])))
+                        cat_b = await catalogue.page(db, club, rs, z1, role="BOWL", limit=60)
+                        cat_n = await catalogue.page(db, club, rs, z1, role="none", limit=60)
+                        cat_x = await catalogue.page(db, club, rs, z1, role="nonsense", limit=60)
+                        cat_all = await catalogue.page(db, club, rs, z1, limit=60)
+                        keys_b = {c["key"] for c in cat_b["items"] if "key" in c and not c.get("stack")}
+                        check("Club cards filtered to bowlers holds ALPHA and none of the others", f"p:{ALPHA}" in keys_b and f"p:{BRAVO}" not in keys_b and f"p:{CHARLIE}" not in keys_b, str(sorted(keys_b))[:200])
+                        keys_n = {c["key"] for c in cat_n["items"] if "key" in c and not c.get("stack")}
+                        check("...'none' is the players with no role recorded, and leaves out the ones with one", f"p:{CHARLIE}" in keys_n and f"p:{ALPHA}" not in keys_n and f"p:{BRAVO}" not in keys_n)
+                        check("...a role it does not know is no filter at all", cat_x["total"] == cat_all["total"] and cat_b["total"] < cat_all["total"])
+                        await db.execute(text("UPDATE players SET player_role = NULL WHERE id = ANY(CAST(:p AS uuid[]))"), {"p": [ALPHA, BRAVO]}); await db.commit()
+                        cards.forget(ORG)
+                        wl_snap = await cards.club_snapshot(db, club, fresh=True)
+                    # Challenges can ask for roles
+                    from app.services import player_card_challenges as challenges
+                    if hasattr(challenges, "describe_rules") and hasattr(cards, "ROLES"):
+                        ok_rules = challenges.clean_rules({"count": 4, "roles": ["BOWL", "AR"], "min_role": {"BOWL": 2}})
+                        check("a challenge can be limited to roles and ask for a minimum of one", ok_rules.get("roles") == ["BOWL", "AR"] and ok_rules.get("min_role") == {"BOWL": 2}, str(ok_rules))
+                        def refuses(raw):
+                            try:
+                                challenges.clean_rules(raw); return False
+                            except challenges.ChallengeError:
+                                return True
+                        check("...an unknown role, a minimum the roles leave out, and minimums over the count are refused", refuses({"count": 4, "roles": ["GOALIE"]}) and refuses({"count": 4, "roles": ["BAT"], "min_role": {"BOWL": 1}}) and refuses({"count": 3, "min_role": {"BAT": 2, "BOWL": 2}}))
+                        def card_(role, i):
+                            return {"kind": "player", "tier": "common", "rarity": 10, "player_id": f"p{i}", "role": role, "key": f"p:{i}"}
+                        good = [card_("BOWL", 1), card_("BOWL", 2), card_("AR", 3), card_("AR", 4)]
+                        ev = challenges.evaluate(ok_rules, good)
+                        check("a squad of two bowlers and two all-rounders meets it", ev["ok"] is True, str(ev["checks"]))
+                        ev2 = challenges.evaluate(ok_rules, [card_("BOWL", 1), card_("AR", 2), card_("AR", 3), card_("AR", 4)])
+                        check("...one bowler is short of the minimum, and the line says so", ev2["ok"] is False and any(c["id"] == "min_role:BOWL" and c["ok"] is False and c["have"] == 1 for c in ev2["checks"]), str(ev2["checks"]))
+                        ev3 = challenges.evaluate(ok_rules, [card_("BOWL", 1), card_("BOWL", 2), card_("AR", 3), card_(None, 4)])
+                        check("...a card with no role recorded does not count as any role", ev3["ok"] is False and any(c["id"] == "roles" and c["have"] == 3 for c in ev3["checks"]), str(ev3["checks"]))
+                        check("the rules read back in plain words", any("bowlers" in l for l in challenges.describe_rules(ok_rules)) and any("At least 2 bowlers" == l for l in challenges.describe_rules(ok_rules)), str(challenges.describe_rules(ok_rules)))
                     # the request over them
                     await swaps.create_swap(db, club, wl_snap, z1, z2, [{"key": f"p:{ALPHA}", "qty": 1}], [{"key": f"p:{CHARLIE}", "qty": 1}])
                     await db.commit()

@@ -93,7 +93,7 @@ HAVE = ("all", "not_mine", "swappable")
 
 
 async def page(db: AsyncSession, club: Organisation, snap: dict, me: str, *, filter: str = "all", sort: str = "rarity",
-               q: str = "", offset: int = 0, limit: int = 12, have: str = "all", set_key: Optional[str] = None) -> dict:
+               q: str = "", offset: int = 0, limit: int = 12, have: str = "all", set_key: Optional[str] = None, role: str = "") -> dict:
     """One window of the book. `filter` is all, regular, special or a category key; `have` narrows to the cards the
     asker does not hold ("not_mine") or that at least one other player could swap ("swappable"). Returns `{total, counts, items}`
     where an item is a card or, for a player's several cards of one category, a stack `{stack, key, cat, cards, name, count}`."""
@@ -104,6 +104,8 @@ async def page(db: AsyncSession, club: Organisation, snap: dict, me: str, *, fil
     mine = (await swaps._rows_by_card(db, club.id, me)).get(me, {})
 
     have = have if have in HAVE else "all"
+    # `role` narrows to cards whose player has that role in the club's records (`none` is the players with no role recorded).
+    role = role if (role in cards.ROLES or role == "none") else ""
     in_set = None
     if set_key:
         from app.services import player_card_sets as sets_mod
@@ -111,6 +113,10 @@ async def page(db: AsyncSession, club: Organisation, snap: dict, me: str, *, fil
         in_set = found[:2] if found else (set(), set())
 
     def wanted(key: tuple) -> bool:
+        if role:
+            have_role = (snap["people"].get(key[0]) or {}).get("role")
+            if (have_role or "none") != role:
+                return False
         if have == "not_mine":
             return mine.get(key, 0) + (1 if key == (me, None) else 0) == 0
         if have == "swappable":

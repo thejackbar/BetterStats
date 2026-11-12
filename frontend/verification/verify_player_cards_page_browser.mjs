@@ -79,7 +79,7 @@ const run = async () => {
     check('a sidebar, and no rail or bottom bar', await vis(page, '[data-sidebar]') && !(await vis(page, '[data-rail]')) && !(await vis(page, '[data-bottom-bar]')))
     const items = await page.locator('[data-sidebar] [data-nav]').evaluateAll((els) => els.map((e) => e.getAttribute('data-nav')))
     sidebarKeys = items
-    check('Home, My cards, Club cards, Wish list, Showcase, Open packs, Swaps, Spares, Challenges, Sets and board, How it works, Settings, in that order', JSON.stringify(items) === JSON.stringify(['home', 'book', 'club', 'wishlist', 'showcase', 'packs', 'swaps', 'spares', 'challenges', 'sets', 'how', 'settings']), JSON.stringify(items))
+    check('Home, My cards, Club cards, Wish list, Showcase, Open packs, Market, Swaps, Spares, Challenges, Sets and board, How it works, Settings, in that order', JSON.stringify(items) === JSON.stringify(['home', 'book', 'club', 'wishlist', 'showcase', 'packs', 'market', 'swaps', 'spares', 'challenges', 'sets', 'how', 'settings']), JSON.stringify(items))
     check('the screen you are on is lit', (await page.locator('[data-sidebar] [data-nav="home"]').getAttribute('aria-current')) === 'page')
     check('packs and swaps carry their counts', (await page.locator('[data-sidebar] [data-nav="packs"] [data-nav-badge]').textContent()) === '2' && (await page.locator('[data-sidebar] [data-nav="swaps"] [data-nav-badge]').textContent()) === '1')
     check('Back to my page goes to the dashboard', (await page.locator('[data-sidebar] [data-back-to-page]').getAttribute('href')) === '/playerdash/tok123')
@@ -110,7 +110,7 @@ const run = async () => {
     await page.click('[data-bottom-bar] [data-nav="more"]')
     await page.waitForSelector('[data-more-sheet]')
     const links = await page.locator('[data-more-link]').allTextContents()
-    check('More holds Club cards, Wish list, Showcase, Spares, Challenges, Sets and board, How it works, Settings and the way back', links.map((x) => x.trim()).join('|') === 'Club cards|Wish list|Showcase|Spares|Challenges|Sets and board|How it works|Settings|Back to my page', links.join('|'))
+    check('More holds Club cards, Wish list, Showcase, Market, Spares, Challenges, Sets and board, How it works, Settings and the way back', links.map((x) => x.trim()).join('|') === 'Club cards|Wish list|Showcase|Market|Spares|Challenges|Sets and board|How it works|Settings|Back to my page', links.join('|'))
     const moreKeys = await page.locator('[data-more-link][data-more-key]').evaluateAll((els) => els.map((e) => e.getAttribute('data-more-key')))
     check('the phone menu is the sidebar list: the bar plus More covers every sidebar entry, in the same order, and nothing else', JSON.stringify([...items, ...moreKeys].filter((k) => k !== 'more').sort()) === JSON.stringify([...sidebarKeys].sort()) && JSON.stringify(sidebarKeys.filter((k) => moreKeys.includes(k))) === JSON.stringify(moreKeys), `${JSON.stringify(items)} ${JSON.stringify(moreKeys)} vs ${JSON.stringify(sidebarKeys)}`)
     check('the More sheet carries the group headings the sidebar has', /Collection/i.test(await page.locator('[data-more-sheet]').textContent()) && /Club/i.test(await page.locator('[data-more-sheet]').textContent()))

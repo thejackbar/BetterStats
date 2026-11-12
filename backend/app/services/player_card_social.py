@@ -1,10 +1,11 @@
 """Player Cards, the social side: the wish list, spares a player is open to swapping, one card in full, and a player's
 alert settings.
 
-* A wish list is private to its owner. A card on it is listed with who could swap one right now, which is the same thing
-  anyone can already see in Club cards. Nobody else is ever told what is on someone's list, with ONE exception: a suggested swap
-  (below) shows each of two players a card of theirs the other is after, and a card of the other's they are after, because the
-  match is the point. Nothing else on either list is shown. Everyone else only ever gets a count of wishes on a card they hold.
+* A wish list is visible to the club by name in the Market (`services/player_card_market.py`), unless its owner switches that off
+  (`player_card_prefs.wants_hidden`, Settings). A list kept private is never shown or named there, but it still counts in the
+  "wanted by" numbers, and it still drives a suggested swap (below) with the one player it matches.
+* A card on a list is listed to its owner with who could swap one right now, which is the same thing anyone can already see in Club
+  cards. A suggested swap shows each of two players a card of theirs the other is after, and a card of the other's they are after.
 * A card comes off the wish list the moment the player holds a copy, however it came (`player_cards.drop_fulfilled_wants`).
 * A player is told how many other players have a card they HOLD on their wish list, as a number, never as names
   (`wanted_counts`): in the book, on the card page and on Spares. A player already holding a copy does not count.
@@ -320,13 +321,13 @@ async def card_detail(db: AsyncSession, club: Organisation, snap: dict, me: str,
 # ── Alert settings ────────────────────────────────────────────────────────────────────────────────────────────
 
 # Nobody is emailed until they ask (both alerts default OFF); everyone is on the collectors board until they leave it.
-PREF_FIELDS = ("alert_swaps", "alert_wants", "board_hidden", "feed_hidden")
-_PREF_DEFAULTS = {"alert_swaps": False, "alert_wants": False, "board_hidden": False, "feed_hidden": False}
+PREF_FIELDS = ("alert_swaps", "alert_wants", "board_hidden", "feed_hidden", "wants_hidden")
+_PREF_DEFAULTS = {"alert_swaps": False, "alert_wants": False, "board_hidden": False, "feed_hidden": False, "wants_hidden": False}
 
 
 async def load_prefs(db: AsyncSession, me: str) -> dict:
     row = (await db.execute(text(
-        "SELECT alert_swaps, alert_wants, board_hidden, feed_hidden FROM player_card_prefs WHERE player_id = CAST(:me AS UUID)"
+        "SELECT alert_swaps, alert_wants, board_hidden, feed_hidden, wants_hidden FROM player_card_prefs WHERE player_id = CAST(:me AS UUID)"
     ), {"me": me})).mappings().first()
     out = dict(_PREF_DEFAULTS)
     if row:
@@ -341,8 +342,9 @@ async def save_prefs(db: AsyncSession, club: Organisation, me: str, patch: dict)
         if k in patch and patch[k] is not None:
             current[k] = bool(patch[k])
     await db.execute(text(
-        "INSERT INTO player_card_prefs (player_id, organisation_id, alert_swaps, alert_wants, board_hidden, feed_hidden) "
-        "VALUES (CAST(:me AS UUID), CAST(:o AS UUID), :a, :w, :b, :f) "
-        "ON CONFLICT (player_id) DO UPDATE SET alert_swaps = :a, alert_wants = :w, board_hidden = :b, feed_hidden = :f, updated_at = NOW()"
-    ), {"me": me, "o": str(club.id), "a": current["alert_swaps"], "w": current["alert_wants"], "b": current["board_hidden"], "f": current["feed_hidden"]})
+        "INSERT INTO player_card_prefs (player_id, organisation_id, alert_swaps, alert_wants, board_hidden, feed_hidden, wants_hidden) "
+        "VALUES (CAST(:me AS UUID), CAST(:o AS UUID), :a, :w, :b, :f, :h) "
+        "ON CONFLICT (player_id) DO UPDATE SET alert_swaps = :a, alert_wants = :w, board_hidden = :b, feed_hidden = :f, wants_hidden = :h, updated_at = NOW()"
+    ), {"me": me, "o": str(club.id), "a": current["alert_swaps"], "w": current["alert_wants"], "b": current["board_hidden"], "f": current["feed_hidden"],
+        "h": current["wants_hidden"]})
     return current

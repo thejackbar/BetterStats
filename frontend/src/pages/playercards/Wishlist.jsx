@@ -49,7 +49,7 @@ export default function Wishlist() {
   const href = (w) => `${basePath}/card/${encodeURIComponent(w.key)}`
   return (
     <div data-screen="wishlist">
-      <PageHead title="Wish list" sub="Cards you are after. Only you can see this list. When someone could swap you one, you can ask them from here."
+      <PageHead title="Wish list" sub="Cards you are after. Other players can see this list in the Market, so they can swap you what you want (you can switch that off in Settings). When someone could swap you one, you can ask them from here."
         actions={<Link to={`${basePath}/club`} className="px-4 py-2 rounded-lg border pb-hairline text-sm font-semibold">Find cards to add</Link>} />
       {data.wants.length === 0 && (
         <div data-no-wants className="rounded-2xl border pb-hairline bg-pb-surface p-6 text-pb-dim">

@@ -72,7 +72,7 @@ def clean_rules(raw: Any) -> dict:
     typo cannot make a challenge easier than the admin meant."""
     if not isinstance(raw, dict):
         raise ChallengeError("The rules could not be read.")
-    allowed = {"count", "kinds", "tiers_only", "min_tier", "min_rating", "max_per_player", "special_kinds", "players", "players_label"}
+    allowed = {"count", "kinds", "tiers_only", "min_tier", "min_rating", "max_per_player", "special_kinds", "players", "players_label", "roles", "min_role"}
     extra = set(raw) - allowed
     if extra:
         raise ChallengeError(f"Not a rule we know: {', '.join(sorted(extra))}.")
@@ -104,6 +104,22 @@ def clean_rules(raw: Any) -> dict:
         if not isinstance(sk, list) or any(k not in cards.SPECIAL_KINDS for k in sk):
             raise ChallengeError("That is not a kind of special card.")
         out["special_kinds"] = sorted(set(sk))
+    if raw.get("roles"):
+        rl = raw["roles"]
+        if not isinstance(rl, list) or any(r not in cards.ROLES for r in rl):
+            raise ChallengeError("Pick roles from Batter, Bowler, All Rounder and Wicketkeeper.")
+        out["roles"] = [r for r in cards.ROLES if r in rl]
+    if raw.get("min_role"):
+        mr = raw["min_role"]
+        if not isinstance(mr, dict) or any(r not in cards.ROLES for r in mr):
+            raise ChallengeError("The minimum per role could not be read.")
+        clean = {r: _int(n, 1, out["count"], f"The number of {cards.ROLES[r].lower()} cards") for r, n in mr.items() if n}
+        if sum(clean.values()) > out["count"]:
+            raise ChallengeError("The role minimums add up to more cards than the challenge takes.")
+        if "roles" in out and any(r not in out["roles"] for r in clean):
+            raise ChallengeError("A role is asked for but the roles allowed leave it out.")
+        if clean:
+            out["min_role"] = clean
     if raw.get("players"):
         ids = raw["players"]
         if not isinstance(ids, list) or len(ids) > MAX_KEYS:
@@ -140,9 +156,18 @@ def describe_rules(rules: dict) -> list[str]:
         out.append("All different players" if rules["max_per_player"] == 1 else f"No more than {rules['max_per_player']} cards of one player")
     if rules.get("special_kinds"):
         out.append("Special cards: " + ", ".join(cards.SPECIAL_KINDS[k] for k in rules["special_kinds"]))
+    if rules.get("roles"):
+        out.append("Only " + _role_list(rules["roles"]))
+    for r, n in (rules.get("min_role") or {}).items():
+        out.append(f"At least {n} {cards.ROLES[r].lower()}{'' if n == 1 else 's'}")
     if rules.get("players"):
         out.append(rules.get("players_label") or f"Only cards of {len(rules['players'])} named players")
     return out
+
+
+def _role_list(codes: list[str]) -> str:
+    names = [cards.ROLES[c].lower() + "s" for c in codes]
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
 
 
 def clean_reward(raw: Any) -> dict:
@@ -197,6 +222,13 @@ def evaluate(rules: dict, chosen: list[dict]) -> dict:
     if rules.get("special_kinds"):
         wrong = sum(1 for c in chosen if c["kind"] == "special" and c.get("special_kind") not in rules["special_kinds"])
         add("special_kinds", "Special cards: " + ", ".join(cards.SPECIAL_KINDS[k] for k in rules["special_kinds"]), wrong == 0, n - wrong, n)
+    if rules.get("roles"):
+        # A card with no recorded role cannot show it is one of these, so it does not count.
+        wrong = sum(1 for c in chosen if c.get("role") not in rules["roles"])
+        add("roles", "Only " + _role_list(rules["roles"]), wrong == 0, n - wrong, n)
+    for r, need in (rules.get("min_role") or {}).items():
+        have = sum(1 for c in chosen if c.get("role") == r)
+        add(f"min_role:{r}", f"At least {need} {cards.ROLES[r].lower()}{'' if need == 1 else 's'}", have >= need, have, need)
     if rules.get("players"):
         allowed = set(rules["players"])
         wrong = sum(1 for c in chosen if c["player_id"] not in allowed)

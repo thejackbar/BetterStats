@@ -286,6 +286,7 @@ async def _challenge_payload(db: AsyncSession, club: Organisation) -> dict:
         "players": sorted(({"id": pid, "name": snap["people"][pid]["display_name"]} for pid in drawable), key=lambda p: p["name"].lower()),
         "tiers": [{"key": k, "label": challenges.TIER_NAME[k]} for k in challenges.TIER_KEYS],
         "special_kinds": [{"key": k, "label": v} for k, v in cards.SPECIAL_KINDS.items()],
+        "roles": [{"key": k, "label": v} for k, v in cards.ROLES.items()],
         "qualities": cards.quality_options(),
         "limits": {"count": challenges.MAX_COUNT, "completions": challenges.MAX_COMPLETIONS, "reward_qty": challenges.MAX_REWARD_QTY,
                    "pack_size": {"min": cards.MIN_PACK_SIZE, "max": cards.MAX_PACK_SIZE, "default": cards.PACK_SIZE}},
