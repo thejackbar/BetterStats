@@ -1,0 +1,4 @@
+# Meta ad: BetterStats explainer (9:16, 1080x1920, 2:15)
+Built from the supplied story, no voiceover, captions carry every point, music + soft SFX.
+Meta optimisation: vertical full-bleed; hook text and club crests popping in the first 2 seconds; captions and action kept inside the Reels/Stories safe zone (top ~290px and bottom ~420px kept clear of text); large high-contrast type; sound-off friendly; "betterat.cricket/trial" shown at 6.7s and again as a large end card; ends on a clear call to action.
+Data: Applecross leaderboard (real top run scorers and wicket takers), Kalamunda career run records, Applecross counts (4,061 games, 1,653 players, 52 seasons) and Scarborough's Liam Pollard (real career totals and photo). Merge, scorecard-photo, spreadsheet, partnership, awards and new-record examples are illustrative. Real crests for all seven clubs.

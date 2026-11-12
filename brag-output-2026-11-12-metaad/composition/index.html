@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=1080, height=1920">
+<title>BetterStats: your club's whole cricket history</title>
+<script src="assets/gsap.min.js"></script>
+<style>
+@font-face{font-family:'AC';src:url('assets/fonts/applecross-display.ttf') format('truetype');font-weight:100 900;font-style:normal}
+:root{--g:#16c784;--sel:#3b82f6;--soc:#ec4899;--adm:#f59e0b;--iq:#a855f7;--fan:#06b6d4;--mut:#94a3b8;--card:#0f1420;--line:rgba(255,255,255,.1)}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:1080px;height:1920px;overflow:hidden;background:#04070b;font-family:'Inter',sans-serif;color:#fff}
+#root{position:absolute;left:0;top:0;width:1080px;height:1920px;overflow:hidden;background:#04070b}
+#bg{position:absolute;inset:0;background:#04070b}
+.ab{position:absolute;border-radius:50%}
+#ab1{width:1300px;height:1300px;left:-500px;top:-300px;background:radial-gradient(circle,rgba(22,199,132,.32),rgba(22,199,132,0) 65%)}
+#ab2{width:1100px;height:1100px;left:300px;top:700px;background:radial-gradient(circle,rgba(59,130,246,.16),rgba(59,130,246,0) 65%)}
+#ab3{width:1200px;height:1200px;left:-300px;top:1100px;background:radial-gradient(circle,rgba(22,199,132,.2),rgba(22,199,132,0) 65%)}
+.scene{position:absolute;left:0;top:0;width:1080px;height:1920px;overflow:hidden;opacity:0}
+.abs{position:absolute}
+.h{opacity:0}
+#bug{position:absolute;left:60px;top:296px;display:flex;align-items:center;gap:14px;z-index:50}
+#bug img{width:54px;height:46px;object-fit:contain}
+#bug span{font:800 italic 30px/1 'AC',sans-serif;text-transform:uppercase;letter-spacing:.5px;padding-right:.16em}
+.cap{position:absolute;left:60px;width:960px;top:372px;font:800 italic 64px/1.08 'AC',sans-serif;text-transform:uppercase;letter-spacing:-.5px;padding-right:.16em;opacity:0;text-shadow:0 4px 30px rgba(0,0,0,.6)}
+.cap em{font-style:italic;color:var(--g)}
+.card{position:absolute;background:var(--card);border:1px solid var(--line);border-radius:30px;box-shadow:0 30px 80px rgba(0,0,0,.5)}
+.mono{position:absolute;font:600 26px 'JetBrains Mono',monospace;letter-spacing:3px;text-transform:uppercase;color:var(--mut)}
+.pill{position:absolute;display:flex;align-items:center;gap:12px;border-radius:999px;padding:10px 26px;font:700 30px 'Inter',sans-serif;white-space:nowrap}
+.crest{position:absolute;object-fit:contain}
+.ty i{font-style:normal}
+.tag{position:absolute;left:60px;top:652px;display:flex;align-items:center;gap:14px;font:600 28px 'JetBrains Mono',monospace;letter-spacing:3px;text-transform:uppercase;color:var(--mut);opacity:0}
+.tag img{width:46px;height:46px;object-fit:contain}
+.btn{position:absolute;border-radius:22px;background:var(--g);color:#04130d;font:800 38px 'Inter',sans-serif;display:grid;place-items:center;box-shadow:0 10px 40px rgba(22,199,132,.4)}
+.row{position:absolute;display:flex;align-items:center}
+.chip{display:inline-block;border-radius:999px;padding:8px 22px;font:700 28px 'Inter',sans-serif;border:2px solid rgba(255,255,255,.18);color:#cbd5e1;background:rgba(255,255,255,.05)}
+.tap{position:absolute;width:90px;height:90px;margin:-45px 0 0 -45px;border-radius:50%;border:5px solid #fff;background:rgba(255,255,255,.25);opacity:0;z-index:60}
+#cta{position:absolute;left:90px;top:1450px;width:900px;height:96px;border-radius:48px;background:var(--g);color:#04130d;font:800 40px/96px 'Inter',sans-serif;text-align:center;opacity:0;z-index:40;box-shadow:0 10px 50px rgba(22,199,132,.45)}
+</style></head><body>
+<div id="root" data-composition-id="main" data-start="0" data-duration="135" data-width="1080" data-height="1920">
+<div id="bg"><div class="ab" id="ab1"></div><div class="ab" id="ab2"></div><div class="ab" id="ab3"></div></div>
+<div id="bug"><img src="assets/img/bettercricket-logo.png" alt=""><span>BetterCricket</span></div>
+<div id="s1" class="clip scene" data-start="0" data-duration="9.4" data-track-index="1"></div>
+<div id="s2" class="clip scene" data-start="9" data-duration="12.4" data-track-index="1"></div>
+<div id="s3" class="clip scene" data-start="21" data-duration="14.4" data-track-index="1"></div>
+<div id="s4" class="clip scene" data-start="35" data-duration="22.4" data-track-index="1"></div>
+<div id="s5" class="clip scene" data-start="57" data-duration="12.4" data-track-index="1"></div>
+<div id="s6" class="clip scene" data-start="69" data-duration="20.4" data-track-index="1"></div>
+<div id="s7" class="clip scene" data-start="89" data-duration="10.4" data-track-index="1"></div>
+<div id="s8" class="clip scene" data-start="99" data-duration="8.4" data-track-index="1"></div>
+<div id="s9" class="clip scene" data-start="107" data-duration="19.4" data-track-index="1"></div>
+<div id="s10" class="clip scene" data-start="126" data-duration="9" data-track-index="1"></div>
+<audio id="music" data-timeline-role="music" data-start="0" data-duration="135" data-media-start="3" data-track-index="2" data-volume="0.5" data-fade-out="3" src="assets/music/bed.mp3"></audio>
+<audio id="sfx0" data-start="0.3" data-duration="0.12" data-track-index="4" data-volume="0.4" src="assets/sfx/interface/bong_001.ogg"></audio>
+<audio id="sfx1" data-start="1.4" data-duration="0.06" data-track-index="4" data-volume="0.35" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx2" data-start="2.26" data-duration="0.06" data-track-index="4" data-volume="0.35" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx3" data-start="3.12" data-duration="0.06" data-track-index="4" data-volume="0.35" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx4" data-start="3.98" data-duration="0.06" data-track-index="4" data-volume="0.35" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx5" data-start="4.84" data-duration="0.06" data-track-index="4" data-volume="0.35" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx6" data-start="5.7" data-duration="0.06" data-track-index="4" data-volume="0.35" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx7" data-start="6.56" data-duration="0.06" data-track-index="4" data-volume="0.35" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx8" data-start="9.1" data-duration="0.6" data-track-index="4" data-volume="0.28" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx9" data-start="15.6" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx10" data-start="16.0" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx11" data-start="16.4" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx12" data-start="16.8" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx13" data-start="18.3" data-duration="0.01" data-track-index="4" data-volume="0.6" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx14" data-start="18.9" data-duration="0.12" data-track-index="4" data-volume="0.4" src="assets/sfx/interface/bong_001.ogg"></audio>
+<audio id="sfx15" data-start="21.0" data-duration="0.6" data-track-index="4" data-volume="0.28" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx16" data-start="27.9" data-duration="0.01" data-track-index="4" data-volume="0.3" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx17" data-start="30.4" data-duration="0.01" data-track-index="4" data-volume="0.6" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx18" data-start="31.5" data-duration="0.14" data-track-index="4" data-volume="0.4" src="assets/sfx/impact/impactSoft_medium_002.ogg"></audio>
+<audio id="sfx19" data-start="32.2" data-duration="0.06" data-track-index="4" data-volume="0.4" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx20" data-start="35.0" data-duration="0.6" data-track-index="4" data-volume="0.28" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx21" data-start="37.0" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx22" data-start="37.5" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx23" data-start="38.0" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx24" data-start="38.5" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx25" data-start="41.6" data-duration="0.06" data-track-index="4" data-volume="0.4" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx26" data-start="45.0" data-duration="0.12" data-track-index="4" data-volume="0.4" src="assets/sfx/interface/bong_001.ogg"></audio>
+<audio id="sfx27" data-start="46.5" data-duration="0.18" data-track-index="4" data-volume="0.4" src="assets/sfx/impact/impactSoft_medium_001.ogg"></audio>
+<audio id="sfx28" data-start="54.0" data-duration="0.12" data-track-index="4" data-volume="0.4" src="assets/sfx/interface/bong_001.ogg"></audio>
+<audio id="sfx29" data-start="57.0" data-duration="0.6" data-track-index="4" data-volume="0.28" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx30" data-start="59.85" data-duration="0.69" data-track-index="4" data-volume="0.45" src="assets/sfx/casino/card-place-1.ogg"></audio>
+<audio id="sfx31" data-start="63.2" data-duration="0.01" data-track-index="4" data-volume="0.6" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx32" data-start="67.6" data-duration="0.01" data-track-index="4" data-volume="0.5" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx33" data-start="69.0" data-duration="0.6" data-track-index="4" data-volume="0.28" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx34" data-start="69.7" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx35" data-start="69.98" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx36" data-start="70.26" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx37" data-start="70.54" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx38" data-start="70.82" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx39" data-start="71.1" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx40" data-start="75.2" data-duration="0.01" data-track-index="4" data-volume="0.5" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx41" data-start="79.6" data-duration="0.14" data-track-index="4" data-volume="0.5" src="assets/sfx/impact/impactSoft_medium_002.ogg"></audio>
+<audio id="sfx42" data-start="84.3" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx43" data-start="85.2" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx44" data-start="85.5" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx45" data-start="85.8" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx46" data-start="89.0" data-duration="0.6" data-track-index="4" data-volume="0.28" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx47" data-start="93.3" data-duration="0.01" data-track-index="4" data-volume="0.5" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx48" data-start="95.2" data-duration="0.01" data-track-index="4" data-volume="0.4" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx49" data-start="96.4" data-duration="0.01" data-track-index="4" data-volume="0.4" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx50" data-start="97.6" data-duration="0.01" data-track-index="4" data-volume="0.4" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx51" data-start="99.0" data-duration="0.6" data-track-index="4" data-volume="0.28" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx52" data-start="99.5" data-duration="0.69" data-track-index="5" data-volume="0.45" src="assets/sfx/casino/card-place-1.ogg"></audio>
+<audio id="sfx53" data-start="101.5" data-duration="0.69" data-track-index="4" data-volume="0.45" src="assets/sfx/casino/card-place-1.ogg"></audio>
+<audio id="sfx54" data-start="103.5" data-duration="0.69" data-track-index="4" data-volume="0.45" src="assets/sfx/casino/card-place-1.ogg"></audio>
+<audio id="sfx55" data-start="105.5" data-duration="0.69" data-track-index="4" data-volume="0.45" src="assets/sfx/casino/card-place-1.ogg"></audio>
+<audio id="sfx56" data-start="107.0" data-duration="0.6" data-track-index="4" data-volume="0.28" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx57" data-start="107.3" data-duration="0.06" data-track-index="5" data-volume="0.5" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx58" data-start="111.4" data-duration="0.06" data-track-index="4" data-volume="0.5" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx59" data-start="114.2" data-duration="0.06" data-track-index="4" data-volume="0.5" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx60" data-start="117.0" data-duration="0.06" data-track-index="4" data-volume="0.5" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx61" data-start="119.8" data-duration="0.06" data-track-index="4" data-volume="0.5" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx62" data-start="122.6" data-duration="0.06" data-track-index="4" data-volume="0.5" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx63" data-start="124.6" data-duration="0.72" data-track-index="4" data-volume="0.4" src="assets/sfx/casino/card-fan-1.ogg"></audio>
+<audio id="sfx64" data-start="126.0" data-duration="0.6" data-track-index="4" data-volume="0.28" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx65" data-start="128.4" data-duration="0.01" data-track-index="4" data-volume="0.4" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx66" data-start="130.7" data-duration="1.48" data-track-index="4" data-volume="0.55" src="assets/sfx/impact/impactBell_heavy_000.ogg"></audio>
+
+</div>
+<script>
+const tl = gsap.timeline({ paused: true });
+const $ = (s, p = document) => p.querySelector(s);
+const mk = (parent, cls, html, style, tag = 'div') => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; if (style) e.style.cssText = style; parent.appendChild(e); return e; };
+const fi = (e, t, d = 0.45, y = 30, extra = {}) => tl.fromTo(e, { opacity: 0, y }, { opacity: 1, y: 0, duration: d, ease: 'power3.out', immediateRender: false, ...extra }, t);
+const fo = (e, t, d = 0.35) => tl.fromTo(e, { opacity: 1 }, { opacity: 0, duration: d, ease: 'sine.in', immediateRender: false }, t);
+const pop = (e, t, d = 0.5) => tl.fromTo(e, { opacity: 0, scale: 0.4 }, { opacity: 1, scale: 1, duration: d, ease: 'back.out(1.8)', immediateRender: false }, t);
+const grow = (e, t, d = 0.9, ease = 'power2.out') => tl.fromTo(e, { scaleX: 0 }, { scaleX: 1, duration: d, ease, immediateRender: false }, t);
+const typeIn = (parent, text, t0, dur, style) => { const w = mk(parent, 'ty', null, style, 'span'); [...text].forEach((c, i) => { const s = mk(w, '', c === ' ' ? '&nbsp;' : c, 'opacity:0', 'i'); tl.set(s, { opacity: 1 }, t0 + dur * i / text.length); }); return w; };
+const count = (e, from, to, t0, d, fmt = (v) => Math.round(v).toLocaleString('en-AU')) => { const o = { v: from }; e.textContent = fmt(from); tl.fromTo(o, { v: from }, { v: to, duration: d, ease: 'power1.out', immediateRender: false, onUpdate: () => { e.textContent = fmt(o.v); } }, t0); };
+const tap = (parent, x, y, t) => { const e = mk(parent, 'tap', null, `left:${x}px;top:${y}px`); tl.fromTo(e, { opacity: 0.9, scale: 0.3 }, { opacity: 0, scale: 1.6, duration: 0.7, ease: 'power2.out', immediateRender: false }, t); };
+const caps = (scene, list, top) => list.forEach(([text, a, b]) => { const c = mk(scene, 'cap', text, top ? `top:${top}px` : ''); fi(c, a, 0.5, 26); fo(c, b - 0.3, 0.3); });
+const sceneIO = (id, t0, t1) => { tl.fromTo(id, { opacity: 0 }, { opacity: 1, duration: 0.35, ease: 'sine.out', immediateRender: false }, t0); tl.fromTo(id, { opacity: 1 }, { opacity: 0, duration: 0.35, ease: 'sine.in', immediateRender: false }, t1 - 0.05); };
+const crestTag = (scene, crest, label, t0, t1) => { const g = mk(scene, 'tag', `<img src="assets/crest/${crest}.png" alt="">${label}`); fi(g, t0, 0.4, 14); fo(g, t1 - 0.3, 0.3); return g; };
+const FMT = (n) => n.toLocaleString('en-AU');
+
+// ---------------- brand furniture
+const drift = (id, pts) => { let t = 0, px = 0, py = 0, ps = 1; pts.forEach(([x, y, s, d]) => { tl.fromTo(id, { x: px, y: py, scale: ps }, { x, y, scale: s, duration: d, ease: 'sine.inOut', immediateRender: false }, t); t += d; px = x; py = y; ps = s; }); };
+drift('#ab1', [[200, 160, 1.1, 22], [-120, 260, 0.95, 22], [160, -60, 1.1, 22], [-100, 120, 1.0, 22], [180, 220, 1.1, 22], [0, 0, 1, 22], [100, 80, 1.05, 22]]);
+drift('#ab2', [[-200, 200, 1.1, 22], [-80, -80, 0.92, 22], [-260, 120, 1.15, 22], [-60, 240, 1.0, 22], [-200, 40, 1.1, 22], [0, 0, 1, 22], [-100, 60, 1.05, 22]]);
+drift('#ab3', [[200, -200, 1.1, 22], [-160, -120, 1.2, 22], [120, -260, 0.95, 22], [-80, -80, 1.1, 22], [160, -180, 1.0, 22], [0, 0, 1, 22], [80, -100, 1.05, 22]]);
+fo('#bug', 125.2, 0.5);
+
+// ================= S1 hook (0 - 9)
+{
+  const S = $('#s1'); sceneIO('#s1', 0, 9.4);
+  const h = mk(S, 'cap', 'Your club’s whole cricket history.<br><em>Kept for you.</em>', 'top:372px;font-size:70px;opacity:1');
+  const box = mk(S, 'abs', null, 'left:90px;top:800px;width:900px;height:128px;border-radius:64px;background:#fff;box-shadow:0 20px 60px rgba(0,0,0,.5)');
+  mk(box, '', '<svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="#475569" stroke-width="2.4" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M16 16l5 5"/></svg>', 'position:absolute;left:44px;top:36px');
+  const ph = mk(box, '', 'Search your club…', 'position:absolute;left:128px;top:34px;font:500 50px/60px Inter,sans-serif;color:#94a3b8');
+  fo(ph, 0.35, 0.2);
+  const clubs = [['Applecross', 'applecross'], ['Bannockburn', 'bannockburn'], ['Scarborough', 'scarborough'], ['Leeming Spartans', 'leeming'], ['Gisborne', 'gisborne'], ['Sunbury', 'sunbury'], ['Kalamunda', 'kalamunda']];
+  const pos = [[202, 1050], [427, 1050], [652, 1050], [877, 1050], [315, 1330], [540, 1330], [765, 1330]];
+  clubs.forEach(([name, key], i) => {
+    const t = 0.5 + i * 0.86;
+    const q = mk(box, '', '', 'position:absolute;left:128px;top:34px;font:600 50px/60px Inter,sans-serif;color:#0a0d14;opacity:0;white-space:nowrap');
+    tl.set(q, { opacity: 1 }, t); tl.set(q, { opacity: 0 }, t + 0.84);
+    typeIn(q, name, t, 0.42);
+    const [cx, cy] = pos[i];
+    const c = mk(S, 'crest h', null, `left:${cx - 95}px;top:${cy - 95}px;width:190px;height:190px`, 'img'); c.src = `assets/crest/${key}.png`;
+    pop(c, t + 0.5, 0.45);
+    const lb = mk(S, 'mono h', name, `left:${cx - 120}px;top:${cy + 104}px;width:240px;text-align:center;font-size:24px;letter-spacing:1px`); fi(lb, t + 0.6, 0.3, 8);
+  });
+  const cta = mk(S, 'pill h', 'Start at <b style="color:#04130d">betterat.cricket/trial</b>', 'left:90px;top:1500px;width:900px;justify-content:center;background:var(--g);color:#04130d;font-size:40px;padding:22px 26px;box-shadow:0 10px 50px rgba(22,199,132,.45)');
+  fi(cta, 6.7, 0.5, 30);
+}
+
+// ================= S2 sign up (9 - 21)
+{
+  const S = $('#s2'); sceneIO('#s2', 9, 21.4);
+  caps(S, [['Pick <em>your club.</em>', 9.3, 12.2], ['A few details and a <em>4-digit email code.</em>', 12.5, 17.9], ['<em>Free trial.</em> No card.', 18.1, 21.2]]);
+  const glow = mk(S, 'abs h', null, 'left:200px;top:710px;width:680px;height:680px;border-radius:50%;background:radial-gradient(circle,rgba(22,199,132,.45),rgba(22,199,132,0) 68%)');
+  fi(glow, 9.3, 0.6, 0); fo(glow, 11.6, 0.5);
+  const crest = mk(S, 'crest h', null, 'left:280px;top:790px;width:520px;height:520px;transform-origin:50% 50%', 'img'); crest.src = 'assets/crest/gisborne.png';
+  tl.fromTo(crest, { opacity: 0, scale: 0.3 }, { opacity: 1, scale: 1, duration: 0.9, ease: 'back.out(1.5)', immediateRender: false }, 9.3);
+  tl.to(crest, { x: -365, y: -262, scale: 0.21, duration: 0.8, ease: 'power3.inOut' }, 11.9);
+  const nm = mk(S, 'mono h', 'Gisborne Cricket Club', 'left:0;width:1080px;text-align:center;top:1320px;font-size:34px'); fi(nm, 10.0, 0.5, 14); fo(nm, 11.6, 0.3);
+  const card = mk(S, 'card h', null, 'left:90px;top:690px;width:900px;height:790px');
+  tl.fromTo(card, { opacity: 0, y: 120 }, { opacity: 1, y: 0, duration: 0.7, ease: 'power3.out', immediateRender: false }, 12.0);
+  mk(card, '', 'Start your free trial', 'position:absolute;left:210px;top:50px;font:800 40px Inter,sans-serif');
+  mk(card, '', 'Gisborne Cricket Club', 'position:absolute;left:210px;top:102px;font:600 26px Inter,sans-serif;color:var(--mut)');
+  const bd = mk(S, 'pill h', '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#04130d" stroke-width="2.6" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>About 3 minutes', 'left:640px;top:1495px;background:var(--g);color:#04130d;font-size:30px');
+  pop(bd, 13.0, 0.5);
+  const field = (label, y) => { mk(card, 'mono', label, `position:absolute;left:50px;top:${y}px;font-size:24px`); return mk(card, '', null, `position:absolute;left:50px;top:${y + 38}px;width:800px;height:84px;border-radius:18px;background:rgba(255,255,255,.06);border:2px solid rgba(255,255,255,.14);padding:18px 24px;font:600 36px/44px Inter,sans-serif`); };
+  const f1 = field('Your name', 170); typeIn(f1, 'Sam Taylor', 12.7, 0.9);
+  const f2 = field('Email', 300); typeIn(f2, 'sam@yourclub.com.au', 13.8, 1.4);
+  mk(card, 'mono', '4-digit code from your email', 'position:absolute;left:50px;top:432px;font-size:24px');
+  [4, 8, 1, 6].forEach((d, i) => { const b = mk(card, '', null, `position:absolute;left:${50 + i * 118}px;top:472px;width:100px;height:104px;border-radius:18px;background:rgba(255,255,255,.06);border:2px solid rgba(255,255,255,.14);text-align:center;font:800 56px/100px Inter,sans-serif`); const n = mk(b, 'h', String(d), 'color:var(--g)'); pop(n, 15.6 + i * 0.4, 0.3); tl.to(b, { borderColor: '#16c784', duration: 0.2 }, 15.6 + i * 0.4); });
+  const ck = mk(card, '', null, 'position:absolute;left:50px;top:612px;width:50px;height:50px;border-radius:12px;border:3px solid rgba(255,255,255,.35)');
+  const tick = mk(ck, 'h', '<svg width="50" height="50" viewBox="0 0 24 24" fill="none" stroke="#04130d" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7"/></svg>', 'position:absolute;left:-3px;top:-3px;width:50px;height:50px;border-radius:12px;background:var(--g)'); pop(tick, 17.2, 0.3);
+  mk(card, '', 'I agree to the terms', 'position:absolute;left:120px;top:614px;font:600 34px Inter,sans-serif;color:#e2e8f0');
+  const go = mk(card, 'btn', 'Start free trial', 'left:50px;top:694px;width:800px;height:76px;font-size:34px'); void go;
+  tap(S, 700, 1430, 18.3);
+  tl.to(go, { scale: 0.96, duration: 0.12, yoyo: true, repeat: 1 }, 18.3);
+  const ok = mk(S, 'pill h', '✓ You’re in. No card needed.', 'left:160px;top:960px;width:760px;justify-content:center;background:#fff;color:#04130d;font-size:40px;padding:24px 20px;z-index:70;box-shadow:0 20px 60px rgba(0,0,0,.5)'); pop(ok, 18.9, 0.5); fo(card, 18.7, 0.25); fo(S.querySelector('.crest'), 18.7, 0.25); fo(bd, 18.7, 0.25);
+}
+
+// ================= S3 first sync (21 - 35)
+{
+  const S = $('#s3'); sceneIO('#s3', 21, 35.4);
+  caps(S, [['Your first sync <em>starts on its own.</em>', 21.3, 24.6], ['It pulls your club’s history from <em>Cricket Australia.</em>', 24.8, 28.6], ['Later, <em>one click</em> on Sync Now brings in the latest games.', 28.8, 35.2]]);
+  crestTag(S, 'applecross', 'Applecross Cricket Club', 21.4, 35.2);
+  const grp = mk(S, 'abs', null, 'left:0;top:0;width:1080px;height:1920px;transform-origin:540px 740px');
+  const ringC = mk(grp, '', '<svg width="420" height="420" viewBox="0 0 420 420"><circle cx="210" cy="210" r="170" stroke="rgba(255,255,255,.1)" stroke-width="26" fill="none"/><circle id="rg" cx="210" cy="210" r="170" stroke="#16c784" stroke-width="26" fill="none" stroke-linecap="round" stroke-dasharray="1068" stroke-dashoffset="1068" transform="rotate(-90 210 210)"/></svg>', 'position:absolute;left:330px;top:760px;opacity:0');
+  fi(ringC, 21.5, 0.5, 20);
+  tl.fromTo('#rg', { strokeDashoffset: 1068 }, { strokeDashoffset: 0, duration: 6.0, ease: 'power1.inOut', immediateRender: false }, 21.8);
+  const pct = mk(grp, '', '0%', 'position:absolute;left:330px;top:915px;width:420px;text-align:center;font:800 90px/110px Inter,sans-serif'); tl.set(pct, { opacity: 0 }, 0); fi(pct, 21.6, 0.4, 0);
+  const o = { p: 0 }; tl.fromTo(o, { p: 0 }, { p: 100, duration: 6.0, ease: 'power1.inOut', immediateRender: false, onUpdate: () => { pct.textContent = Math.round(o.p) + '%'; } }, 21.8);
+  const done = mk(grp, '', '✓ Synced', 'position:absolute;left:330px;top:925px;width:420px;text-align:center;font:800 56px/90px Inter,sans-serif;color:var(--g);opacity:0'); fo(pct, 27.8, 0.2); pop(done, 27.9, 0.4);
+  const tiles = [['Games', 4061, 21.8, 6, 'g1'], ['Players', 1653, 21.8, 6, 'g2'], ['Seasons', 52, 21.8, 6, 'g3']];
+  const tileEls = [];
+  tiles.forEach(([lab, val, t, d], i) => { const c = mk(grp, 'card h', null, `left:${60 + i * 322}px;top:1230px;width:300px;height:170px`); mk(c, 'mono', lab, 'position:absolute;left:0;width:100%;text-align:center;top:26px;font-size:26px'); const v = mk(c, '', '0', 'position:absolute;left:0;width:100%;text-align:center;top:64px;font:800 66px/80px Inter,sans-serif;color:var(--g)'); fi(c, 22.0 + i * 0.15, 0.4, 20); count(v, 0, val, t, d); tileEls.push([c, v]); });
+  // phase B
+  tl.to(grp, { scale: 0.5, y: -20, duration: 0.9, ease: 'power3.inOut' }, 28.5);
+  const sync = mk(S, 'btn h', '<span style="display:flex;align-items:center;gap:16px"><svg id="sp" width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#04130d" stroke-width="3" stroke-linecap="round"><path d="M20 11a8 8 0 10-2.3 5.7"/><path d="M20 4v7h-7"/></svg>Sync Now</span>', 'left:310px;top:1105px;width:460px;height:104px;z-index:5');
+  pop(sync, 29.3, 0.45);
+  tap(S, 540, 1157, 30.4); fo(sync, 31.2, 0.3);
+  tl.to(sync, { scale: 0.94, duration: 0.12, yoyo: true, repeat: 1 }, 30.4);
+  tl.to('#sp', { rotation: 720, transformOrigin: '50% 50%', duration: 1.2, ease: 'power1.inOut' }, 30.5);
+  const newg = mk(S, 'pill h', '+1 new game · Round 7', 'left:280px;top:1128px;background:#fff;color:#04130d;font-size:32px;z-index:6'); tl.fromTo(newg, { opacity: 0, y: 40, scale: 0.8 }, { opacity: 1, y: 0, scale: 1, duration: 0.5, ease: 'back.out(1.6)', immediateRender: false }, 31.5); fo(newg, 33.3, 0.4);
+  // leaderboard
+  const lb = mk(S, 'card h', null, 'left:90px;top:1240px;width:900px;height:290px');
+  fi(lb, 29.6, 0.5, 30);
+  mk(lb, 'mono', 'Most runs this season', 'position:absolute;left:36px;top:20px;font-size:24px');
+  const rows = [['T. Jones', 405], ['J. Smith', 412], ['M. Lee', 398]]; // initial order by display position
+  const rowEls = rows.map(([n, v], i) => { const r = mk(lb, '', null, `position:absolute;left:30px;top:${70 + i * 70}px;width:840px;height:62px;border-radius:14px;background:rgba(255,255,255,.05)`); mk(r, '', String(i + 1), 'position:absolute;left:22px;top:10px;font:700 34px/42px Inter,sans-serif;color:var(--mut)'); mk(r, '', n, 'position:absolute;left:80px;top:10px;font:700 34px/42px Inter,sans-serif'); const vv = mk(r, '', String(v), 'position:absolute;right:24px;top:10px;font:800 34px/42px Inter,sans-serif;color:var(--g)'); return [r, vv]; });
+  // J. Smith (row1) 412 and T. Jones (row0) 405 -> display order Smith, Jones, Lee initially: swap names to be right
+  rowEls[0][0].children[1].textContent = 'J. Smith'; rowEls[0][1].textContent = '412'; rowEls[1][0].children[1].textContent = 'T. Jones'; rowEls[1][1].textContent = '405';
+  // after sync: M. Lee 398 -> 431 overtakes both
+  const up = mk(rowEls[2][0], '', '▲ 2', 'position:absolute;right:130px;top:12px;font:800 28px/38px Inter,sans-serif;color:var(--g);opacity:0');
+  tl.to(rowEls[2][0], { y: -140, background: 'rgba(22,199,132,.16)', duration: 0.7, ease: 'power3.inOut' }, 32.2);
+  tl.to(rowEls[0][0], { y: 70, duration: 0.7, ease: 'power3.inOut' }, 32.2); tl.to(rowEls[1][0], { y: 70, duration: 0.7, ease: 'power3.inOut' }, 32.2);
+  const lv = rowEls[2][1]; count(lv, 398, 431, 32.2, 0.7); fi(up, 32.9, 0.3, 0);
+  rowEls[2][0].children[0].textContent = '3';
+}
+
+// ================= S4 bring in your history (35 - 57)
+{
+  const S = $('#s4'); sceneIO('#s4', 35, 57.4);
+  const beat = (t0, t1, crest, label, text) => { crestTag(S, crest, label, t0 + 0.2, t1); caps(S, [[text, t0 + 0.3, t1 - 0.1]]); };
+  // a spreadsheet
+  beat(35, 40.5, 'sunbury', 'Spreadsheet · Sunbury', 'Drop in any spreadsheet. <em>Match the columns once.</em>');
+  {
+    const sheet = mk(S, 'card h', null, 'left:90px;top:730px;width:900px;height:300px'); fi(sheet, 35.8, 0.5, 40);
+    const heads = ['Player', 'Runs', 'Wkts', 'Date']; const cols = [['#16c784'], ['#3b82f6'], ['#f59e0b'], ['#ec4899']];
+    heads.forEach((hd, i) => { const c = mk(sheet, '', hd, `position:absolute;left:${24 + i * 216}px;top:24px;width:200px;height:58px;border-radius:12px;background:rgba(255,255,255,.07);text-align:center;font:700 30px/58px Inter,sans-serif;color:#cbd5e1`); tl.to(c, { backgroundColor: cols[i][0], color: '#04130d', duration: 0.3 }, 37.0 + i * 0.5); [0, 1, 2].forEach((r) => mk(sheet, '', null, `position:absolute;left:${24 + i * 216}px;top:${100 + r * 62}px;width:200px;height:46px;border-radius:10px;background:rgba(255,255,255,.04)`)); });
+    const maps = [['Player', 'Player name', '#16c784'], ['Runs', 'Runs scored', '#3b82f6'], ['Wkts', 'Wickets', '#f59e0b'], ['Date', 'Match date', '#ec4899']];
+    maps.forEach(([a, b, col], i) => { const r = mk(S, 'abs h', null, `left:90px;top:${1068 + i * 88}px;width:900px;height:76px;border-radius:18px;background:rgba(255,255,255,.05);border:2px solid ${col}`); mk(r, '', a, 'position:absolute;left:28px;top:16px;font:700 32px/42px Inter,sans-serif;color:#cbd5e1'); mk(r, '', '→', 'position:absolute;left:300px;top:12px;font:700 40px/50px Inter,sans-serif;color:' + col); mk(r, '', b, 'position:absolute;left:380px;top:16px;font:800 32px/42px Inter,sans-serif'); const k = mk(r, '', '✓', `position:absolute;right:28px;top:14px;width:46px;height:46px;border-radius:50%;background:${col};color:#04130d;text-align:center;font:800 30px/46px Inter,sans-serif`); fi(r, 37.1 + i * 0.5, 0.4, 20); pop(k, 37.45 + i * 0.5, 0.3); });
+    [sheet].forEach((e) => fo(e, 40.0, 0.4)); S.querySelectorAll('.abs.h').forEach((e) => fo(e, 40.0, 0.4));
+  }
+  // b scorecard photo
+  beat(40.5, 46, 'bannockburn', 'Scorecard photo · Bannockburn', 'Photograph an old scorecard. <em>It reads it, you check it.</em>');
+  {
+    const paper = mk(S, 'abs h', null, 'left:170px;top:740px;width:740px;height:660px;background:#f4efe1;border-radius:14px;transform:rotate(-2deg);box-shadow:0 30px 80px rgba(0,0,0,.6)');
+    mk(paper, '', 'BANNOCKBURN v ___', 'position:absolute;left:40px;top:28px;font:700 40px Inter,sans-serif;color:#6b5f45;letter-spacing:3px;opacity:.6');
+    const w = (y, wd) => mk(paper, '', `<svg width="${wd}" height="26" viewBox="0 0 ${wd} 26" fill="none" stroke="#2a3a8a" stroke-width="3" stroke-linecap="round"><path d="M2 14 q12 -18 24 0 t24 0 t24 0 t24 0 t24 0 t24 0 t24 0 t24 0 t24 0 t24 0 t24 0 t24 0 t24 0 t24 0 t24 0" /></svg>`, `position:absolute;left:40px;top:${y}px;width:${wd}px;overflow:hidden`);
+    for (let i = 0; i < 9; i++) { w(110 + i * 58, 440 + (i % 3) * 60); mk(paper, '', `<svg width="60" height="26" viewBox="0 0 60 26" fill="none" stroke="#2a3a8a" stroke-width="3" stroke-linecap="round"><path d="M2 14 q8 -18 16 0 t16 0 t16 0 t8 0"/></svg>`, `position:absolute;right:50px;top:${110 + i * 58}px`); }
+    fi(paper, 40.8, 0.6, 60);
+    const scan = mk(S, 'abs h', null, 'left:150px;top:740px;width:780px;height:12px;background:var(--g);box-shadow:0 0 40px 16px rgba(22,199,132,.6);border-radius:6px;z-index:5');
+    tl.fromTo(scan, { opacity: 1, y: 0 }, { opacity: 1, y: 660, duration: 1.8, ease: 'power1.inOut', immediateRender: false }, 41.6); fo(scan, 43.4, 0.3);
+    fo(paper, 43.3, 0.5);
+    const tidy = mk(S, 'card h', null, 'left:90px;top:730px;width:900px;height:680px'); fi(tidy, 43.4, 0.5, 30);
+    mk(tidy, 'mono', 'Bannockburn · Scorecard', 'position:absolute;left:36px;top:28px;font-size:26px');
+    const players = [['R. Ford', 'c Smith b Lee', 54], ['J. Hay', 'b Jones', 31], ['T. Brown', 'lbw b Lee', 22], ['M. Nye', 'not out', 18], ['D. Cox', 'run out', 9]];
+    players.forEach(([n, how, r], i) => { const rw = mk(tidy, '', null, `position:absolute;left:30px;top:${86 + i * 90}px;width:840px;height:76px;border-radius:14px;background:rgba(255,255,255,.05)`); mk(rw, '', n, 'position:absolute;left:24px;top:16px;font:700 34px/44px Inter,sans-serif'); mk(rw, '', how, 'position:absolute;left:260px;top:20px;font:500 28px/38px Inter,sans-serif;color:var(--mut)'); mk(rw, '', String(r), 'position:absolute;right:26px;top:14px;font:800 40px/48px Inter,sans-serif;color:var(--g)'); fi(rw, 43.8 + i * 0.22, 0.35, 16); });
+    const rv = mk(S, 'pill h', '✓ Reviewed', 'left:600px;top:1350px;background:var(--g);color:#04130d;font-size:36px;z-index:7;transform:rotate(-4deg)'); pop(rv, 45.0, 0.45);
+    [tidy, rv].forEach((e) => fo(e, 45.8, 0.3));
+  }
+  // c partnerships
+  beat(46, 51.5, 'applecross', 'Partnerships', 'Add partnership records <em>from a file.</em>');
+  {
+    const file = mk(S, 'card h', '<span style="color:var(--g);font-weight:800">CSV</span>&nbsp; partnerships.csv', 'left:240px;top:740px;width:600px;height:96px;padding:26px 36px;font:700 36px/44px Inter,sans-serif;z-index:5');
+    tl.fromTo(file, { opacity: 0, y: -160, rotate: -6 }, { opacity: 1, y: 0, rotate: 0, duration: 0.6, ease: 'bounce.out', immediateRender: false }, 46.5); fo(file, 48.2, 0.4);
+    const bars = [['1st wicket', 212], ['2nd wicket', 187], ['3rd wicket', 164], ['4th wicket', 151]];
+    bars.forEach(([lab, v], i) => { const y = 910 + i * 120; mk(S, 'mono h pb', lab, `left:90px;top:${y}px;font-size:28px;color:#cbd5e1`); const tr = mk(S, 'abs h pb', null, `left:90px;top:${y + 44}px;width:900px;height:44px;border-radius:22px;background:rgba(255,255,255,.07)`); const b = mk(tr, '', null, `width:${v / 212 * 780}px;height:44px;border-radius:22px;background:linear-gradient(90deg,#16c784,#12a46b);transform-origin:0 50%;transform:scaleX(0)`); const val = mk(tr, '', String(v), 'position:absolute;right:20px;top:2px;font:800 34px/40px Inter,sans-serif'); fi(tr, 47.4 + i * 0.2, 0.3, 10); grow(b, 47.6 + i * 0.25, 1.0); });
+    S.querySelectorAll('.pb').forEach((e) => fo(e, 51.0, 0.35));
+  }
+  // d awards
+  beat(51.5, 57, 'kalamunda', 'Awards · Honour board', 'Add club awards <em>and honours.</em>');
+  {
+    const board = mk(S, 'abs h', null, 'left:90px;top:740px;width:900px;height:660px;border-radius:26px;background:linear-gradient(160deg,#2b1c10,#150d07);border:4px solid #6b4a2a;box-shadow:0 30px 80px rgba(0,0,0,.6)');
+    fi(board, 52.0, 0.5, 40);
+    mk(board, '', 'HONOUR BOARD', 'position:absolute;left:0;width:100%;top:34px;text-align:center;font:800 italic 50px \'AC\',sans-serif;letter-spacing:6px;color:#e5b64a');
+    const lines = [['2022/23', 'Club Champion', 'J. Smith'], ['2023/24', 'Club Champion', 'T. Brown'], ['2024/25', 'Players’ Player', 'M. Lee'], ['2025/26', 'Club Champion', 'R. Ford']];
+    lines.forEach(([yr, aw, who], i) => { const y = 124 + i * 118; const r = mk(board, 'h', null, `position:absolute;left:36px;top:${y}px;width:828px;height:96px;border-radius:14px;border:2px solid rgba(229,182,74,.35)`); mk(r, '', yr, 'position:absolute;left:24px;top:24px;font:700 32px/44px JetBrains Mono,monospace;color:#e5b64a'); mk(r, '', aw, 'position:absolute;left:210px;top:24px;font:700 34px/44px Inter,sans-serif;color:#f5e6c4'); mk(r, '', who, 'position:absolute;right:26px;top:24px;font:800 36px/44px Inter,sans-serif;color:#fff'); if (i < 3) fi(r, 52.5 + i * 0.25, 0.35, 14); else { tl.fromTo(r, { opacity: 0, scale: 1.08 }, { opacity: 1, scale: 1, duration: 0.5, ease: 'back.out(1.5)', immediateRender: false }, 54.0); tl.to(r, { borderColor: '#16c784', boxShadow: '0 0 40px rgba(22,199,132,.5)', duration: 0.4 }, 54.3); mk(r, '', 'NEW', 'position:absolute;right:230px;top:28px;padding:4px 16px;border-radius:999px;background:var(--g);color:#04130d;font:800 24px/34px Inter,sans-serif'); } });
+    fo(board, 56.6, 0.3);
+  }
+}
+
+// ================= S5 merge duplicates (57 - 69)
+{
+  const S = $('#s5'); sceneIO('#s5', 57, 69.4);
+  caps(S, [['Same player, spelled two ways? <em>We find the pairs.</em>', 57.3, 61.2], ['<em>Merge the exact matches</em> in one click.', 61.4, 65.2], ['Check the rest <em>pair by pair.</em>', 65.4, 69.2]]);
+  crestTag(S, 'leeming', 'Leeming Spartans', 57.4, 69.2);
+  const mkCard = (txt, sub, x, y) => { const c = mk(S, 'card h', null, `left:${x}px;top:${y}px;width:420px;height:170px`); mk(c, '', txt, 'position:absolute;left:30px;top:30px;font:800 46px/56px Inter,sans-serif'); mk(c, '', sub, 'position:absolute;left:30px;top:100px;font:600 28px/36px Inter,sans-serif;color:var(--mut)'); return c; };
+  const a = mkCard('Smith, Jon', '80 games', 60, 790), b = mkCard('Jon Smith', '62 games', 600, 790);
+  fi(a, 57.8, 0.5, 30); fi(b, 58.0, 0.5, 30);
+  tl.to(a, { x: 240, duration: 0.8, ease: 'power3.inOut' }, 59.0); tl.to(b, { x: -240, duration: 0.8, ease: 'power3.inOut' }, 59.0);
+  const fused = mk(S, 'card h', null, 'left:300px;top:790px;width:480px;height:170px;border-color:#16c784;box-shadow:0 0 60px rgba(22,199,132,.4)'); mk(fused, '', 'Jon Smith', 'position:absolute;left:34px;top:30px;font:800 50px/56px Inter,sans-serif'); mk(fused, '', '142 games · 1 profile', 'position:absolute;left:34px;top:100px;font:700 30px/36px Inter,sans-serif;color:var(--g)');
+  tl.set(a, { opacity: 0 }, 59.85); tl.set(b, { opacity: 0 }, 59.85); tl.fromTo(fused, { opacity: 0, scale: 0.85 }, { opacity: 1, scale: 1, duration: 0.5, ease: 'back.out(2)', immediateRender: false }, 59.85);
+  fo(fused, 61.0, 0.4); fo(a, 61.0, 0.1); fo(b, 61.0, 0.1);
+  const found = mk(S, 'pill h', null, 'left:140px;top:860px;width:800px;justify-content:center;background:rgba(255,255,255,.08);border:2px solid rgba(255,255,255,.2);font-size:52px;padding:30px'); const cnt = mk(found, '', '12', 'font:800 72px Inter,sans-serif;color:var(--g)'); mk(found, '', 'pairs found', 'font:700 48px Inter,sans-serif'); fi(found, 61.2, 0.5, 30);
+  const mg = mk(S, 'btn h', 'Merge exact matches', 'left:140px;top:1060px;width:800px;height:110px;font-size:44px'); fi(mg, 62.0, 0.45, 30); tap(S, 540, 1115, 63.2); tl.to(mg, { scale: 0.95, duration: 0.12, yoyo: true, repeat: 1 }, 63.2);
+  count(cnt, 12, 3, 63.4, 1.0);
+  const rest = mk(S, 'pill h', '3 need a look', 'left:300px;top:1220px;background:rgba(245,181,66,.16);border:2px solid #f5b542;color:#f5b542;font-size:40px;padding:14px 40px'); fi(rest, 64.6, 0.4, 20);
+  fo(rest, 65.3, 0.3); fo(found, 65.3, 0.3); fo(mg, 65.3, 0.3);
+  const pairs = [['Mc Donald, Ben', 'McDonald, Ben'], ['Kaur, A.', 'Kaur, Amrit'], ['Lee, Dan', 'Lee, Daniel']];
+  pairs.forEach(([x, y], i) => { const r = mk(S, 'card h', null, `left:90px;top:${790 + i * 190}px;width:900px;height:160px;border-radius:24px`); mk(r, '', x, 'position:absolute;left:30px;top:24px;font:700 38px/48px Inter,sans-serif'); mk(r, '', y, 'position:absolute;left:30px;top:84px;font:700 38px/48px Inter,sans-serif;color:var(--mut)'); const bt = mk(r, '', 'Merge', 'position:absolute;right:28px;top:40px;width:200px;height:80px;border-radius:18px;background:rgba(22,199,132,.18);border:2px solid #16c784;color:var(--g);text-align:center;font:800 36px/76px Inter,sans-serif'); fi(r, 65.5 + i * 0.3, 0.45, 26); if (i === 0) { tl.to(bt, { backgroundColor: '#16c784', color: '#04130d', duration: 0.25 }, 67.6); tl.to(r, { opacity: 0.3, duration: 0.4 }, 68.0); } });
+}
+
+// ================= S6 site fills in (69 - 89)
+{
+  const S = $('#s6'); sceneIO('#s6', 69, 89.4);
+  // 6a skeleton
+  caps(S, [['Now it all <em>fills in.</em>', 69.3, 71.7]]);
+  const names = ['Leaderboards', 'Records', 'Players', 'Scorecards', 'Ladders', 'Honours'];
+  const tilesA = names.map((n, i) => { const t = mk(S, 'card h', null, `left:${90 + (i % 2) * 460}px;top:${760 + Math.floor(i / 2) * 210}px;width:440px;height:186px;border-radius:26px`); mk(t, 'mono', n, 'position:absolute;left:28px;top:28px;font-size:30px;color:#e2e8f0'); [0.9, 0.6, 0.75].forEach((w, j) => mk(t, '', null, `position:absolute;left:28px;top:${84 + j * 30}px;width:${w * 380}px;height:16px;border-radius:8px;background:linear-gradient(90deg,rgba(22,199,132,.7),rgba(22,199,132,.2))`)); pop(t, 69.7 + i * 0.28, 0.4); fo(t, 71.3, 0.35); return t; });
+  void tilesA;
+  // 6b leaderboards
+  const bat = [['R. Wilton', 9261], ['A. Castley', 9027], ['D. Stirling', 8115], ['R. Pulley', 7671], ['M. Campbell', 7450], ['P. Jordan', 6951], ['L. Blakey', 5267]];
+  const bowl = [['R. Fletcher', 708], ['R. Pulley', 601], ['B. Baetsen', 557], ['G. Wright', 523], ['V. Steenholdt', 500], ['R. Wilton', 490], ['B. McGregor', 442]];
+  caps(S, [['<em>Leaderboards</em> for every category.', 71.5, 77.6]]);
+  crestTag(S, 'applecross', 'Applecross · Leaderboards', 71.6, 77.5);
+  const chips = mk(S, 'abs h', null, 'left:90px;top:726px;width:900px;height:60px'); fi(chips, 71.9, 0.4, 14); fo(chips, 77.2, 0.3);
+  const c1 = mk(chips, 'chip', 'Batting · Runs'), c2 = mk(chips, 'chip', 'Bowling · Wickets', 'margin-left:14px'); void c2;
+  tl.to(c1, { backgroundColor: '#16c784', color: '#04130d', borderColor: '#16c784', duration: 0.01 }, 71.9);
+  const keys = {}; bat.forEach(([n, v], i) => { keys[n] = keys[n] || {}; keys[n].b = [i, v]; }); bowl.forEach(([n, v], i) => { keys[n] = keys[n] || {}; keys[n].w = [i, v]; });
+  const Y = (i) => 812 + i * 88;
+  Object.entries(keys).forEach(([n, o]) => {
+    const r = mk(S, 'abs h', null, `left:90px;top:${Y(o.b ? o.b[0] : 7)}px;width:900px;height:74px`);
+    mk(r, '', n, 'position:absolute;left:0;top:14px;font:700 34px/44px Inter,sans-serif;width:250px');
+    const tr = mk(r, '', null, 'position:absolute;left:270px;top:20px;width:470px;height:34px;border-radius:17px;background:rgba(255,255,255,.07)');
+    const bar = mk(tr, '', null, `width:${o.b ? o.b[1] / 9261 * 470 : 0}px;height:34px;border-radius:17px;background:linear-gradient(90deg,#16c784,#12a46b)`);
+    const v1 = mk(r, '', o.b ? FMT(o.b[1]) : '', 'position:absolute;left:760px;top:14px;font:800 34px/44px Inter,sans-serif;color:var(--g)'); const v2 = mk(r, '', o.w ? FMT(o.w[1]) : '', 'position:absolute;left:760px;top:14px;font:800 34px/44px Inter,sans-serif;color:#f5b542;opacity:0');
+    if (o.b) { fi(r, 72.1 + o.b[0] * 0.12, 0.3, 0); tl.fromTo(bar, { scaleX: 0, transformOrigin: '0 50%' }, { scaleX: 1, duration: 1.3, ease: 'power3.out', immediateRender: false }, 72.3 + o.b[0] * 0.12); }
+    else tl.set(r, { opacity: 0 }, 0);
+    const T = 75.4;
+    if (o.b) { if (o.w) { tl.to(r, { y: Y(o.w[0]) - Y(o.b[0]), duration: 0.9, ease: 'power3.inOut' }, T); tl.to(bar, { width: o.w[1] / 708 * 470, background: 'linear-gradient(90deg,#f5b542,#d9962a)', duration: 0.9, ease: 'power3.inOut' }, T); tl.to(v1, { opacity: 0, duration: 0.3 }, T); tl.to(v2, { opacity: 1, duration: 0.3 }, T + 0.5); } else { fo(r, T, 0.4); } }
+    else { tl.set(bar, { width: o.w[1] / 708 * 470, background: 'linear-gradient(90deg,#f5b542,#d9962a)' }, 0); tl.set(v1, { opacity: 0 }, 0); tl.set(v2, { opacity: 1 }, 0); tl.set(r, { y: Y(o.w[0]) - Y(7) }, 0); tl.fromTo(r, { opacity: 0 }, { opacity: 1, duration: 0.5, immediateRender: false }, T + 0.4); }
+    fo(r, 77.2, 0.3);
+  });
+  tl.to(c1, { backgroundColor: 'rgba(255,255,255,.05)', color: '#cbd5e1', borderColor: 'rgba(255,255,255,.18)', duration: 0.2 }, 75.3);
+  tl.to(chips.children[1], { backgroundColor: '#f5b542', color: '#04130d', borderColor: '#f5b542', duration: 0.2 }, 75.3);
+  tap(S, 380, 756, 75.2);
+  // 6c records
+  caps(S, [['All-time records, <em>flagged the week they’re set.</em>', 77.5, 82.7]]);
+  crestTag(S, 'kalamunda', 'Kalamunda · Records', 77.6, 82.6);
+  mk(S, 'mono h rc', 'Career runs', 'left:90px;top:736px;font-size:28px'); const recs = [['C. Lewis', 11016], ['T. Overton', 8615], ['M. Travcich', 6936], ['B. Dreyer', 1893]];
+  const recRows = [['C. Lewis', 11016], ['T. Overton', 8615], ['M. Travcich', 6936], ['D. Armstrong', 6100]];
+  recRows.forEach(([n, v], i) => { const r = mk(S, 'card h rc', null, `left:90px;top:${790 + i * 88}px;width:900px;height:74px;border-radius:18px`); mk(r, '', String(i + 1), 'position:absolute;left:26px;top:12px;font:700 34px/48px Inter,sans-serif;color:var(--mut)'); mk(r, '', n, 'position:absolute;left:84px;top:12px;font:700 36px/48px Inter,sans-serif'); mk(r, '', FMT(v), 'position:absolute;right:28px;top:10px;font:800 38px/52px Inter,sans-serif;color:var(--g)'); fi(r, 77.9 + i * 0.15, 0.35, 16); });
+  const nr = mk(S, 'abs h rc', null, 'left:90px;top:1170px;width:900px;height:240px;border-radius:30px;background:linear-gradient(135deg,rgba(22,199,132,.25),rgba(22,199,132,.06));border:3px solid #16c784;box-shadow:0 0 70px rgba(22,199,132,.4)');
+  mk(nr, '', 'Highest score', 'position:absolute;left:36px;top:30px;font:600 30px/38px JetBrains Mono,monospace;color:var(--mut);text-transform:uppercase;letter-spacing:2px'); mk(nr, '', '168*', 'position:absolute;left:36px;top:80px;font:800 110px/130px Inter,sans-serif'); mk(nr, '', 'A. Batter · this week', 'position:absolute;left:340px;top:132px;font:700 34px/44px Inter,sans-serif;color:#cbd5e1');
+  const flag = mk(nr, '', 'NEW RECORD', 'position:absolute;right:30px;top:-22px;padding:10px 28px;border-radius:14px;background:var(--g);color:#04130d;font:800 34px/44px Inter,sans-serif;transform:rotate(3deg);box-shadow:0 10px 30px rgba(0,0,0,.4)');
+  tl.fromTo(nr, { opacity: 0, y: -300 }, { opacity: 1, y: 0, duration: 0.6, ease: 'bounce.out', immediateRender: false }, 79.6); pop(flag, 80.3, 0.4);
+  S.querySelectorAll('.rc').forEach((e) => fo(e, 82.2, 0.3));
+  // 6d profile
+  caps(S, [['A career page <em>for every player.</em>', 82.7, 87.6]]);
+  crestTag(S, 'scarborough', 'Scarborough · Player', 82.8, 87.5);
+  const pc = mk(S, 'card h pc', null, 'left:90px;top:720px;width:900px;height:720px'); fi(pc, 83.0, 0.5, 30);
+  const ph = mk(pc, '', null, 'position:absolute;left:36px;top:36px;width:210px;height:210px;border-radius:50%;object-fit:cover;border:5px solid var(--g)', 'img'); ph.src = 'assets/img/pollard.jpg';
+  mk(pc, '', 'Liam Pollard', 'position:absolute;left:280px;top:50px;font:800 56px/66px Inter,sans-serif'); mk(pc, '', 'Scarborough · All grades', 'position:absolute;left:280px;top:120px;font:600 30px/38px Inter,sans-serif;color:var(--mut)');
+  const badges = mk(pc, '', null, 'position:absolute;left:280px;top:172px;width:600px;display:flex;flex-wrap:wrap;gap:10px');
+  [['100 games', 85.2], ['1,000 runs', 85.5], ['100 wickets', 85.8]].forEach(([t, tm]) => { const b = mk(badges, 'h', '★ ' + t, 'padding:6px 18px;border-radius:999px;background:rgba(245,181,66,.18);border:2px solid #f5b542;color:#f5b542;font:800 26px/34px Inter,sans-serif'); pop(b, tm, 0.35); });
+  [['Games', 149], ['Runs', 1500], ['Wickets', 192]].forEach(([l, v], i) => { const t = mk(pc, '', null, `position:absolute;left:${36 + i * 290}px;top:292px;width:272px;height:150px;border-radius:22px;background:rgba(255,255,255,.05)`); mk(t, 'mono', l, 'position:absolute;left:0;width:100%;text-align:center;top:20px;font-size:24px'); const n = mk(t, '', '0', 'position:absolute;left:0;width:100%;text-align:center;top:58px;font:800 62px/76px Inter,sans-serif;color:var(--g)'); count(n, 0, v, 83.6, 1.8); });
+  mk(pc, 'mono', 'Career by season', 'position:absolute;left:36px;top:480px;font-size:24px');
+  const crv = mk(pc, '', '<svg width="828" height="170" viewBox="0 0 828 170" fill="none"><path id="cv" d="M0 150 C80 140 120 110 180 112 C240 114 280 70 350 76 C420 82 460 40 540 44 C620 48 680 30 740 20 L828 8" stroke="#16c784" stroke-width="8" stroke-linecap="round" pathLength="1" stroke-dasharray="1" stroke-dashoffset="1"/></svg>', 'position:absolute;left:36px;top:520px');
+  tl.fromTo('#cv', { strokeDashoffset: 1 }, { strokeDashoffset: 0, duration: 1.6, ease: 'power2.inOut', immediateRender: false }, 84.3);
+  fo(pc, 87.2, 0.3);
+  // 6e devices
+  caps(S, [['On laptop <em>and phone.</em>', 87.6, 89.3]]);
+  const lap = mk(S, 'card h dv', null, 'left:60px;top:790px;width:640px;height:420px;border-radius:20px;border-width:6px');
+  const ph2 = mk(S, 'card h dv', null, 'left:760px;top:740px;width:250px;height:520px;border-radius:40px;border-width:7px');
+  [lap, ph2].forEach((d, k) => { const rows = k ? 6 : 6; for (let i = 0; i < rows; i++) { const w = [0.95, 0.8, 0.7, 0.58, 0.46, 0.36][i]; const tr = mk(d, '', null, `position:absolute;left:${k ? 20 : 30}px;top:${(k ? 70 : 60) + i * (k ? 64 : 56)}px;width:${(k ? 210 : 580)}px;height:${k ? 30 : 34}px;border-radius:17px;background:rgba(255,255,255,.07)`); mk(tr, '', null, `width:${w * 100}%;height:100%;border-radius:17px;background:linear-gradient(90deg,#16c784,#12a46b)`); } });
+  fi(lap, 87.7, 0.5, 40); fi(ph2, 87.9, 0.5, 40);
+  S.querySelectorAll('.dv').forEach((e) => fo(e, 89.0, 0.3));
+}
+
+// ================= S7 StatLab (89 - 99)
+{
+  const S = $('#s7'); sceneIO('#s7', 89, 99.4);
+  caps(S, [['StatLab: <em>200+ ready-made reports.</em>', 89.3, 93.8], ['Or <em>build your own</em> with filters.', 94.0, 99.2]]);
+  crestTag(S, 'applecross', 'Applecross · StatLab', 89.4, 99.2);
+  const chip = mk(S, 'pill h', '<span id="rcount" style="font-weight:800">0</span><span>+ reports</span>', 'left:640px;top:640px;background:var(--g);color:#04130d;font-size:34px;padding:8px 26px'); fi(chip, 89.6, 0.4, 10); fo(chip, 93.4, 0.3); count($('#rcount'), 0, 200, 89.8, 2.4);
+  const win = mk(S, 'card h sl', null, 'left:90px;top:760px;width:900px;height:620px;overflow:hidden'); fi(win, 89.7, 0.5, 30); fo(win, 93.6, 0.4);
+  const names = ['Runs by batting position', 'Bowling by over', 'Partnerships by wicket', 'Dismissal types', 'Runs by month', 'Fielding leaders', 'Results by opposition', 'Home v away', 'Toss and result', 'Strike rate by phase', 'Catches by position', 'Wickets by bowler type', 'Team totals by grade', 'Runs chasing v batting first'];
+  const inner = mk(win, '', null, 'position:absolute;left:0;top:0;width:900px');
+  names.forEach((n, i) => { const r = mk(inner, '', null, `height:96px;margin:14px 26px;border-radius:20px;background:rgba(255,255,255,.05);padding:24px 28px;font:700 36px/48px Inter,sans-serif;display:flex;justify-content:space-between`); r.innerHTML = `<span>${n}</span><span style="color:var(--g)">›</span>`; if (i === 0) r.id = 'sel0'; });
+  tl.fromTo(inner, { y: 0 }, { y: -560, duration: 2.6, ease: 'power1.inOut', immediateRender: false }, 90.0);
+  tl.to(inner, { y: 0, duration: 0.7, ease: 'power2.inOut' }, 92.7);
+  tl.to('#sel0', { backgroundColor: 'rgba(22,199,132,.25)', duration: 0.3 }, 93.2);
+  tap(S, 540, 806, 93.3);
+  // table
+  const tb = mk(S, 'card h', null, 'left:90px;top:700px;width:900px;height:740px'); fi(tb, 93.8, 0.5, 40);
+  mk(tb, '', 'Runs by batting position', 'position:absolute;left:34px;top:24px;font:800 38px/48px Inter,sans-serif');
+  const fchips = [['All seasons', '2025/26'], ['All grades', '1st XI'], ['All formats', 'T20']];
+  fchips.forEach(([a, b], i) => { const c = mk(tb, 'chip', null, `position:absolute;left:${34 + i * 290}px;top:92px;width:270px;text-align:center;padding:8px 6px;font-size:26px;overflow:hidden;height:52px`); const s1 = mk(c, '', a, 'position:absolute;left:0;width:100%;top:7px'); const s2 = mk(c, '', b, 'position:absolute;left:0;width:100%;top:7px;opacity:0;color:#04130d;font-weight:800'); const tt = 95.2 + i * 1.2; tl.to(s1, { opacity: 0, duration: 0.2 }, tt); tl.to(s2, { opacity: 1, duration: 0.2 }, tt); tl.to(c, { backgroundColor: '#16c784', borderColor: '#16c784', duration: 0.2 }, tt); tap(S, 90 + 34 + i * 290 + 135, 700 + 118, tt - 0.1); });
+  const sets = [[4300, 3900, 3100, 2200, 1500], [800, 760, 690, 540, 310], [520, 610, 450, 400, 220], [180, 140, 210, 120, 90]];
+  const rn = ['1–2', '3–4', '5–6', '7–8', '9–11'];
+  rn.forEach((lab, i) => { const y = 180 + i * 108; const r = mk(tb, '', null, `position:absolute;left:34px;top:${y}px;width:832px;height:90px`); mk(r, 'mono', 'Pos ' + lab, 'position:absolute;left:0;top:26px;font-size:26px;width:150px;color:#cbd5e1'); const tr = mk(r, '', null, 'position:absolute;left:170px;top:28px;width:500px;height:34px;border-radius:17px;background:rgba(255,255,255,.07)'); const bar = mk(tr, '', null, `height:34px;border-radius:17px;background:linear-gradient(90deg,#16c784,#12a46b);width:${sets[0][i] / 4300 * 500}px`); const val = mk(r, '', FMT(sets[0][i]), 'position:absolute;left:700px;top:20px;font:800 38px/50px Inter,sans-serif;color:var(--g);width:140px;text-align:right'); fi(r, 94.3 + i * 0.15, 0.35, 14); const mx = [4300, 800, 610, 210]; [1, 2, 3].forEach((k) => { const tt = 95.4 + (k - 1) * 1.2; const wmax = k === 1 ? 800 : k === 2 ? 650 : 220; const o = { v: sets[k - 1][i] }; tl.to(bar, { width: sets[k][i] / wmax * 500, duration: 0.7, ease: 'power3.inOut' }, tt); tl.fromTo(o, { v: sets[k - 1][i] }, { v: sets[k][i], duration: 0.7, ease: 'power3.inOut', immediateRender: false, onUpdate: () => { val.textContent = FMT(Math.round(o.v)); } }, tt); void mx; }); });
+}
+
+// ================= S8 and more (99 - 107)
+{
+  const S = $('#s8'); sceneIO('#s8', 99, 107.4);
+  caps(S, [['Every scorecard, <em>kept for good.</em>', 99.3, 101.4], ['A season annual <em>that fills itself.</em>', 101.4, 103.4], ['Honour boards <em>and premierships.</em>', 103.4, 105.4], ['A card <em>for every player.</em>', 105.4, 107.3]]);
+  const tile = (i) => mk(S, 'card h', null, `left:${70 + (i % 2) * 470}px;top:${720 + Math.floor(i / 2) * 360}px;width:440px;height:330px;overflow:hidden`);
+  const t1 = tile(0), t2 = tile(1), t3 = tile(2), t4 = tile(3);
+  [0, 1, 2].forEach((i) => mk(t1, '', null, `position:absolute;left:${50 + i * 36}px;top:${40 + i * 30}px;width:300px;height:220px;border-radius:16px;background:${['#1a2333', '#1f2b40', '#26354f'][i]};border:2px solid rgba(255,255,255,.14)`));
+  [0, 1, 2, 3, 4].forEach((i) => mk(t1, '', null, `position:absolute;left:${160 + 0 * i}px;top:${112 + i * 30}px;width:${i === 0 ? 200 : 240 - i * 10}px;height:12px;border-radius:6px;background:${i === 0 ? '#16c784' : 'rgba(255,255,255,.35)'}`));
+  mk(t2, '', null, 'position:absolute;left:110px;top:26px;width:220px;height:278px;border-radius:10px 20px 20px 10px;background:linear-gradient(150deg,#16c784,#0b6e4a);box-shadow:-10px 10px 30px rgba(0,0,0,.5)');
+  mk(t2, '', null, 'position:absolute;left:110px;top:26px;width:26px;height:278px;border-radius:10px 0 0 10px;background:rgba(0,0,0,.28)');
+  mk(t2, '', '<img src="assets/img/bettercricket-logo.png" style="width:70px;height:60px;object-fit:contain"><div style="font:800 italic 34px/1.1 \'AC\';margin-top:14px">SEASON<br>ANNUAL</div><div style="font:700 28px Inter;margin-top:10px">2025/26</div>', 'position:absolute;left:150px;top:60px;color:#04130d;width:170px');
+  mk(t3, '', null, 'position:absolute;left:30px;top:30px;width:380px;height:270px;border-radius:14px;background:linear-gradient(160deg,#2b1c10,#150d07);border:3px solid #6b4a2a');
+  mk(t3, '', '<svg width="120" height="110" viewBox="0 0 24 22" fill="#e5b64a"><path d="M6 2h12v6a6 6 0 01-12 0V2z"/><path d="M6 4H2v2a4 4 0 004 4M18 4h4v2a4 4 0 01-4 4" fill="none" stroke="#e5b64a" stroke-width="1.5"/><rect x="10.5" y="13" width="3" height="4"/><rect x="7" y="17" width="10" height="2.5" rx="1"/></svg>', 'position:absolute;left:160px;top:52px');
+  [0, 1, 2].forEach((i) => mk(t3, '', null, `position:absolute;left:60px;top:${190 + i * 34}px;width:320px;height:16px;border-radius:8px;background:rgba(229,182,74,${0.7 - i * 0.18})`));
+  mk(t4, '', null, 'position:absolute;left:120px;top:20px;width:200px;height:290px;border-radius:22px;background:linear-gradient(160deg,#3a2c08,#0d0f16);border:4px solid #e5b64a;box-shadow:0 0 40px rgba(229,182,74,.35)');
+  const cp = mk(t4, '', null, 'position:absolute;left:136px;top:36px;width:168px;height:168px;border-radius:14px;object-fit:cover', 'img'); cp.src = 'assets/img/pollard.jpg';
+  mk(t4, '', 'L. POLLARD<br><span style="color:#e5b64a;font-size:22px;letter-spacing:2px">LEGENDARY</span>', 'position:absolute;left:120px;top:222px;width:200px;text-align:center;font:800 26px/1.3 Inter,sans-serif');
+  [[t1, 99.5], [t2, 101.5], [t3, 103.5], [t4, 105.5]].forEach(([t, tm]) => { tl.fromTo(t, { opacity: 0, scale: 0.7, y: 40 }, { opacity: 1, scale: 1, y: 0, duration: 0.55, ease: 'back.out(1.6)', immediateRender: false }, tm); });
+  [[t1, 101.4], [t2, 103.4], [t3, 105.4]].forEach(([t, tm]) => tl.to(t, { opacity: 0.45, duration: 0.3 }, tm));
+}
+
+// ================= S9 modules (107 - 126)
+{
+  const S = $('#s9'); sceneIO('#s9', 107, 126.4);
+  caps(S, [['Once Stats is loaded, <em>add what you need.</em>', 107.3, 111.4]]);
+  const mods = [['betterstats', 'Stats', '#16c784'], ['betterselect', 'Select', '#3b82f6'], ['bettersocials', 'Socials', '#ec4899'], ['betteradmin', 'Admin', '#f59e0b'], ['betteriq', 'IQ', '#a855f7'], ['betterfantasy', 'Fantasy', '#06b6d4']];
+  const lines = [['', ''], ['Availability and <b>team selection.</b>', 111.4], ['Posts that <b>fill from your match data.</b>', 114.2], ['Fees, email, <b>rosters and meetings.</b>', 117.0], ['Know <b>the opposition.</b>', 119.8], ['A club <b>fantasy comp.</b>', 122.6]];
+  const CX = 540, CY = 1040, R = 330;
+  const pos = [[CX, CY], [CX, CY - R], [CX + R * 0.95, CY - R * 0.3], [CX + R * 0.6, CY + R * 0.85], [CX - R * 0.6, CY + R * 0.85], [CX - R * 0.95, CY - R * 0.3]];
+  const row = (i) => [90 + 75 + i * 162, 1040];
+  mods.forEach(([key, lab, col], i) => {
+    const g = mk(S, 'abs h', null, `left:${pos[i][0] - 90}px;top:${pos[i][1] - 90}px;width:180px;height:200px;text-align:center`);
+    const ring = mk(g, '', null, `position:absolute;left:0;top:0;width:180px;height:180px;border-radius:44px;box-shadow:0 0 70px ${col}77`);
+    const im = mk(g, '', null, 'position:absolute;left:0;top:0;width:180px;height:180px;border-radius:44px', 'img'); im.src = `assets/img/${key}.svg`;
+    const nm = mk(g, '', 'Better<span style="color:' + col + '">' + lab + '</span>', 'position:absolute;left:-40px;width:260px;top:192px;font:800 28px/1.1 Inter,sans-serif'); void ring; void nm;
+    if (i === 0) { tl.fromTo(g, { opacity: 0, scale: 0.4 }, { opacity: 1, scale: 1.25, duration: 0.7, ease: 'back.out(1.6)', immediateRender: false }, 107.3); tl.to(g, { scale: 1.1, duration: 0.5 }, 108.2); }
+    else { tl.fromTo(g, { opacity: 0, scale: 0.3 }, { opacity: 1, scale: 1, duration: 0.6, ease: 'back.out(1.7)', immediateRender: false }, lines[i][1]); const ln = mk(S, 'cap', lines[i][0].replace(/<b>/g, '<em style="color:' + col + '">').replace(/<\/b>/g, '</em>'), ''); fi(ln, lines[i][1] + 0.1, 0.5, 26); fo(ln, lines[i][1] + 2.5, 0.3); }
+    const x2 = row(i)[0] - pos[i][0] - 0, y2 = row(i)[1] - pos[i][1];
+    tl.to(g, { x: row(i)[0] - 90 - (pos[i][0] - 90) + 0, y: y2, scale: 0.78, duration: 0.9, ease: 'power3.inOut' }, 124.6); void x2;
+  });
+  const lo = mk(S, 'cap', 'One club. <em>Six modules.</em>', 'top:1240px;font-size:56px;text-align:center'); fi(lo, 124.9, 0.5, 20);
+}
+
+// ================= S10 CTA (126 - 135)
+{
+  const S = $('#s10'); sceneIO('#s10', 126, 135);
+  caps(S, [['Type <em>your club’s name.</em>', 126.4, 129.4], ['<em>Free trial.</em> No card.', 129.6, 135]]);
+  const lk = mk(S, 'abs h', '<img src="assets/img/bettercricket-logo.png" style="width:130px;height:110px;object-fit:contain"><span style="font:800 italic 70px/1 \'AC\',sans-serif;text-transform:uppercase;padding-right:.16em">BetterCricket</span>', 'left:60px;width:960px;top:690px;display:flex;align-items:center;justify-content:center;gap:24px'); fi(lk, 126.6, 0.6, 20);
+  const box = mk(S, 'abs', null, 'left:90px;top:870px;width:900px;height:128px;border-radius:64px;background:#fff;box-shadow:0 20px 60px rgba(0,0,0,.5)'); fi(box, 126.5, 0.5, 20);
+  mk(box, '', '<svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="#475569" stroke-width="2.4" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M16 16l5 5"/></svg>', 'position:absolute;left:44px;top:36px');
+  const q = mk(box, '', '', 'position:absolute;left:128px;top:34px;font:600 50px/60px Inter,sans-serif;color:#0a0d14;white-space:nowrap'); typeIn(q, 'Applecross', 127.3, 0.9);
+  const c = mk(S, 'crest h', null, 'left:440px;top:1030px;width:200px;height:200px', 'img'); c.src = 'assets/crest/applecross.png'; pop(c, 128.4, 0.5);
+  const url = mk(S, 'abs h', 'betterat.cricket<span style="color:var(--g)">/trial</span>', 'left:30px;width:1020px;top:1290px;text-align:center;font:800 78px/1 Inter,sans-serif;letter-spacing:-1px'); tl.fromTo(url, { opacity: 0, scale: 0.85 }, { opacity: 1, scale: 1, duration: 0.7, ease: 'back.out(1.6)', immediateRender: false }, 130.6);
+  const sub = mk(S, 'pill h', 'Start your free trial', 'left:290px;top:1400px;background:var(--g);color:#04130d;font-size:38px;padding:18px 44px;box-shadow:0 10px 50px rgba(22,199,132,.45)'); fi(sub, 131.4, 0.5, 20);
+}
+
+window.__timelines = window.__timelines || {};
+window.__timelines['main'] = tl;
+tl.seek(0);
+</script></body></html>

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="BetterStats">
+  <defs>
+    <linearGradient id="statsTile" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#19d191"/>
+      <stop offset="1" stop-color="#0c8f5e"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="15" fill="url(#statsTile)"/>
+  <rect x="2.5" y="2.5" width="59" height="59" rx="14.5" fill="none" stroke="#ffffff" stroke-opacity="0.16"/>
+  <!-- ascending bars = analytics -->
+  <g fill="#08110b">
+    <rect x="14" y="36" width="6" height="12" rx="1.5"/>
+    <rect x="24" y="29" width="6" height="19" rx="1.5"/>
+    <rect x="34" y="22" width="6" height="26" rx="1.5"/>
+    <rect x="44" y="15" width="6" height="33" rx="1.5"/>
+  </g>
+</svg>
