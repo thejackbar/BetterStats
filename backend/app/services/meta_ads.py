@@ -1934,13 +1934,15 @@ def _attribution_matches_campaign(attribution: dict | None) -> bool:
 # says WHAT it was: our own email, a Meta ad (this campaign or another), Google, a link shared
 # on social or in a chat, a link from another site, or nothing at all (direct).
 #
-# The order matters and is the whole logic: our email first (it carries utm_id or an email
-# marker, and its links can ALSO carry a utm_source), then Meta, then Google, then AI assistants,
+# The order matters and is the whole logic: an explicit Meta or paid_social tag first (an ad's link
+# carries a utm_id too, so utm_id alone is not proof of email), then our email (utm_id, an email
+# marker or medium), then Meta by click id, then Google, then AI assistants,
 # then a social or chat referrer, then any other campaign tag, then any other referrer, then
 # direct. "Direct" is honest about its limit: a typed address, a bookmark, and any app that
 # strips the referrer (WhatsApp, iMessage, most email clients) all look identical, so a shared
 # link can hide in it.
 _EMAIL_SOURCES = {"email", "e-mail", "newsletter", "edm", "brevo", "mailchimp", "sendgrid", "mailgun"}
+_PAID_SOCIAL_MEDIUMS = {"paid_social", "paid-social", "paidsocial"}
 _OWN_HOSTS = ("betterat.cricket", "betterstats.cricket", "localhost", "127.0.0.1")
 # domain -> how the page names it. A host matches its domain or any subdomain of it.
 _SOCIAL_HOSTS = {
@@ -1999,9 +2001,15 @@ def classify_origin(*, utm_source: str | None = None, utm_medium: str | None = N
     def out(channel: str, label: str) -> dict:
         return {"channel": channel, "label": label, "detail": detail}
 
-    if uid or cam.lower() == "edm" or med in ("email", "e-mail", "edm") or src in _EMAIL_SOURCES:
+    # An explicit Meta or paid-social tag beats a bare utm_id. Both our outreach email and the Meta
+    # ads carry a utm_id (the club's code on the email, the campaign id or the club code on an ad),
+    # so utm_id alone cannot say "email". Click ids stay BELOW email on purpose: Facebook's in-app
+    # browser appends fbclid to any outbound link, our emails included.
+    if src in _META_ATTRIBUTION_SOURCES or med in _PAID_SOCIAL_MEDIUMS:
+        return out("meta", "Meta ad")
+    if uid or cam.lower() == "edm" or "email" in med or med in ("e-mail", "edm") or src in _EMAIL_SOURCES:
         return out("email", "Email (our outreach)" if uid else "Email")
-    if src in _META_ATTRIBUTION_SOURCES or click in ("facebook", "instagram") or path_has("fbclid=") or path_has("igshid="):
+    if click in ("facebook", "instagram") or path_has("fbclid=") or path_has("igshid="):
         return out("meta", "Meta ad")
     if src in ("google", "adwords") or click == "google" or path_has("gclid=") or path_has("gbraid=") or path_has("wbraid="):
         return out("google", "Google ad" if (click == "google" or path_has("gclid=")) else "Google")
