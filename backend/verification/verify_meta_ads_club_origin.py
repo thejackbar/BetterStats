@@ -117,7 +117,24 @@ async def main() -> int:
     check("a referrer that is our own site is not evidence of anything", ch(referrer="https://betterat.cricket/pricing") == "direct")
     check("an unknown campaign tag is its own channel", ch(utm_source="clubnews", utm_campaign="spring") == "campaign_other")
     check("nothing at all is direct", ch() == "direct")
-    check("email beats Meta when both appear (our email's links can carry a utm_source)", ch(utm_source="meta", utm_id="X1") == "email")
+    # The report: Meta ad clicks were labelled "Email (our outreach)". The Meta ad's own link carries
+    # utm_id (the campaign id), and a bare utm_id was read as our per-club email code.
+    check("the reported click is Meta: utm_source=meta, paid_social, campaign id in utm_id, Facebook referrer",
+          ch(utm_source="meta", utm_medium="paid_social", utm_campaign="BC_AU_Trial_CBO_Sep2026",
+             utm_id="120251284365570121", referrer="https://m.facebook.com/") == "meta")
+    check("a Meta ad whose utm_id is a club code (the teaser ad pack) is Meta, not email",
+          ch(landing_path="/club-preview/abc?utm_source=meta&utm_medium=paid_social&utm_id=alpha-cricket-club") == "meta")
+    check("paid_social alone, with no source, is Meta", ch(utm_medium="paid_social", utm_id="X1") == "meta")
+    check("Meta stays Meta with no utm_id at all", ch(utm_source="meta", utm_medium="paid_social") == "meta")
+    # The other half of each pair: email must still be email, or the fix just moved the bug.
+    check("our outreach email (club code in utm_id, no Meta tag) is still email",
+          ch(utm_source="ALPHA1", utm_medium="sales_email", utm_id="ALPHA1") == "email")
+    check("an email link with a club code and a Facebook click id is still email (in-app browsers add fbclid)",
+          ch(utm_id="ABC123", landing_path="/trial?utm_id=ABC123&fbclid=zz") == "email")
+    check("sales_email as a medium is email even with no club code", ch(utm_source="sales", utm_medium="sales_email") == "email")
+    check("the stored-registration path agrees: a Meta first touch with utm_id in its landing path is Meta",
+          (m.origin_from_attribution({"utm_source": "meta", "utm_medium": "paid_social",
+                                      "landing_path": "/trial?utm_source=meta&utm_id=1202&utm_medium=paid_social"}) or {}).get("channel") == "meta")
 
     # ── the registrations: five finished, none of them this campaign ─────────
     async with Session() as db:

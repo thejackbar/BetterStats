@@ -1658,3 +1658,13 @@ What changed: funnel stages say "(Meta)" or "(ours)", the Club selected note com
 On separate /trial pages by source: not recommended, and nothing here needed them. The source is read from the URL's tags and the referrer, not from which page the visitor lands on, so a page per source adds the same data at the cost of duplicated pages and the four reserved top-level slug lists (rule 47). A separate page earns its keep when the MESSAGE differs (a club-specific deep link such as `/trial?club=<name>` from outreach email; `/demo` is already separate because the product differs). What would track better: tag every outbound link (a link builder for email and social posts), store `utm_id` and a last-touch record beside first-touch, and keep the labels honest.
 
 Proof: `verify_meta_ads_snapshot_fixes.py` 20 (control on the previous labels fails 3), `verify_meta_ads_kpi_browser.mjs` 109, streams browser 58, the other Meta suites unchanged.
+
+### v9.143.5.2: Meta ad clicks labelled "Email (our outreach)"
+
+Jack, with a tooltip screenshot: clubs showed as Email (our outreach) though the tags read `utm_source=meta`, `utm_medium=paid_social`, `utm_campaign=BC_AU_Trial_CBO_Sep2026`, `utm_id=120251284365570121`, referrer m.facebook.com. "Surely that's Meta."
+
+Cause: `classify_origin` treated any `utm_id` as our per-club email code and checked email first. The Meta ads put the campaign id in `utm_id` (and the teaser ad pack puts a club code there), so every such click read as our email. The earlier suite even asserted it (`utm_source=meta, utm_id=X1` is email), so the bug was written down as intended behaviour.
+
+Fix: an explicit Meta source or `paid_social` medium is checked before email; email keeps `utm_id`, an email medium (now including `sales_email`), `edm` and email sources; click ids (`fbclid`, click source) stay below email because Facebook's in-app browser adds `fbclid` to any outbound link. It is classification on read, so no stored data needed repair.
+
+Proof: `verify_meta_ads_club_origin.py` 35 pass; control on the previous `meta_ads.py` fails 5 (the reported click, the teaser-ad-pack click, `paid_social` alone, `sales_email` alone, the stored-registration path). Campaign scope, snapshot fixes and new campaign suites unchanged (20 each).
