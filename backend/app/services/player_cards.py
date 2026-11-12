@@ -407,6 +407,26 @@ async def _junior_only(db: AsyncSession, org_id) -> set[str]:
         return set()
 
 
+# The club's own record of what a player is, as a code the cards filter and the challenges use. `player_role` is the club's
+# label ("Batter", "Bowler", "All Rounder", "Wicketkeeper", "Wicketkeeper-Batter"); a keeper who also bats is a keeper. A
+# player with no usable role is `None` (the screens say "no role recorded", they never guess one from the figures).
+ROLES = {"BAT": "Batter", "BOWL": "Bowler", "AR": "All Rounder", "WK": "Wicketkeeper"}
+
+
+def role_code(player_role, is_wicket_keeper=False) -> Optional[str]:
+    k = "".join(ch for ch in str(player_role or "").lower() if ch.isalpha())
+    if k:
+        if "keeper" in k or k in ("wk", "wkt"):
+            return "WK"
+        if k in ("ar", "all") or k.startswith("allround"):
+            return "AR"
+        if k.startswith("bowl") or k == "bwl":
+            return "BOWL"
+        if k.startswith("bat") or "opener" in k or "opening" in k:
+            return "BAT"
+    return "WK" if is_wicket_keeper else None
+
+
 async def _build_snapshot(db: AsyncSession, org_id) -> dict:
     settings = await load_settings(db, org_id)
     players = await _club_players(db, org_id)
@@ -425,6 +445,7 @@ async def _build_snapshot(db: AsyncSession, org_id) -> dict:
             "hero_photo_url": getattr(p, "hero_photo_url", None),
             "action_photo_url": getattr(p, "action_photo_url", None),
             "hero_source": getattr(p, "hero_source", None),
+            "role": role_code(getattr(p, "player_role", None), bool(getattr(p, "is_wicket_keeper", False))),
         }
 
     figs: dict[str, dict] = {}
@@ -637,6 +658,7 @@ def regular_card(snap: dict, pid: str) -> Optional[dict]:
         "hero_photo_url": person["hero_photo_url"],
         "action_photo_url": person["action_photo_url"],
         "hero_source": person["hero_source"],
+        "role": person.get("role"),
         "matches": f.get("matches", 0),
         "runs": f.get("runs", 0),
         "bat_avg": f.get("bat_avg"),
@@ -664,6 +686,7 @@ def special_card(snap: dict, row: dict) -> Optional[dict]:
         "hero_photo_url": person["hero_photo_url"],
         "action_photo_url": person["action_photo_url"],
         "hero_source": person["hero_source"],
+        "role": person.get("role"),
         "title": row["title"],
         "occurred_on": row["occurred_on"].isoformat() if row["occurred_on"] else None,
         "detail": row["detail"] or {},

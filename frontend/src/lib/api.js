@@ -3581,6 +3581,8 @@ export const api = {
   availPublicRemoveWant: (token, key) => request(`/public/availability/${token}/me/cards/wants?key=${encodeURIComponent(key)}`, { method: 'DELETE' }),
   availPublicDismissSuggestedSwap: (token, data) => request(`/public/availability/${token}/me/cards/swaps/suggested/dismiss`, { method: 'POST', body: JSON.stringify(data) }),
   availPublicRestoreSuggestedSwap: (token, data) => request(`/public/availability/${token}/me/cards/swaps/suggested/restore`, { method: 'POST', body: JSON.stringify(data) }),
+  availPublicMarket: (token) => request(`/public/availability/${token}/me/cards/market`),
+  availPublicMarketPlayer: (token, playerId) => request(`/public/availability/${token}/me/cards/market/${encodeURIComponent(playerId)}`),
   availPublicSpares: (token) => request(`/public/availability/${token}/me/cards/spares`),
   availPublicSetSpareOpen: (token, key, open) => request(`/public/availability/${token}/me/cards/spares/open`, { method: 'POST', body: JSON.stringify({ key, open }) }),
   availPublicCard: (token, key) => request(`/public/availability/${token}/me/cards/card?key=${encodeURIComponent(key)}`),

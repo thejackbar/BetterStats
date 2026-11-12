@@ -72,12 +72,18 @@ const byEvent = (a, b) => {
 }
 
 // What the book shows for a filter: the player cards, then the special cards grouped by kind and player.
-export function buildItems(cards, { filter, sort, meId }) {
+export const ROLE_FILTERS = [['BAT', 'Batters'], ['BOWL', 'Bowlers'], ['AR', 'All-rounders'], ['WK', 'Keepers']]
+
+export function buildItems(cards, { filter, sort, meId, role = '' }) {
   let pool = cards
   if (filter === 'doubles') pool = pool.filter((c) => (c.copies || 1) > 1)
-  const wantPlayers = filter === 'all' || filter === 'regular' || filter === 'doubles'
+  if (filter === 'wanted') pool = pool.filter((c) => c.wanted_by > 0)
+  // The role comes from the club's own record of the player; `none` is the players it has no role for.
+  if (role) pool = pool.filter((c) => (c.role || 'none') === role)
+  const wide = filter === 'doubles' || filter === 'wanted'
+  const wantPlayers = filter === 'all' || filter === 'regular' || wide
   const cat = CATEGORIES.find((c) => c.key === filter)
-  const wantSpecials = filter === 'all' || filter === 'special' || filter === 'doubles' || !!cat
+  const wantSpecials = filter === 'all' || filter === 'special' || wide || !!cat
   const items = []
   if (wantPlayers) items.push(...pool.filter((c) => c.kind === 'player').sort(SORTERS[sort] || SORTERS.recent))
   if (wantSpecials) {
@@ -270,6 +276,7 @@ export default function CardGallery({ cards = [], totals, club, accent, display 
   const [needle, setNeedle] = useState('')
   const [have, setHave] = useState('all') // the club's set only: all | not_mine | swappable
   const [filter, setFilter] = useState('all')
+  const [role, setRole] = useState('')
   const [page, setPage] = useState(0)
   const [open, setOpen] = useState(null)
   const [stack, setStack] = useState(null)
@@ -301,8 +308,10 @@ export default function CardGallery({ cards = [], totals, club, accent, display 
   const specialOwned = totals?.special_owned ?? 0
 
   const counts = useMemo(() => {
-    const out = { special: 0, doubles: 0 }
+    const out = { special: 0, doubles: 0, wanted: 0, none: 0, roles: {} }
     for (const c of cards) {
+      if (c.wanted_by > 0) out.wanted += 1
+      if (c.role) out.roles[c.role] = (out.roles[c.role] || 0) + 1; else out.none += 1
       if (c.kind === 'special') { out.special += 1; const k = CAT_OF[c.special_kind]; out[k] = (out[k] || 0) + 1 }
       if (countOf(c, browse) > 1) out.doubles += 1
     }
@@ -318,8 +327,15 @@ export default function CardGallery({ cards = [], totals, club, accent, display 
     { key: 'regular', label: 'Players' },
     ...(counts.special ? [{ key: 'special', label: 'Specials', n: counts.special }] : []),
     ...CATEGORIES.filter((c) => counts[c.key]).map((c) => ({ key: c.key, label: c.label, n: counts[c.key] })),
-    ...(browse ? [] : [{ key: 'doubles', label: 'Doubles', n: counts.doubles }]),
+    ...(browse ? [] : [{ key: 'doubles', label: 'Doubles', n: counts.doubles }, { key: 'wanted', label: 'Wanted', n: counts.wanted }]),
   ], [counts, browse, remote])
+  // Role chips come from the club's own player records. With none recorded there is nothing to filter on, so no row is drawn.
+  const roleChips = useMemo(() => {
+    if (remote) return [{ key: '', label: 'Any role' }, ...ROLE_FILTERS.map(([key, label]) => ({ key, label })), { key: 'none', label: 'No role recorded' }]
+    if (!Object.keys(counts.roles).length) return []
+    return [{ key: '', label: 'Any role' }, ...ROLE_FILTERS.filter(([key]) => counts.roles[key]).map(([key, label]) => ({ key, label, n: counts.roles[key] })),
+      ...(counts.none ? [{ key: 'none', label: 'No role recorded', n: counts.none }] : [])]
+  }, [counts, remote])
 
   const shownCards = useMemo(() => {
     const words = needle.trim().toLowerCase().split(/\s+/).filter(Boolean)
@@ -328,25 +344,25 @@ export default function CardGallery({ cards = [], totals, club, accent, display 
   }, [cards, needle])
   const list = useMemo(() => {
     if (remote) return remote.items || []
-    const items = buildItems(shownCards, { filter, sort, meId })
+    const items = buildItems(shownCards, { filter, sort, meId, role })
     // Grey slots are for the players still to find. Special cards are counted in the header instead.
-    const empties = !browse && (filter === 'all' || filter === 'regular') ? Math.max(0, (totals?.regular_total || 0) - owned) : 0
+    const empties = !browse && !role && (filter === 'all' || filter === 'regular') ? Math.max(0, (totals?.regular_total || 0) - owned) : 0
     return [...items, ...Array.from({ length: empties }, (_, i) => ({ empty: true, key: `empty-${i}` }))]
-  }, [shownCards, filter, sort, totals, owned, meId, browse, remote])
+  }, [shownCards, filter, role, sort, totals, owned, meId, browse, remote])
 
   const slotsPerSpread = perPage * pagesShown
   const listLength = remote ? (remote.total || 0) : list.length
   const spreads = Math.max(1, Math.ceil(listLength / slotsPerSpread))
   const at = Math.min(page, spreads - 1)
   useEffect(() => { if (page > spreads - 1) setPage(spreads - 1) }, [page, spreads])
-  useEffect(() => { setPage(0) }, [sort, filter, mode, needle, have])
+  useEffect(() => { setPage(0) }, [sort, filter, role, mode, needle, have])
   // The club's set is asked for a window at a time, a moment after typing stops.
   const onQuery = remote?.onQuery
   useEffect(() => {
     if (!onQuery) return undefined
-    const t = setTimeout(() => onQuery({ filter, sort, q: needle.trim(), offset: at * slotsPerSpread, limit: slotsPerSpread, ...(have !== 'all' ? { have } : {}) }), needle ? 250 : 0)
+    const t = setTimeout(() => onQuery({ filter, sort, q: needle.trim(), offset: at * slotsPerSpread, limit: slotsPerSpread, ...(have !== 'all' ? { have } : {}), ...(role ? { role } : {}) }), needle ? 250 : 0)
     return () => clearTimeout(t)
-  }, [onQuery, filter, sort, needle, at, slotsPerSpread, have])
+  }, [onQuery, filter, role, sort, needle, at, slotsPerSpread, have])
 
   const turn = (dir) => {
     const next = Math.max(0, Math.min(spreads - 1, at + dir))
@@ -424,6 +440,17 @@ export default function CardGallery({ cards = [], totals, club, accent, display 
           </button>
         ))}
       </div>
+
+      {roleChips.length > 0 && (
+        <div role="tablist" aria-label="Role" data-gallery-roles style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+          {roleChips.map((f) => (
+            <button key={f.key || 'any'} type="button" role="tab" aria-selected={role === f.key} onClick={() => setRole(f.key)} data-gallery-role={f.key || 'any'}
+              style={{ padding: '5px 12px', borderRadius: 999, fontSize: 12, fontWeight: 600, border: '1px solid var(--pb-hairline, rgba(255,255,255,.2))', background: role === f.key ? accent : 'transparent', color: role === f.key ? onColor(accent) : 'inherit' }}>
+              {f.label}{f.n != null && <span style={{ opacity: 0.7, marginLeft: 5 }}>{f.n}</span>}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="cc-book" tabIndex={0} onKeyDown={onKey} onPointerDown={down} onPointerUp={up} aria-label="Card binder. Use the arrow keys to turn the page" style={{ outline: 'none', touchAction: 'pan-y' }}>
         <div ref={bookRef} data-book data-mode={mode} aria-busy={!!remote?.loading} style={{ opacity: remote?.loading ? 0.6 : 1, transition: 'opacity .15s', display: 'flex', gap: 0, borderRadius: 16, background: '#0a0f17', padding: 6, boxShadow: '0 10px 30px rgba(0,0,0,.35)', position: 'relative' }}>

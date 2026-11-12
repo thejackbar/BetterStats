@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import CardGallery from '../../components/cards/CardGallery'
 import ShareSheet from '../../components/cards/ShareSheet'
 import PageHead, { ghostBtn } from './PageHead'
@@ -18,7 +18,8 @@ export default function MyCards() {
       <PageHead title="My cards" sub="Everything you hold. Tap a card to turn it over, share it or put it in a swap."
         actions={mine && <button type="button" onClick={() => setShare(mine)} data-share-mine style={ghostBtn}>Share my card</button>} />
       <CardGallery cards={data.cards} totals={data.totals} club={club} accent={accent} display={display} sponsor={sponsor} meId={mine?.player_id}
-        onShare={setShare} onOffer={(c) => navigate(`${basePath}/swaps/new`, { state: { give: c } })} />
+        onShare={setShare} onOffer={(c) => navigate(`${basePath}/swaps/new`, { state: { give: c } })}
+        viewerExtra={(c) => (c.wanted_by > 0 ? <Link to={`${basePath}/market?card=${encodeURIComponent(c.key)}`} data-see-wanters className="block text-center text-sm font-semibold underline" style={{ color: '#fff' }}>See who wants it</Link> : null)} />
       {share && <ShareSheet card={share} club={club} accent={accent} display={display} sponsor={sponsor} onClose={() => setShare(null)} />}
     </div>
   )

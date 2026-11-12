@@ -334,6 +334,7 @@ async def patch_player(
         player.is_player = data.is_player
     if data.player_role is not None:
         player.player_role = data.player_role.strip() or None
+        _forget_cards(player)   # the cards filter by role, and read it from the snapshot
     if data.is_overseas is not None:
         player.is_overseas = data.is_overseas
     if data.overseas_country is not None:

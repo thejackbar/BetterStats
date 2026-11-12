@@ -169,7 +169,7 @@ export function Builder({ token, board, give: preGive, giveList, prefill, counte
   // Coming from a card search or a swap being changed: the person (and the cards) are already chosen.
   useEffect(() => {
     if (counter) pick(counter.other, new Map(counter.give.map((c) => [c.key, { card: c, qty: c.qty }])))
-    else if (prefill) pick(prefill.player, new Map([[prefill.card.key, { card: prefill.card, qty: 1 }]]))
+    else if (prefill) pick(prefill.player, new Map((prefill.cards || (prefill.card ? [prefill.card] : [])).map((c) => [c.key, { card: c, qty: 1 }])))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   const send = async () => {

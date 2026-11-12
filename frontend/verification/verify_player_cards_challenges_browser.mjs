@@ -171,6 +171,7 @@ const run = async () => {
     players: [{ id: 'p2', name: 'Zed, Alan' }, { id: 'p3', name: 'Adams, Brian' }],
     tiers: ['common', 'rare', 'epic', 'legendary', 'special'].map((k) => ({ key: k, label: k[0].toUpperCase() + k.slice(1) })),
     special_kinds: [{ key: 'century', label: 'Century card' }],
+    roles: [{ key: 'BAT', label: 'Batter' }, { key: 'BOWL', label: 'Bowler' }, { key: 'AR', label: 'All Rounder' }, { key: 'WK', label: 'Wicketkeeper' }],
     qualities: [{ key: 'standard', label: 'Standard', line: 'A plain pack', rare_plus: 0, odds: { epic: 5, legendary: 1 }, special_pct: 0 }, { key: 'special', label: 'Special', line: 'Better odds', rare_plus: 2, odds: { epic: 12, legendary: 3 }, special_pct: 5 }],
     limits: { count: 30, completions: 10, reward_qty: 5, pack_size: { min: 1, max: 12, default: 5 } },
   })
@@ -220,6 +221,9 @@ const run = async () => {
   await page.fill('[aria-label="Cards in the squad"]', '11')
   await page.selectOption('[aria-label="Kind of card"]', 'players')
   await page.fill('[data-min-tier="rare"]', '3')
+  await page.click('[data-checks="roles"] [data-check="BOWL"]')
+  await page.click('[data-checks="roles"] [data-check="AR"]')
+  await page.fill('[data-min-role="BOWL"]', '2')
   await page.fill('[aria-label="Squad rating"]', '70')
   await page.fill('[aria-label="Cards of one player"]', '1')
   await page.locator('[data-checks="tiers"] [data-check="common"]').click()
@@ -234,7 +238,7 @@ const run = async () => {
   await page.locator('[data-challenge-save] button').click()
   await page.waitForSelector('[data-challenge-row="a2"]')
   const made = adminCalls.find((c) => c.method === 'POST')
-  check('the exchange is sent with exactly the rules set', JSON.stringify(made?.body?.rules) === JSON.stringify({ count: 11, kinds: 'players', tiers_only: ['common', 'rare'], min_tier: { rare: 3 }, min_rating: 70, max_per_player: 1, premiership: { season: '2019', grade: 'A Grade' } }), JSON.stringify(made?.body?.rules))
+  check('the exchange is sent with exactly the rules set', JSON.stringify(made?.body?.rules) === JSON.stringify({ count: 11, kinds: 'players', tiers_only: ['common', 'rare'], min_tier: { rare: 3 }, min_rating: 70, max_per_player: 1, roles: ['BOWL', 'AR'], min_role: { BOWL: 2 }, premiership: { season: '2019', grade: 'A Grade' } }), JSON.stringify(made?.body?.rules))
   check('...with the reward, the completions and the closing day', JSON.stringify(made?.body?.reward) === JSON.stringify({ quality: 'special', qty: 2, size: 7, title: 'Squad reward' }) && made.body.max_completions === 3 && made.body.ends_on === '2026-12-31' && made.body.starts_on === null, JSON.stringify(made?.body))
   check('the form closes and the list has the new challenge', (await page.locator('[data-challenge-form]').count()) === 0 && (await page.locator('[data-challenge-row]').count()) === 2)
 

@@ -52,10 +52,10 @@ export default function HowItWorks() {
       </Section>
       <Section id="wishlist" title="Wish list, spares and emails">
         <ul>
-          <li>Put any card on your wish list from Club cards. Only you can see the list. It shows who could swap you each card now, and you can ask them from there. A card comes off the list as soon as you get it, from a pack or a swap.</li>
+          <li>Put any card on your wish list from Club cards. Other players can see it in the Market, with your name, so they can swap you what you are after. You can switch that off in Settings. The list shows who could swap you each card now, and you can ask them from there. A card comes off the list as soon as you get it, from a pack or a swap.</li>
           <li>If someone holds a card on your list and wants a card you hold, Swaps suggests that swap to both of you. It shows the two cards and nothing else from either list, and one tap asks them. Dismiss a suggestion you do not want. That hides it for you only, and Undo brings it straight back.</li>
           <li>A spare is a copy beyond the one you keep. The Spares page gathers them so you can offer several at once. </li>
-          <li>Any card you hold shows how many other players have it on their wish list: a "Wanted" tag in My cards, the same count on the card page, and on each spare. It is a number, never names, and a player who already holds the card is not counted.</li>
+          <li>The Market shows what the club is after. It lists your cards that other players want, with who wants them, and every visible wish list, with the players whose list lines up with your cards first. Open a player to see their list beside yours: the cards you hold are outlined, and so are their cards that are on your list. Pick what to give and what to ask for and start the swap from there. A card you hold also carries a "Wanted" tag in My cards, and you can filter My cards by Wanted, Doubles and the player's role.</li>
           <li>No emails are sent unless you ask for them. In Settings you can switch on an email for when someone asks you for a swap and for when a card on your wish list becomes available, and your club can switch the emails off for everyone.</li>
         </ul>
       </Section>
@@ -78,7 +78,7 @@ export default function HowItWorks() {
       </Section>
       <Section id="privacy" title="Who sees what">
         <ul>
-          <li>Other players can see the cards you could swap and nothing else: not your packs, not your wish list (apart from a suggested swap, which shows the one card of yours they want and the one of theirs you want, and the count of wishes on a card they hold, which is a number and never your name), and not how many of a card you hold beyond what you could give.</li>
+          <li>Other players can see the cards you could swap and nothing else about your collection: not your packs, and not how many of a card you hold beyond what you could give. Your wish list is visible to the club in the Market unless you switch that off in Settings, and a list you keep private is still counted in the "wanted by" numbers and can still produce a suggested swap with the one player it matches (which shows the one card of yours they want and the one of theirs you want).</li>
           <li>Club cards shows every card in the club and how many other players could swap you a copy. It never shows a person's whole collection.</li>
           <li>If you would rather not be in the cards, ask your club to hide you.</li>
         </ul>

@@ -11,6 +11,7 @@ const ROWS = [
 // Choices about being seen. `invert` is a setting stored the other way round: the box is ticked when it is off.
 const SEEN = [
   ['board_hidden', 'Show me on the collectors board', 'Everyone in the club is on it. The board shows your name, your showcase and your rarest player card, and where you stand by share of the set. Untick this to leave it.', true, 'board'],
+  ['wants_hidden', 'Show my wish list in the Market', 'Other players can see the cards on your wish list in the Market, with your name, so they can swap you what you are after. Untick this to keep it private. A card you want still counts in the "wanted by" numbers on cards other players hold, and still gets you a suggested swap with the player it matches, but your list is never shown.', true, null],
   ['feed_hidden', 'Show my name in This week', 'The club\'s weekly feed names who earned a special card, pulled a big card or agreed a swap. Untick this to be left out of it.', true, 'feed'],
 ]
 
@@ -45,7 +46,7 @@ export default function Settings() {
           </div>
           <h2 className="font-mono text-[11px] tracking-wide2 uppercase text-pb-faint mt-6 mb-2">Being seen</h2>
           <div className="flex flex-col gap-3 max-w-xl">
-            {SEEN.filter(([, , , , feature]) => features[feature]).map(([key, label, help, invert]) => (
+            {SEEN.filter(([, , , , feature]) => !feature || features[feature]).map(([key, label, help, invert]) => (
               <label key={key} className="flex gap-4 items-start rounded-2xl border pb-hairline bg-pb-surface p-4 cursor-pointer" data-pref={key}>
                 <input type="checkbox" checked={invert ? !prefs[key] : !!prefs[key]} onChange={(e) => set(key, invert ? !e.target.checked : e.target.checked)} className="w-5 h-5 mt-0.5" style={{ accentColor: accent }} />
                 <span><span className="block font-semibold">{label}</span><span className="block text-sm text-pb-dim mt-0.5">{help}</span></span>

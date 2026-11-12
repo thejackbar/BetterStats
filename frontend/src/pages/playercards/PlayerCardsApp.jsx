@@ -16,6 +16,8 @@ import Swaps from './Swaps'
 import NewSwap from './NewSwap'
 import HowItWorks from './HowItWorks'
 import Wishlist from './Wishlist'
+import Market from './Market'
+import MarketPlayer from './MarketPlayer'
 import Spares from './Spares'
 import CardPage from './CardPage'
 import Settings from './Settings'
@@ -60,6 +62,8 @@ function Shell() {
               <Route path="cards/swaps/history" element={<Swaps tab="history" />} />
               <Route path="cards/swaps/new" element={<NewSwap />} />
               <Route path="cards/wishlist" element={<Wishlist />} />
+              <Route path="cards/market" element={<Market />} />
+              <Route path="cards/market/:pid" element={<MarketPlayer />} />
               <Route path="cards/spares" element={<Spares />} />
               <Route path="cards/card/:key" element={<CardPage />} />
               <Route path="cards/showcase" element={<Showcase />} />
