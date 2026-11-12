@@ -600,6 +600,68 @@ async def login(token: str, body: LoginBody, request: Request, response: Respons
     return {"status": "ok", "manager": {"id": str(mgr.id), "display_name": mgr.display_name}}
 
 
+class ForgotPinBody(BaseModel):
+    email: str
+
+
+FORGOT_PIN_IP_LIMIT = 10
+FORGOT_PIN_EMAIL_LIMIT = 3
+FORGOT_PIN_WINDOW = 60 * 60
+
+
+@router.post("/{token}/forgot-pin")
+async def forgot_pin(token: str, body: ForgotPinBody, request: Request, db: AsyncSession = Depends(get_db)):
+    """Email a manager a new PIN. The stored PIN is a bcrypt hash and cannot be
+    read back, so a fresh 6 digit PIN is made, emailed, and only then saved: if the
+    email does not go, the old PIN keeps working.
+
+    An address with no team here gets the same reply as one that has, so this cannot
+    be used to find out who is registered. A club with no live email provider gets a
+    readable refusal for everyone (the console provider is not a send). Sessions that
+    are already signed in stay signed in."""
+    from app.services import email_service
+    from app.services.fantasy_pin_email import send_new_pin_email
+
+    club = await _club_for_token(db, token)
+    ip = _client_ip(request)
+    email = (body.email or "").strip().lower()
+    generic = {"status": "sent"}
+    if not email:
+        raise HTTPException(status_code=400, detail="Enter the email you signed up with.")
+    rate_limit.enforce(f"fantasy-forgot-pin-ip:{token}:{ip}", FORGOT_PIN_IP_LIMIT, FORGOT_PIN_WINDOW,
+                       detail="Too many requests. Please try again later.")
+    rate_limit.enforce(f"fantasy-forgot-pin-email:{token}:{email}", FORGOT_PIN_EMAIL_LIMIT, FORGOT_PIN_WINDOW,
+                       detail="Too many PIN emails for this address. Please try again later.")
+    if not email_service.email_is_live():
+        raise HTTPException(status_code=503, detail="Email isn't set up for this club yet, so a new PIN can't be sent. Ask your club admin to reset it.")
+
+    mgr = (await db.execute(
+        select(FantasyManager).where(
+            FantasyManager.organisation_id == club.id, func.lower(FantasyManager.email) == email,
+        )
+    )).scalar_one_or_none()
+    if mgr is None:
+        return generic
+
+    sponsors = (await db.execute(select(Sponsor).where(Sponsor.organisation_id == club.id))).scalars().all()
+    named = section_names.resolve(club.section_names, sponsors).get("fantasy") or {}
+    game_name = named.get("name") or f"{club.name} Fantasy Cricket"
+
+    new_pin = "".join(secrets.choice(string.digits) for _ in range(6))
+    result = await send_new_pin_email(
+        email=mgr.email, display_name=mgr.display_name, game_name=game_name, pin=new_pin,
+        link=f"{settings.public_base_url}/fantasy/{token}",
+    )
+    if not result.ok:
+        raise HTTPException(status_code=502, detail="We couldn't send the email just now. Your PIN hasn't changed. Please try again shortly.")
+
+    mgr.credential_hash = _hash_pin(new_pin)
+    await db.commit()
+    # A wrong-PIN lockout for this address would otherwise outlast the new PIN.
+    rate_limit.clear_failures(f"fantasy-login:{token}:{email}:{ip}")
+    return generic
+
+
 @router.post("/{token}/logout")
 async def logout(token: str, response: Response):
     response.delete_cookie(key=COOKIE_NAME, path="/")

@@ -10,12 +10,19 @@ export default function Auth({ token, season, onAuthed }) {
   const [form, setForm] = useState({ display_name: '', email: '', pin: '' })
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [sentTo, setSentTo] = useState('')
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }))
+  const forgot = mode === 'forgot'
 
   const submit = async (e) => {
     e.preventDefault()
     setBusy(true); setErr('')
     try {
+      if (forgot) {
+        await api.fanForgotPin(token, { email: form.email })
+        setSentTo(form.email.trim())
+        return
+      }
       if (mode === 'register') await api.fanRegister(token, form)
       else await api.fanLogin(token, { email: form.email, pin: form.pin })
       await onAuthed()
@@ -60,21 +67,50 @@ export default function Auth({ token, season, onAuthed }) {
         </div>
 
         <div style={{ width: '100%', marginTop: 22 }}>
-          <Segmented options={[['register', 'New player'], ['login', 'Sign in']]} value={mode} onChange={(m) => { setErr(''); setMode(m) }} />
+          <Segmented options={[['register', 'New player'], ['login', 'Sign in']]} value={forgot ? 'login' : mode} onChange={(m) => { setErr(''); setSentTo(''); setMode(m) }} />
         </div>
 
         {err && <div style={{ width: '100%', marginTop: 14 }}><Banner>{err}</Banner></div>}
 
+        {forgot && sentTo ? (
+          <div style={{ width: '100%', marginTop: 14, font: `500 13px 'Hanken Grotesk'`, color: 'var(--text)', lineHeight: 1.5, textAlign: 'center' }}>
+            If {sentTo} has a team here, a new PIN is on its way. It replaces your old one, so sign in with it and change it under Settings.
+            <button type="button" onClick={() => { setSentTo(''); setMode('login') }}
+              style={{ display: 'block', margin: '14px auto 0', background: 'none', border: 0, cursor: 'pointer', color: 'var(--accent-strong)', font: `600 12.5px 'Hanken Grotesk'` }}>
+              Back to sign in
+            </button>
+          </div>
+        ) : (
         <form onSubmit={submit} style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 10, marginTop: 14 }}>
           {mode === 'register' && (
             <input style={inputSx} placeholder="Display name" value={form.display_name} onChange={set('display_name')} required />
           )}
+          {forgot && (
+            <div style={{ font: `500 12.5px 'Hanken Grotesk'`, color: 'var(--dim)', lineHeight: 1.5 }}>
+              Enter the email you signed up with and we'll send you a new PIN. Your old one will stop working.
+            </div>
+          )}
           <input style={inputSx} type="email" placeholder="Email" value={form.email} onChange={set('email')} required />
-          <input style={inputSx} type="password" inputMode="numeric" placeholder="PIN (4+ digits)" value={form.pin} onChange={set('pin')} required />
+          {!forgot && (
+            <input style={inputSx} type="password" inputMode="numeric" placeholder="PIN (4+ digits)" value={form.pin} onChange={set('pin')} required />
+          )}
           <Btn type="submit" full disabled={busy} style={{ marginTop: 4, boxShadow: `0 10px 26px -8px ${tintBg(65)}` }}>
-            {busy ? '…' : mode === 'register' ? 'Create & play' : 'Sign in'}
+            {busy ? '…' : forgot ? 'Email me a new PIN' : mode === 'register' ? 'Create & play' : 'Sign in'}
           </Btn>
+          {mode === 'login' && (
+            <button type="button" onClick={() => { setErr(''); setMode('forgot') }}
+              style={{ background: 'none', border: 0, cursor: 'pointer', color: 'var(--accent-strong)', font: `600 12.5px 'Hanken Grotesk'`, padding: 4 }}>
+              Forgot your PIN?
+            </button>
+          )}
+          {forgot && (
+            <button type="button" onClick={() => { setErr(''); setMode('login') }}
+              style={{ background: 'none', border: 0, cursor: 'pointer', color: 'var(--accent-strong)', font: `600 12.5px 'Hanken Grotesk'`, padding: 4 }}>
+              Back to sign in
+            </button>
+          )}
         </form>
+        )}
         <div style={{ font: `500 11.5px 'Hanken Grotesk'`, color: 'var(--faint)', textAlign: 'center', marginTop: 16, lineHeight: 1.5 }}>
           No app, no account needed beyond this.<br />Your PIN keeps your team yours.
         </div>
