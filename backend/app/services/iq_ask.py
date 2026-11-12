@@ -429,7 +429,9 @@ async def _resolve_pid(session: AsyncSession, org_id: str, value: str) -> str | 
         return None
     if _UUID.match(value):
         return value
-    players = await iq_players.list_all_players(session, org_id)
+    # Only the first few matches are ever shown (the ambiguity list), so only they
+    # need the costly by-grade raise; every match is still found.
+    players = await iq_players.list_all_players(session, org_id, query=value, grid_for=8)
     vl = value.lower()
     exact = [p for p in players if (p["name"] or "").lower() == vl]
     if len(exact) == 1:
@@ -451,10 +453,10 @@ _AMBIGUOUS_NOTE = ("Several players match that name. Ask the user which one they
 
 
 async def _tool_find_players(session, org_id, *, query=None):
-    players = await iq_players.list_all_players(session, org_id)
-    if query:
-        q = query.strip().lower()
-        players = [p for p in players if q in (p["name"] or "").lower()]
+    # The name filter runs in SQL and only the 40 rows returned get the by-grade
+    # raise, so the cost follows the rows shown, not the size of the club. This tool
+    # was taking ~110s a call in production when it read the whole roster first.
+    players = await iq_players.list_all_players(session, org_id, query=query, grid_for=40)
     players = players[:40]
     return {"count": len(players), "scope": _scope_echo(), "players": [
         {"player_id": p["player_id"], "name": p["name"], "role": p.get("player_role"),
