@@ -3,12 +3,13 @@ export default {
   date: '2026-11-12',
   // Above v9.143.5.4's sortKey (2026-11-20T03:00:00Z). Check origin/main at merge time.
   sortKey: '2026-11-20T04:00:00Z',
-  title: 'StatLab: who plays, bowls and fields together',
+  title: 'Fielding: every catch and stumping, and the bowler it came off',
   items: [
-    "StatLab has a new Teammates & Pairs group. Most games played together ranks every pair of players by matches in the same side, with their wins, losses, draws and win percentage. Best win rate together ranks the same pairs by how often the side won, with a minimum games setting so a pair who won their only match does not top it.",
-    "Bowler and fielder dismissals lists who takes the catches and stumpings off whose bowling. A new Fielder setting narrows it to the wicketkeeper (stumpings and catches behind) or to everyone who was not keeping. It replaces Top bowler/fielder combinations, which only counted catches. Old saved reports of that one still open.",
-    "Opening bowling pairs shows who took the new ball together, and Opening batting pairs shows who shared the first-wicket stand, with the runs they put on.",
-    "Pick a player on any of these and you get only the pairs they are in, so you can see who someone plays with most, or whose bowling they catch off.",
-    "Games together count a match the same way each player's own Matches figure does. Wins and losses cover games where the side is known, so a hand-typed or imported match with no team named counts as a game together but not as a win or a loss. Keeper catches are a floor: a catch saved before keeper catches were tracked only shows under All fielders.",
+    "A player's Fielding tab now lists every catch and stumping they have taken, oldest first, with the bowler it came off, the batter and the match. A keeper's first stumping is the first row and their latest is the last. Flip it to newest first if you prefer.",
+    "Above the list, a summary by bowler shows how many stumpings, catches and keeper catches the player has taken off each one, with the first and latest date. It is there on every player's profile, not only keepers.",
+    "Filter the list to stumpings, catches or keeper catches. Rows are numbered from the oldest, so \"stumping 12\" stays stumping 12 whichever way you sort.",
+    "The list follows the same filters as the fielding totals above it: grade type, match type, competition, grade and season.",
+    "It is built from scorecards, so it can hold fewer than the totals, which also count seasons we only have a total for and caught and bowled. Where it does, a note says how many are listed. Run outs are not listed because no bowler is credited with one.",
+    "A bowler the club has hidden from its public site is shown as \"Not shown\" and is not linked. The catch or stumping still counts for the fielder.",
   ],
 }

@@ -49,6 +49,7 @@ from app.services import player_form
 from app.services.session_safety import rollback_keeping
 from app.services import milestone_totals
 from app.services import grade_scope, junior_hiding, player_privacy
+from app.services import fielding_pairings, player_visibility
 from app.services.player_aliases import normalise_name_key, seed_alias_on_rename
 from app.services.player_age import age_on, dob_error, visible_age
 from app.services.player_kit import clean_shirt_number
@@ -843,6 +844,42 @@ async def get_player_upcoming_milestones(player_id: str, db: AsyncSession = Depe
 
     upcoming.sort(key=lambda m: m.get("needed", 9999))
     return upcoming
+
+
+@router.get("/{player_id}/fielding-dismissals")
+async def get_player_fielding_dismissals(
+    player_id: str,
+    season_id: Optional[str] = Query(None),
+    categories: Optional[str] = Query(None),
+    formats: Optional[str] = Query(None),
+    competitions: Optional[str] = Query(None),
+    grades: Optional[list[str]] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    viewer: User | None = Depends(get_optional_user),
+):
+    """Every catch and stumping this player took, with the bowler it came off.
+
+    Oldest first, so a keeper's first stumping is the first row and the most
+    recent is the last. `by_bowler` sums the same rows per bowler. Read through
+    the page's own grade, match-type and season lens, so it agrees with the
+    fielding headline above it. Run outs are not here: no bowler is credited.
+    See services/fielding_pairings.py for what the list cannot hold.
+    """
+    try:
+        pid = uuid.UUID(player_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=404, detail="Player not found")
+    player = await db.get(Player, pid)
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions, grades)
+    # A bowler the club has hidden is never named to a public viewer. The row
+    # stays (the fielder did take it); only the bowler goes. A club admin sees all.
+    hidden: set = set()
+    if player.organisation_id and not await user_can_view_org_private(db, viewer, str(player.organisation_id)):
+        hidden = await player_visibility.hidden_player_ids(db, player.organisation_id)
+    return await fielding_pairings.fielder_dismissals(
+        db, str(pid), scope=scope, season_id=season_id, hidden_ids=hidden)
 
 
 @router.get("/{player_id}/captain-stats")

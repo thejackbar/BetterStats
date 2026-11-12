@@ -2769,7 +2769,7 @@ Asked: the "Closest wins" report was probably wrong, because it looks at chases 
 
 Asked to fix `Biggest winning margins` and `Biggest defeats` the same way as Closest wins (v9.139.2.2): both sorted `match_list.margin_runs`, the whole-match run difference, which has no meaning for a chase. No backend change; the margins already sit on `team_innings_list`. Presets: `Biggest wins (Runs)` and `(Wickets)` read OUR rows (`is_ours = 1`, `won_by_runs` or `won_by_wickets` > 0, descending); `Biggest defeats (Runs)` and `(Wickets)` read the OPPOSITION's rows (`is_ours = 0`), because a defeat is their win and the margin is theirs. Check: `verify_statlab_team_records.py` 32 (G4's two-day fourth-innings chase at 102/2 is an 8-wicket defeat); `verify_statlab_team_records_browser.mjs` 50, control on the previous build fails 11.
 
-## StatLab teammate pair reports (v9.143.6)
+## StatLab teammate pair reports (v9.143.7)
 
 Asked: "In statlab, we should be able to do reports like find out which players have played the most games together, see lists of players who have dismissals together (one is the bowler, the other is the fielder and filter to see wicketkeepers too) and other interesting cool stats."
 
@@ -2787,3 +2787,19 @@ Frontend (`StatLab.jsx`): `DERIVED_GUIDE` / `guideFor` give a derived report its
 Proof. `backend/verification/verify_statlab_teammate_pairs.py` (44 checks, hand-built games: a washout, an intra-club fixture, a player in a match through a spell alone, a roster-less hand-typed game, a lent bowler opening, a catch with the keeper flag unrecorded). Control on the previous `statlab.py`: 3 pass (the vacuous empty-table ones), 41 fail. `frontend/verification/verify_statlab_teammate_pairs_browser.mjs` (38, API stubbed, exact request on the wire, 390px, per-player report keeps the attribute filters as the control); the control on the previous `StatLab.jsx` fails at the first check (no group). Existing `verify_statlab_team_records.py` (32), `verify_statlab_player_filter.py` (17), `verify_club_room_statlab_scope.py` (10) and `verify_statlab_player_browser.mjs` (23) still pass.
 
 Not done: run-outs record no bowler and no thrower on the scorecard, so there is no run-out pair. A bowler and keeper table is `bowler_fielder_dismissals` with `fielder_role=keeper`.
+
+## Fielding: every catch and stumping, and the bowler it came off (v9.143.6)
+
+Asked for the Fielding tab to list a keeper's stumpings from first to most recent with the bowler each came off, plus a summary of the bowlers a player has taken catches or stumpings off, for every player. The pairing already existed: `bowler_wickets` (synced) and `manual_bowler_wickets` (hand-entered and CricketStatz imports) hold one row per caught or stumped wicket with `bowler_id`, `fielder_id`, `batter_name`, `batter_runs`, `dismissal_type` and `caught_behind`, unioned by `v_effective_bowler_wickets`. Nothing read it for a player's own fielding (BetterIQ reads it for opposition batters). New `GET /players/{id}/fielding-dismissals` (`routers/players.py`) over `services/fielding_pairings.py`; new `FieldingPairings` panel under the season table in `PlayerProfile.jsx`'s `FieldingTab`. No schema change, no migration.
+
+What it reads and why:
+- The page's lens, same as the headline: `_club_game_clause`, the player's `GradeScope` (`_resolve_player_scope`) on `g.grade_id`, and `season_id` through `_game_season_clause`. `LEFT JOIN` grades and seasons (via `g.season_id`), so a grade-less hand-entered game is kept.
+- Both people are the club's own: `fielder_id = :pid` and the bowler's `players.organisation_id` equal to the fielder's, because a both-synced fixture carries the other club's rows on the same game.
+- A kind is `stumping` (`stumped`), `caught_behind` (`caught` with `caught_behind` TRUE) or `catch` (`caught`, NULL reads as a plain catch, so a hand-entered keeper catch shows as a catch). Run outs credit no bowler and caught-and-bowled has no separate fielder, so neither is listed.
+- The headline totals come from CA's season aggregates (raised by `held_topup`), so the list can hold fewer. The panel names the shortfall ("Listed here: 7 of 9 stumpings and 3 of 5 catches") only where it exists, and always says run outs are not listed.
+- A bowler in `player_visibility.hidden_player_ids` (unless the viewer is a club admin or Better staff) is masked on the row (`bowler_hidden`, no name, no id) and pooled into one "Not shown" summary line. The row stays: the fielder did take it. The route gate still hides the fielder's own profile.
+- Hand-entered cards paired to a synced game are not doubled: the view hides whichever copy was not chosen.
+
+Not built, offered as the obvious follow-up: the mirror on the Bowling tab (who has caught or stumped off a bowler). The service reads one direction only today.
+
+Proof: `backend/verification/verify_fielding_pairings.py` (38 checks against a real Postgres with `superseded_ddl` applied on the shared harness: synced, hand-entered, grade-less, both pairing directions, shared fixture, another club's game, cross-club bowler, hidden bowler public and admin, junior, T20 and season picks; `CONTROL=1` switches off the club clause and the hidden mask and fails 11); `frontend/verification/verify_fielding_pairings_browser.mjs` (30 checks in Chromium on the production build with the API stubbed: exact request, order and numbering, filter chips, hidden row, note present and absent, pagination, a late reply from the player the page has left, 390px; control on the previous build fails 26). `audit_route_access` and `audit_game_ownership_reads` are unchanged (59 flagged, none new).

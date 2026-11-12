@@ -3392,6 +3392,13 @@ export const api = {
     return request(`/leaderboard/sirs/${type}?${params}`)
   },
   getPlayerCaptainStats: (playerId, scope) => request(`/players/${playerId}/captain-stats${scopeQuery(scope)}`),
+  // Every catch and stumping the player took, oldest first, with the bowler it came off.
+  // Same filters as the fielding headline, and the season when one is picked.
+  getPlayerFieldingDismissals: (playerId, scope, seasonId) => {
+    const qs = scopeQuery(scope)
+    const season = seasonId ? `${qs ? '&' : '?'}season_id=${encodeURIComponent(seasonId)}` : ''
+    return request(`/players/${playerId}/fielding-dismissals${qs}${season}`)
+  },
 
   // ─── BetterSelect: Fixtures ─────────────────────────────
   bsListFixtures: (upcomingOnly = false, { hideJuniors = false } = {}) => {
