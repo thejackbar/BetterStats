@@ -1,8 +1,8 @@
 export default {
   version: 'v9.143.6',
   date: '2026-11-12',
-  // Above v9.143.5.3's sortKey (2026-11-20T02:00:00Z). Check origin/main at merge time.
-  sortKey: '2026-11-20T03:00:00Z',
+  // Above v9.143.5.4's sortKey (2026-11-20T03:00:00Z). Check origin/main at merge time.
+  sortKey: '2026-11-20T04:00:00Z',
   title: 'Fielding: every catch and stumping, and the bowler it came off',
   items: [
     "A player's Fielding tab now lists every catch and stumping they have taken, oldest first, with the bowler it came off, the batter and the match. A keeper's first stumping is the first row and their latest is the last. Flip it to newest first if you prefer.",
