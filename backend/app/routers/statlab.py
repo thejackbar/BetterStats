@@ -81,10 +81,14 @@ _CTX_KEYS_TEXT = {
     "family_id",
     # One player: narrows the finished rows, never the figures on them.
     "player_id",
+    # Pair reports: which fielders a bowler/fielder table counts (all, keeper, fielder).
+    "fielder_role",
 }
 _CTX_KEYS_INT = {
     "min_year", "max_year", "position_min", "position_max",
     "first_n_matches", "milestone_runs",
+    # Pair reports: the games floor on "Best win rate together".
+    "min_games",
 }
 _CTX_KEYS_BOOL = {
     "finals_only", "captain_only", "keeper_only", "on_this_day",

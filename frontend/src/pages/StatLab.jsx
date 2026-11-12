@@ -72,9 +72,11 @@ const SEASON_KEYS = ['season_ids', 'season_id']
 
 // Drop the context a target cannot use, so switching tabs never leaves a
 // hidden filter scoping the results (or a chip naming one that does nothing).
-function pruneContext(ctx, guide) {
+function pruneContext(ctx, guide, derived = null) {
   const out = { ...(ctx || {}) }
   const drop = (keys) => keys.forEach(k => { delete out[k] })
+  if (derived !== 'bowler_fielder_dismissals') drop(['fielder_role'])
+  if (derived !== 'win_rate_together') drop(['min_games'])
   if (!guide.player) drop(PLAYER_KEYS)
   if (!guide.attrs) drop(ATTR_KEYS)
   if (!guide.innings) drop(INNINGS_KEYS)
@@ -297,7 +299,18 @@ const PRESET_GROUPS = [
       { type: 'derived', key: 'partnership_aggregates_pair',     label: 'Top partnership aggregates',  description: 'Total partnership runs per pair of batters.' },
       { type: 'derived', key: 'century_partnerships_pair',       label: 'Most century partnerships by pair', description: 'Count of 100+ partnerships per pair.' },
       { type: 'derived', key: 'best_partnership_pair',           label: 'Best partnership by pair',    description: 'Highest single partnership for each pair.' },
+      { type: 'derived', key: 'opening_batting_pairs',           label: 'Opening batting pairs',       description: 'Pairs who shared the first-wicket stand, by number of stands.' },
       { type: 'preset', label: 'On this day — partnerships',     target: 'partnership_list', sortBy: 'runs', sortDir: 'desc', filters: [], context: { on_this_day: true } },
+    ],
+  },
+  {
+    key: 'teammates', label: 'Teammates & Pairs', defaultOpen: false,
+    items: [
+      { type: 'derived', key: 'games_together',            label: 'Most games played together', description: 'Pairs of players ranked by matches in the same side.' },
+      { type: 'derived', key: 'win_rate_together',         label: 'Best win rate together',     description: 'Pairs ranked by the share of their matches the side won.' },
+      { type: 'derived', key: 'bowler_fielder_dismissals', label: 'Bowler and fielder dismissals', description: 'Who takes the catches and stumpings off whose bowling. Filter to the wicketkeeper.' },
+      { type: 'derived', key: 'opening_bowling_pairs',     label: 'Opening bowling pairs',      description: 'Pairs who took the new ball together.' },
+      { type: 'derived', key: 'opening_batting_pairs',     label: 'Opening batting pairs',      description: 'Pairs who shared the first-wicket stand.' },
     ],
   },
   {
@@ -334,7 +347,6 @@ const PRESET_GROUPS = [
       { type: 'derived', key: 'hat_tricks',                        label: 'Hat tricks',                description: 'From Admin → Awards (manually recorded).' },
       { type: 'derived', key: 'ducks_inflicted',                   label: 'Most ducks inflicted',      description: 'Bowlers who dismissed batters for 0 most often.' },
       { type: 'derived', key: 'golden_ducks_inflicted',            label: 'Most golden ducks inflicted', description: 'Bowlers who dismissed batters for 0 off 0–1 balls.' },
-      { type: 'derived', key: 'bowler_fielder_combo',              label: 'Top bowler/fielder combinations', description: 'Most productive bowler+catcher partnerships.' },
       // The batter's side of this ("Highest C&B count") is under Batting; this
       // is the bowler's, ranked by caught-and-bowled wickets taken.
       { type: 'derived', key: 'caught_and_bowled_bowler',           label: 'Highest C&B count (bowler)', description: 'Bowlers ranked by caught-and-bowled wickets taken.' },
@@ -519,10 +531,39 @@ const PAIR_DERIVED = new Set([
   'partnership_aggregates_pair',
   'century_partnerships_pair',
   'top_partnerships_by_wicket',
+  'games_together',
+  'win_rate_together',
+  'opening_bowling_pairs',
+  'opening_batting_pairs',
 ])
 // Derived reports that render as two separate named-role columns (BOWLER / FIELDER)
 // rather than the combined "A & B" pair format.
-const DUO_DERIVED = new Set(['bowler_fielder_combo'])
+const DUO_DERIVED = {
+  bowler_fielder_combo: ['BOWLER', 'FIELDER'],
+  bowler_fielder_dismissals: ['BOWLER', 'FIELDER'],
+}
+// Pair reports that can be narrowed to one player's pairs (context.player_id), and that read
+// the match filters only: a pair has two players, so one gender, captain or keeper flag cannot
+// describe it. The player picker shows for these and the attribute and innings filters do not.
+const PAIR_GUIDE = { player: true, attrs: false, innings: false, match: 'all' }
+const DERIVED_GUIDE = {
+  games_together: PAIR_GUIDE,
+  win_rate_together: PAIR_GUIDE,
+  bowler_fielder_dismissals: PAIR_GUIDE,
+  opening_bowling_pairs: PAIR_GUIDE,
+  opening_batting_pairs: PAIR_GUIDE,
+}
+const guideFor = (target, derived) => (derived ? (DERIVED_GUIDE[derived] || FULL_GUIDE) : (TARGET_GUIDE[target] || FULL_GUIDE))
+const PAIR_PLAYER_HINT = 'Only pairs this player is in.'
+// The controls only one report reads. Dropped when another report is picked so no hidden
+// setting keeps scoping the table and no chip names one that does nothing.
+const FIELDER_ROLE_OPTIONS = [
+  { value: '', label: 'All fielders' },
+  { value: 'keeper', label: 'Wicketkeeper (stumpings and catches behind)' },
+  { value: 'fielder', label: 'Fielders, not keeping' },
+]
+const FIELDER_ROLE_CHIP = { keeper: 'Fielder: wicketkeeper', fielder: 'Fielder: not keeping' }
+const MIN_GAMES_OPTIONS = [3, 5, 10, 20, 30, 50]
 
 let _treeIdCounter = 1000
 const newTreeId = () => ++_treeIdCounter
@@ -610,6 +651,8 @@ function summarizeContextChips(ctx, seasons, grades) {
   if (ctx.position_max) push('position_max', `Position ≤ ${ctx.position_max}`)
   if (ctx.first_n_matches) push('first_n_matches', `First ${ctx.first_n_matches} matches`)
   if (ctx.milestone_runs)  push('milestone_runs', `Milestone: ${ctx.milestone_runs} runs`)
+  if (ctx.fielder_role)    push('fielder_role', FIELDER_ROLE_CHIP[ctx.fielder_role] || `Fielder: ${ctx.fielder_role}`)
+  if (ctx.min_games)       push('min_games', `Min games: ${ctx.min_games}`)
   if (ctx.gender)        push('gender', `Gender: ${ctx.gender}`)
   if (ctx.overseas)      push('overseas', `Overseas: ${ctx.overseas}`)
   if (ctx.player_role)   push('player_role', `Role: ${ctx.player_role}`)
@@ -1138,6 +1181,24 @@ function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, targ
           </select>
         </div>
       )}
+      {activeDerived === 'bowler_fielder_dismissals' && (
+        <div>
+          <Label>Fielder</Label>
+          <select className={`${selectCls} mt-1 ${isFieldActive(ctx.fielder_role) ? activeFieldCls : ''}`}
+                  value={ctx.fielder_role || ''} onChange={e => set('fielder_role', e.target.value)}>
+            {FIELDER_ROLE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </div>
+      )}
+      {activeDerived === 'win_rate_together' && (
+        <div>
+          <Label>Minimum games together</Label>
+          <select className={selectCls + ' mt-1'} value={ctx.min_games || '10'}
+                  onChange={e => set('min_games', e.target.value)}>
+            {MIN_GAMES_OPTIONS.map(n => <option key={n} value={n}>{n} games with a known side</option>)}
+          </select>
+        </div>
+      )}
       {activeDerived === 'milestone_runs' && (
         <div>
           <Label>Runs milestone</Label>
@@ -1661,7 +1722,9 @@ export default function StatLab() {
   }, [runQuery, clubSlug, navigate, reportSlug])
 
   const applyDerived = useCallback(async (name) => {
-    const next = { ...queryRef.current, filterTree: emptyTree() }
+    const cur = queryRef.current
+    // A chosen player stays chosen on a report that can use one; the rest drop what they cannot read.
+    const next = { ...cur, filterTree: emptyTree(), context: pruneContext(cur.context, guideFor(null, name), name) }
     setQuery(next)
     setActivePreset(null)
     await runQuery(next, name)
@@ -2015,13 +2078,13 @@ export default function StatLab() {
               {showCustomise && (
                 <div className="px-4 pb-4 pt-3 pb-hairline-t space-y-3">
                   {/* One player first — everything below then narrows their rows. */}
-                  {!activeDerived && (TARGET_GUIDE[query.target] || FULL_GUIDE).player && (
+                  {guideFor(query.target, activeDerived).player && (
                     <PlayerPicker
                       orgId={orgId}
                       playerId={query.context?.player_id}
                       playerName={query.context?.player_name}
                       onChange={setPlayer}
-                      hint={PLAYER_FILTER_HINT[query.target]}
+                      hint={activeDerived ? PAIR_PLAYER_HINT : PLAYER_FILTER_HINT[query.target]}
                     />
                   )}
                   {/* Sort + Direction + Limit on one row */}
@@ -2069,7 +2132,7 @@ export default function StatLab() {
                         seasons={seasons}
                         grades={grades}
                         targetShape={targetMeta.shape}
-                        guide={activeDerived ? FULL_GUIDE : (TARGET_GUIDE[query.target] || FULL_GUIDE)}
+                        guide={guideFor(query.target, activeDerived)}
                         target={query.target}
                         activeDerived={activeDerived}
                         orgId={orgId}
@@ -2121,7 +2184,7 @@ export default function StatLab() {
                     <div className="flex items-center gap-3">
                       <Label>
                         {(() => {
-                          const unit = activeDerived ? 'PLAYERS' : (targetMeta.shape === 'list' ? 'ROWS' : 'GROUPS')
+                          const unit = activeDerived ? ((PAIR_DERIVED.has(activeDerived) || DUO_DERIVED[activeDerived]) ? 'PAIRS' : 'PLAYERS') : (targetMeta.shape === 'list' ? 'ROWS' : 'GROUPS')
                           const reportName = activeDerived
                             ? schema?.derived?.[activeDerived]?.label
                             : (openReport ? openReport.title : activePreset)
@@ -2285,6 +2348,10 @@ export default function StatLab() {
 // ─── Results table ────────────────────────────────────────────────────────────
 
 function entityHeader(target, activeDerived) {
+  if (activeDerived && DUO_DERIVED[activeDerived]) {
+    const [a, b] = DUO_DERIVED[activeDerived]
+    return [{ key: 'player_a_name', label: a }, { key: 'player_b_name', label: b }]
+  }
   if (activeDerived && PAIR_DERIVED.has(activeDerived)) {
     return [{ key: 'pair', label: 'PAIR' }]
   }
@@ -2352,8 +2419,8 @@ function ResultsTable({ rows, columns, target, activeDerived, clientSort, onSort
   const navigate = useNavigate()
   const opensScorecard = !activeDerived && SCORECARD_TARGETS.has(target)
   const dimCols = activeDerived
-    ? (DUO_DERIVED.has(activeDerived)
-        ? [{ key: 'player_a_name', label: 'BOWLER' }, { key: 'player_b_name', label: 'FIELDER' }]
+    ? (DUO_DERIVED[activeDerived]
+        ? entityHeader(target, activeDerived)
         : PAIR_DERIVED.has(activeDerived)
             ? [{ key: 'pair', label: 'PAIR' }]
             : [{ key: 'player_name', label: 'PLAYER' }])
@@ -2421,7 +2488,7 @@ function formatCell(v, col) {
   if (col?.key === 'overs') return fmtOvers(v)
   // Averages / strike rates / economy → always 2 decimals.
   if (col?.decimal) return fmt2(v)
-  if (col?.key === 'played_at' && typeof v === 'string') {
+  if ((col?.key === 'played_at' || col?.key === 'first_game' || col?.key === 'last_game') && typeof v === 'string') {
     try { return new Date(v).toISOString().slice(0, 10) } catch { return v }
   }
   // Numeric counts (runs, wickets, matches, balls…) → thousands separators.
