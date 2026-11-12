@@ -577,7 +577,9 @@ function fmtDay(iso) {
     .toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: '2-digit' })
 }
 
-function BowlerName({ id, name, hidden, fmtName }) {
+function BowlerName({ id, name, hidden, unknown = false, fmtName }) {
+  // Two different absences: a bowler the club has hidden, and a scorecard that named nobody.
+  if (unknown) return <span className="text-pb-faint italic">Not recorded</span>
   if (hidden || !name) return <span className="text-pb-faint italic">Not shown</span>
   const label = fmtName(name)
   return id
@@ -635,8 +637,8 @@ function FieldingPairings({ playerId, seasonId = null, scope = null, fielding = 
   if (headCatches != null && catchesListed < headCatches) short.push(`${catchesListed} of ${headCatches} catches`)
   const shortNote = short.length > 0 && (
     <p className="text-[12px] text-pb-faint">
-      Listed here: {short.join(' and ')}. The totals above also count seasons we only hold a total for,
-      caught and bowled, and fielders a scorecard did not name.
+      Listed here: {short.join(' and ')}. The totals above also count seasons we only hold a total for
+      and caught and bowled.
     </p>
   )
 
@@ -678,9 +680,9 @@ function FieldingPairings({ playerId, seasonId = null, scope = null, fielding = 
             </thead>
             <tbody>
               {bowlers.map((g, i) => (
-                <tr key={g.bowler_id || `hidden-${i}`} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                <tr key={g.bowler_id || `none-${i}`} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
                   <td className="py-2.5 pl-5">
-                    <BowlerName id={g.bowler_id} name={g.bowler_name} hidden={g.bowler_hidden} fmtName={fmtName} />
+                    <BowlerName id={g.bowler_id} name={g.bowler_name} hidden={g.bowler_hidden} unknown={g.bowler_unknown} fmtName={fmtName} />
                   </td>
                   {showStump && <td className="py-2.5 font-mono text-right text-pb-dim">{dash(g.stumping)}</td>}
                   {showCatch && <td className="py-2.5 font-mono text-right text-pb-dim">{dash(g.catch)}</td>}
@@ -732,7 +734,7 @@ function FieldingPairings({ playerId, seasonId = null, scope = null, fielding = 
             </thead>
             <tbody>
               {visible.map((r, i) => (
-                <tr key={r.wicket_id ? `${r.source}-${r.wicket_id}` : i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                <tr key={`${r.game_id}-${r.source}-${r.wicket_id ?? 'x'}-${i}`} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
                   <td className="py-2.5 pl-5 font-mono text-[11px] text-pb-faint">{r.n}</td>
                   <td className="py-2.5 font-mono text-[11px] text-pb-faint whitespace-nowrap">
                     {r.game_id
@@ -743,7 +745,7 @@ function FieldingPairings({ playerId, seasonId = null, scope = null, fielding = 
                     <span className={r.kind === 'stumping' ? 'font-semibold' : 'text-pb-dim'}>{PAIRING_HOW[r.kind]}</span>
                   </td>
                   <td className="py-2.5">
-                    <BowlerName id={r.bowler_id} name={r.bowler_name} hidden={r.bowler_hidden} fmtName={fmtName} />
+                    <BowlerName id={r.bowler_id} name={r.bowler_name} hidden={r.bowler_hidden} unknown={r.bowler_unknown} fmtName={fmtName} />
                   </td>
                   <td className="py-2.5 text-pb-dim whitespace-nowrap">
                     {r.batter_name || '—'}{r.batter_runs != null && <span className="font-mono text-[11px] text-pb-faint"> · {r.batter_runs}</span>}
@@ -771,6 +773,12 @@ function FieldingPairings({ playerId, seasonId = null, scope = null, fielding = 
 
       <div className="space-y-1">
         {shortNote}
+        {counts.unpaired > 0 && (
+          <p className="text-[12px] text-pb-faint">
+            {counts.unpaired} {counts.unpaired === 1 ? 'row shows' : 'rows show'} no bowler or batter, because the scorecard
+            credits the catch or stumping but its dismissal text does not name anyone.
+          </p>
+        )}
         <p className="text-[12px] text-pb-faint">
           Run outs are not listed, because no bowler is credited with one. Rows come from scorecards, so a game with no scorecard held is not here.
         </p>

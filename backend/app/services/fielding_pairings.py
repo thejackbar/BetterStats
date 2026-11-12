@@ -12,11 +12,15 @@ What this can and cannot say, so the screen can say it too:
   a pairing and is never listed.
 * Caught-and-bowled has no separate fielder (the bowler is the catcher), so it
   is not listed against anyone.
-* ``fielder_id`` is NULL when the scorecard's fielder could not be matched to a
-  player (a fill-in, a redacted junior), and nothing is held at all for a game
-  with no scorecard. The season totals above the list come from CA's own
-  aggregates, so the list can hold fewer than the headline. The caller compares
-  the two and says so; this module only reports what it holds.
+* ``fielder_id`` is NULL when the scorecard's dismissal text names nobody (CA
+  sometimes sends ``st:  b: `` with both names blank), so no pairing row can be
+  built. The scorecard's per-game fielding row still credits the player, so the
+  shortfall between that row and the pairings held is added back as rows with
+  no bowler (``bowler_unknown``). That is what makes the list agree with the
+  headline for every scorecard we hold. Nothing is held at all for a game with
+  no scorecard, and the season totals above the list come from CA's own
+  aggregates, so the list can still hold fewer than the headline. The caller
+  compares the two and says so.
 * ``caught_behind`` NULL (an older synced row, or a hand-entered card) reads as
   a plain catch, the same rule every other reader of the column follows.
 
@@ -43,6 +47,8 @@ KINDS = (KIND_CATCH, KIND_CAUGHT_BEHIND, KIND_STUMPING)
 # One group for every bowler the viewer may not be shown, so a stumping off a
 # hidden junior still counts for the keeper without naming anyone.
 HIDDEN_BOWLER_KEY = "hidden"
+# One group for every row with no bowler recorded, for the same reason.
+UNKNOWN_BOWLER_KEY = "unknown"
 
 
 def kind_of(dismissal_type: Optional[str], caught_behind: Optional[bool]) -> Optional[str]:
@@ -77,6 +83,43 @@ def count_kinds(rows: Iterable[dict]) -> dict:
     return counts
 
 
+def unpaired_rows(game_gaps: Iterable[dict], paired: Iterable[dict]) -> list[dict]:
+    """Rows for the catches and stumpings a game's fielding row credits that no pairing holds.
+
+    ``game_gaps`` is one dict per game with the fielder's own counts from the scorecard's fielding
+    row (``stumpings``, ``catches`` including the keeper's, ``catches_wk``) and
+    ``own_caught_bowled``, the player's own caught-and-bowled that game. ``paired`` is the rows
+    already built from the pairing table. Never negative: a game with more pairings than the
+    fielding row says adds nothing. A caught-and-bowled is the bowler's own catch, so it is taken
+    off the plain-catch shortfall rather than shown as a catch with no bowler.
+    """
+    have: dict[tuple, int] = {}
+    for r in paired:
+        k = (r["game_id"], r["kind"])
+        have[k] = have.get(k, 0) + 1
+    out = []
+    for g in game_gaps:
+        gid = g["game_id"]
+        wk = int(g.get("catches_wk") or 0)
+        want = {
+            KIND_STUMPING: int(g.get("stumpings") or 0),
+            KIND_CAUGHT_BEHIND: wk,
+            KIND_CATCH: max(int(g.get("catches") or 0) - wk - int(g.get("own_caught_bowled") or 0), 0),
+        }
+        for kind, n in want.items():
+            for _ in range(max(n - have.get((gid, kind), 0), 0)):
+                out.append({
+                    "wicket_id": None, "game_id": gid, "played_at": g.get("played_at"),
+                    "home_team": g.get("home_team"), "away_team": g.get("away_team"),
+                    "home_away_known": g.get("home_away_known"),
+                    "grade_name": g.get("grade_name"), "season_name": g.get("season_name"),
+                    "innings_number": None, "batter_name": None, "batter_runs": None,
+                    "bowler_id": None, "bowler_name": None, "bowler_hidden": False,
+                    "bowler_unknown": True, "source": "fielding", "kind": kind,
+                })
+    return out
+
+
 def by_bowler(rows: Iterable[dict]) -> list[dict]:
     """One line per bowler: what the fielder took off them, first and last date.
 
@@ -87,13 +130,20 @@ def by_bowler(rows: Iterable[dict]) -> list[dict]:
     for r in rows:
         if r.get("kind") not in KINDS:
             continue
-        key = HIDDEN_BOWLER_KEY if r.get("bowler_hidden") else str(r.get("bowler_id") or "")
+        if r.get("bowler_hidden"):
+            key = HIDDEN_BOWLER_KEY
+        elif r.get("bowler_unknown"):
+            key = UNKNOWN_BOWLER_KEY
+        else:
+            key = str(r.get("bowler_id") or "")
+        special = key in (HIDDEN_BOWLER_KEY, UNKNOWN_BOWLER_KEY)
         g = groups.get(key)
         if g is None:
             g = groups[key] = {
-                "bowler_id": None if key == HIDDEN_BOWLER_KEY else r.get("bowler_id"),
-                "bowler_name": None if key == HIDDEN_BOWLER_KEY else r.get("bowler_name"),
+                "bowler_id": None if special else r.get("bowler_id"),
+                "bowler_name": None if special else r.get("bowler_name"),
                 "bowler_hidden": key == HIDDEN_BOWLER_KEY,
+                "bowler_unknown": key == UNKNOWN_BOWLER_KEY,
                 **{k: 0 for k in KINDS},
                 "total": 0,
                 "first_played_at": None,
@@ -113,6 +163,8 @@ def by_bowler(rows: Iterable[dict]) -> list[dict]:
     out.sort(key=lambda g: (g["bowler_name"] or "~").lower())
     out.sort(key=lambda g: g["last_played_at"] or "", reverse=True)
     out.sort(key=lambda g: g["total"], reverse=True)
+    # People first: the hidden and not-recorded lines are not bowlers, so they close the table.
+    out.sort(key=lambda g: g["bowler_hidden"] or g["bowler_unknown"])
     return out
 
 
@@ -179,10 +231,51 @@ async def fielder_dismissals(
         d["bowler_hidden"] = False
         rows.append(d)
 
+    # The scorecard's own fielding row per game, against the pairings just read. The same game, season
+    # and scope clauses, so it is the same lens. Aggregated per game first so the join is one row each.
+    gaps = await session.execute(
+        text(f"""
+            SELECT
+                g.id::text AS game_id,
+                g.played_at::text AS played_at,
+                {sides},
+                COALESCE(gr.display_name_override, gr.name) AS grade_name,
+                s.name AS season_name,
+                fs.stumpings, fs.catches, fs.catches_wk,
+                COALESCE((
+                    SELECT COUNT(*) FROM v_effective_bowler_wickets cb
+                    WHERE cb.game_id = g.id AND cb.bowler_id = CAST(:pid AS UUID)
+                      AND LOWER(cb.dismissal_type) = 'caught and bowled'
+                ), 0) AS own_caught_bowled
+            FROM (
+                SELECT f.game_id,
+                       COALESCE(SUM(f.stumpings), 0) AS stumpings,
+                       COALESCE(SUM(f.catches), 0) AS catches,
+                       COALESCE(SUM(f.catches_wk), 0) AS catches_wk
+                FROM v_effective_fielding_stats f
+                WHERE f.player_id = CAST(:pid AS UUID)
+                GROUP BY f.game_id
+            ) fs
+            JOIN v_effective_games g ON g.id = fs.game_id
+            LEFT JOIN grades gr ON gr.id = g.grade_id
+            LEFT JOIN seasons s ON s.id = g.season_id
+            WHERE fs.stumpings + fs.catches > 0
+              {club}{season}{scope_sql}
+        """),
+        params,
+    )
+    extra = unpaired_rows([dict(r) for r in gaps.mappings()], rows)
+    if extra:
+        # Same order as the query: dated oldest first, undated last, a game's own rows together.
+        rows = sorted(rows + extra, key=lambda r: (r["played_at"] is None, r["played_at"] or "", r["game_id"],
+                                                   r["innings_number"] if r["innings_number"] is not None else 99))
+
     rows = mask_hidden_bowlers(rows, hidden_ids)
+    counts = count_kinds(rows)
+    counts["unpaired"] = sum(1 for r in rows if r.get("bowler_unknown"))
     return {
         "player_id": player_id,
         "rows": rows,
-        "counts": count_kinds(rows),
+        "counts": counts,
         "by_bowler": by_bowler(rows),
     }

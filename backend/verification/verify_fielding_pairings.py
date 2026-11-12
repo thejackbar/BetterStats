@@ -22,6 +22,16 @@ Seeds Ryan Carmody, a keeper, and:
   M4  hand-entered, 2000-12-16, the chosen card           stumped off Cal
   G5  synced, 2000-12-09, another club's game, Carmody's name on it    stumped off Ben (not our game)
 
+Where CA's dismissal text names nobody ("st:  b: ") no pairing can be built, but the scorecard's fielding row
+still credits the keeper. Those are added back as rows with no bowler:
+
+  G9  synced, 2000-10-14, A Grade     fielding row: 2 stumpings, 1 keeper catch; NO pairing rows  -> 3 added
+  G10 synced, 2000-10-28, A Grade     fielding row: 2 stumpings; one paired (off Lee)             -> 1 added
+  G11 synced, 2000-11-11, A Grade     Carmody BOWLS a caught-and-bowled; fielding row: 1 catch    -> 0 added
+  G12 synced, 2000-11-12, Under 16s   fielding row: 1 stumping, no pairing                        -> 1 added, juniors only
+  G13 synced, 2000-12-10, another club's game, fielding row: 1 stumping                           -> 0 (not our game)
+  G1 also gets a fielding row that matches its pairings exactly                                   -> 0 added
+
 Every "this row is absent" check is paired with a raw query showing the row COULD be there, so a check that can
 only pass is not a check. `CONTROL=1` switches off the club-ownership clause and the hidden-bowler mask; the
 guard checks must then fail, and nothing may crash.
@@ -56,12 +66,12 @@ ORG, OPP = b.ORG, b.OPP
 Session, check = b.Session, b.check
 CONTROL = bool(os.environ.get("CONTROL"))
 
-RYAN, BEN, CAL, DAN, HARRY = (uuid.uuid4() for _ in range(5))
+RYAN, BEN, CAL, DAN, HARRY, LEE = (uuid.uuid4() for _ in range(6))
 RIVAL_KEEPER, RIVAL_BOWLER, OTHER_KEEPER = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
 ADMIN = uuid.uuid4()
 S1, S0, S_OPP = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
 G_A, G_A0, G_J, G_OPP = uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
-G1, G2, G3, G5, G7, G8 = (uuid.uuid4() for _ in range(6))
+G1, G2, G3, G5, G7, G8, G9, G10, G11, G12, G13 = (uuid.uuid4() for _ in range(11))
 M1, M2, M3, M4 = (uuid.uuid4() for _ in range(4))
 CLUB_NAME = "Carmody Club"
 
@@ -85,7 +95,7 @@ async def build() -> None:
             await ex("INSERT INTO grades (id, season_id, name, grassroots_id, category, categories) "
                      "VALUES (:i, :s, :n, :g, :c, ARRAY[CAST(:c AS text)])", i=gid, s=sid, n=nm, g=str(gid), c=cat)
         for pid, org, nm in ((RYAN, ORG, "Carmody, Ryan"), (BEN, ORG, "Bowler, Ben"), (CAL, ORG, "Quick, Cal"),
-                             (DAN, ORG, "Spin, Dan"), (HARRY, ORG, "Hidden, Harry"),
+                             (DAN, ORG, "Spin, Dan"), (HARRY, ORG, "Hidden, Harry"), (LEE, ORG, "Late, Lee"),
                              (RIVAL_KEEPER, OPP, "Keeper, Rival"), (RIVAL_BOWLER, OPP, "Bowler, Rival"),
                              (OTHER_KEEPER, OPP, "Keeper, Other")):
             await ex("INSERT INTO players (id, organisation_id, name, grassroots_id, status) "
@@ -137,6 +147,24 @@ async def build() -> None:
 
         await game(G8, G_A, "2000-12-16", "One Day", ORG, OPP)
         await bw(G8, BEN, RYAN, "stumped", "Synced Twin", 6)
+
+        async def field(gid, st=0, c=0, wk=0):
+            await ex("INSERT INTO fielding_stats (game_id, player_id, catches, catches_wk, run_outs, stumpings) "
+                     "VALUES (:g, :p, :c, :w, 0, :s)", g=gid, p=RYAN, c=c, w=wk, s=st)
+
+        await field(G1, st=1, c=2, wk=1)                                  # matches its pairings exactly
+        await game(G9, G_A, "2000-10-14", "One Day", ORG, OPP)
+        await field(G9, st=2, c=1, wk=1)                                  # names blank: no pairing rows at all
+        await game(G10, G_A, "2000-10-28", "One Day", ORG, OPP)
+        await bw(G10, LEE, RYAN, "stumped", "Z Partial", 3)
+        await field(G10, st=2)                                            # one paired, one not
+        await game(G11, G_A, "2000-11-11", "One Day", ORG, OPP)
+        await bw(G11, RYAN, None, "caught and bowled", "Own Bowling", 14)
+        await field(G11, c=1)                                             # his own catch off his own bowling
+        await game(G12, G_J, "2000-11-12", "One Day", ORG, OPP)
+        await field(G12, st=1)
+        await game(G13, G_OPP, "2000-12-10", "One Day", OPP, None, home="Rival CC", away="Elsewhere CC")
+        await field(G13, st=1)
 
         await manual(M1, G_A, "2000-11-18")
         await mbw(M1, CAL, RYAN, "stumped", "S Manual", 11)
@@ -195,8 +223,9 @@ async def main() -> None:
 
     print("\n-- THE STUMPING LIST, FIRST TO MOST RECENT --")
     stumps = pairs(d, "stumping")
-    check("seven stumpings: synced, hand-entered, grade-less and the chosen card",
-          len(stumps) == 7, str(stumps))
+    named = [x for x in stumps if x[1] is not None]
+    check("seven named stumpings: synced, hand-entered, grade-less and the chosen card",
+          len(named) == 7, str(named))
     check("oldest first: the 5 Feb stumping off Dan opens the list, the 16 Dec chosen card closes it",
           bool(stumps) and stumps[0][:2] == ("2000-02-05", "Spin, Dan") and stumps[-1][:2] == ("2000-12-16", "Quick, Cal"),
           str(stumps[:1] + stumps[-1:]))
@@ -214,10 +243,11 @@ async def main() -> None:
     check("one catch off Ben at G1, and the hand-entered one off Ben (caught_behind NULL reads as a plain catch)",
           sorted(pairs(d, "catch")) == [("2000-10-07", "Bowler, Ben", "L Brown"), ("2000-11-18", "Bowler, Ben", "T Manual")],
           str(pairs(d, "catch")))
-    check("the keeper catch is its own kind, off Cal",
-          pairs(d, "caught_behind") == [("2000-10-07", "Quick, Cal", "K Jones")], str(pairs(d, "caught_behind")))
-    check("counts: 7 stumpings, 2 catches, 1 caught behind, 10 in all",
-          d.get("counts") == {"catch": 2, "caught_behind": 1, "stumping": 7, "total": 10}, str(d.get("counts")))
+    check("the keeper catch is its own kind, off Cal (and G9's, with no bowler recorded)",
+          pairs(d, "caught_behind") == [("2000-10-07", "Quick, Cal", "K Jones"), ("2000-10-14", None, None)],
+          str(pairs(d, "caught_behind")))
+    check("counts: 11 stumpings, 2 catches, 2 caught behind, 15 in all, 4 with no bowler recorded",
+          d.get("counts") == {"catch": 2, "caught_behind": 2, "stumping": 11, "total": 15, "unpaired": 4}, str(d.get("counts")))
     check("a bowled wicket and a caught-and-bowled have no fielder, so neither is listed",
           not any(r.get("batter_name") in ("Q Stump", "R Lee") for r in of(d)))
 
@@ -233,10 +263,10 @@ async def main() -> None:
     check("Dan: 2 stumpings, first 5 Feb", (dan.get("stumping"), dan.get("total")) == (2, 2)
           and dan.get("first_played_at", "")[:10] == "2000-02-05", str(dan))
     order = [g.get("bowler_name") for g in d.get("by_bowler") or []]
-    check("most dismissals first (Ben 4, Cal 3, Dan 2, then the hidden line)",
-          order[:3] == ["Bowler, Ben", "Quick, Cal", "Spin, Dan"], str(order))
+    check("most dismissals first (Ben 4, Cal 3, Dan 2, Lee 1), then the not-recorded and hidden lines last",
+          order[:4] == ["Bowler, Ben", "Quick, Cal", "Spin, Dan", "Late, Lee"] and order[4:] == [None, None], str(order))
     check("the summary adds up to the list",
-          sum(g.get("total", 0) for g in d.get("by_bowler") or []) == len(of(d)) == 10,
+          sum(g.get("total", 0) for g in d.get("by_bowler") or []) == len(of(d)) == 15,
           str(sum(g.get("total", 0) for g in d.get("by_bowler") or [])))
 
     print("\n-- HAND-ENTERED AND SYNCED CARDS ARE NEVER COUNTED TWICE --")
@@ -282,21 +312,50 @@ async def main() -> None:
     da = await route(RYAN, viewer=admin)
     check("a signed-in club admin sees Harry named",
           any(r.get("bowler_name") == "Hidden, Harry" for r in of(da)) and not any(r.get("bowler_hidden") for r in of(da)))
-    check("the admin's list is otherwise the same ten", len(of(da)) == 10, str(len(of(da))))
+    check("the admin's list is otherwise the same fifteen", len(of(da)) == 15, str(len(of(da))))
+
+    print("\n-- WHERE CA'S TEXT NAMES NOBODY, THE FIELDING ROW STILL COUNTS --")
+    nb = [r for r in of(d) if r.get("bowler_unknown")]
+    by_game = {}
+    for r in nb:
+        by_game.setdefault(r["game_id"], []).append(r["kind"])
+    check("G9 (no pairing rows) adds its 2 stumpings and 1 keeper catch, with no bowler or batter",
+          sorted(by_game.get(str(G9), [])) == ["caught_behind", "stumping", "stumping"]
+          and all(r["bowler_name"] is None and r["batter_name"] is None for r in nb if r["game_id"] == str(G9)), str(by_game))
+    check("G10 (one of two paired) adds only the one missing stumping", by_game.get(str(G10)) == ["stumping"], str(by_game.get(str(G10))))
+    check("G10's paired stumping is still there, named, off Lee",
+          ("2000-10-28", "Late, Lee", "Z Partial") in stumps)
+    check("G1 (fielding row equals its pairings) adds nothing", str(G1) not in by_game, str(by_game.get(str(G1))))
+    check("G11 (his own caught-and-bowled counted as a catch) adds nothing, and is not shown as a catch",
+          str(G11) not in by_game and not any(r.get("batter_name") == "Own Bowling" for r in of(d)), str(by_game.get(str(G11))))
+    check("another club's game (G13) adds nothing, though its fielding row names him",
+          str(G13) not in by_game)
+    check("... that fielding row IS his and IS in the view (so the check can fail)",
+          await raw_count("SELECT COALESCE(SUM(stumpings),0) FROM v_effective_fielding_stats WHERE game_id = :g AND player_id = :p", g=G13, p=RYAN) == 1)
+    check("the junior game's fielding row (G12) is out under the club default",
+          str(G12) not in by_game)
+    ub = next((g for g in d.get("by_bowler") or [] if g.get("bowler_unknown")), {})
+    check("the summary holds them as one 'no bowler recorded' line, 3 stumpings 1 keeper catch, no name or id",
+          (ub.get("total"), ub.get("stumping"), ub.get("caught_behind")) == (4, 3, 1)
+          and ub.get("bowler_name") is None and ub.get("bowler_id") is None, str(ub))
+    ordered = [(r.get("played_at") or "", r["game_id"]) for r in of(d)]
+    check("the added rows sit in date order among the paired ones", ordered == sorted(ordered), str(ordered[:6]))
 
     print("\n-- THE PAGE'S OWN FILTERS --")
     dj = await route(RYAN, categories="all")
     check("juniors are out under the club default and in when 'all' is picked",
-          not any(r.get("batter_name") == "Junior Opp" for r in of(d)) and any(r.get("batter_name") == "Junior Opp" for r in of(dj)),
+          not any(r.get("batter_name") == "Junior Opp" for r in of(d)) and any(r.get("batter_name") == "Junior Opp" for r in of(dj))
+          and str(G12) in {r["game_id"] for r in of(dj) if r.get("bowler_unknown")},
           str(pairs(dj, "stumping")))
-    check("all grade types: 8 stumpings, 11 in all", (dj.get("counts") or {}).get("stumping") == 8 and (dj.get("counts") or {}).get("total") == 11,
-          str(dj.get("counts")))
+    check("all grade types: 13 stumpings, 17 in all (the junior pairing and the junior fielding row)",
+          (dj.get("counts") or {}).get("stumping") == 13 and (dj.get("counts") or {}).get("total") == 17
+          and (dj.get("counts") or {}).get("unpaired") == 5, str(dj.get("counts")))
     dt = await route(RYAN, formats="t20")
     check("a T20 pick leaves only G2's two stumpings",
           pairs(dt, "stumping") and {x[2] for x in pairs(dt)} == {"M Green", "N Hall"} and len(of(dt)) == 2, str(pairs(dt)))
     ds = await route(RYAN, season_id=str(S1))
-    check("a season pick drops the 1999/00 stumping (6 left; Dan 1)",
-          (ds.get("counts") or {}).get("stumping") == 6 and line(ds, "Spin, Dan").get("total") == 1, str(ds.get("counts")))
+    check("a season pick drops the 1999/00 stumping (10 left; Dan 1)",
+          (ds.get("counts") or {}).get("stumping") == 10 and line(ds, "Spin, Dan").get("total") == 1, str(ds.get("counts")))
 
     print("\n-- A PLAYER WITH NOTHING, AND A BAD ID --")
     de = await route(BEN)

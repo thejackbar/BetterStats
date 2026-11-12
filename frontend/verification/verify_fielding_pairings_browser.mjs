@@ -42,8 +42,8 @@ const row = (n, day, kind, bowler, batter, runs) => ({
 const bowlerLines = (rows) => {
   const g = new Map()
   for (const r of rows) {
-    const k = r.bowler_hidden ? 'hidden' : r.bowler_id
-    if (!g.has(k)) g.set(k, { bowler_id: r.bowler_id, bowler_name: r.bowler_name, bowler_hidden: r.bowler_hidden,
+    const k = r.bowler_unknown ? 'unknown' : r.bowler_hidden ? 'hidden' : r.bowler_id
+    if (!g.has(k)) g.set(k, { bowler_id: r.bowler_id, bowler_name: r.bowler_name, bowler_hidden: r.bowler_hidden, bowler_unknown: !!r.bowler_unknown,
       catch: 0, caught_behind: 0, stumping: 0, total: 0, first_played_at: r.played_at, last_played_at: r.played_at })
     const x = g.get(k); x[r.kind]++; x.total++
     if (r.played_at < x.first_played_at) x.first_played_at = r.played_at
@@ -54,7 +54,8 @@ const bowlerLines = (rows) => {
 const payload = (id, rows) => ({
   player_id: id, rows,
   counts: { catch: rows.filter(r => r.kind === 'catch').length, caught_behind: rows.filter(r => r.kind === 'caught_behind').length,
-            stumping: rows.filter(r => r.kind === 'stumping').length, total: rows.length },
+            stumping: rows.filter(r => r.kind === 'stumping').length, total: rows.length,
+            unpaired: rows.filter(r => r.bowler_unknown).length },
   by_bowler: bowlerLines(rows),
 })
 const ben = { id: BEN, name: 'Bowler, Ben' }, cal = { id: CAL, name: 'Quick, Cal' }, dan = { id: DAN, name: 'Spin, Dan' }, olly = { id: OLLY, name: 'Other, Olly' }
@@ -71,7 +72,9 @@ const A_ROWS = [
   row(9, '2000-12-16', 'stumping', cal, 'V Late', 6),
   row(10, '2000-12-23', 'catch', ben, 'W Latest', 2),
 ]
-const B_ROWS = [row(21, '2001-01-06', 'stumping', olly, 'X One', 3), row(22, '2001-01-13', 'stumping', olly, 'Y Two', 9)]
+// A scorecard whose dismissal text named nobody: the fielding row credits the stumping, so the server adds it with no bowler.
+const NO_BOWLER = { ...row(23, '2001-01-20', 'stumping', null, null, null), bowler_hidden: false, bowler_unknown: true, source: 'fielding' }
+const B_ROWS = [row(21, '2001-01-06', 'stumping', olly, 'X One', 3), row(22, '2001-01-13', 'stumping', olly, 'Y Two', 9), NO_BOWLER]
 const C_ROWS = Array.from({ length: 40 }, (_, i) =>
   row(100 + i, `2000-${String(1 + Math.floor(i / 28)).padStart(2, '0')}-${String(1 + (i % 28)).padStart(2, '0')}`,
       i < 3 ? 'stumping' : 'catch', i % 2 ? ben : cal, `Batter ${i}`, i))
@@ -86,7 +89,7 @@ const statsFor = (id, name, fielding) => ({
 })
 const WORLD = {
   [A]: { name: 'Carmody, Ryan', fielding: headline(5, 9), rows: A_ROWS, delay: 0 },   // list: 3 of 5 catches, 7 of 9 stumpings
-  [B]: { name: 'Other, Player', fielding: headline(0, 2), rows: B_ROWS, delay: 0 },   // list equals the headline
+  [B]: { name: 'Other, Player', fielding: headline(0, 3), rows: B_ROWS, delay: 0 },   // list equals the headline, one row with no bowler
   [C]: { name: 'Many, Catches', fielding: headline(37, 3), rows: C_ROWS, delay: 0 },  // list equals the headline
 }
 
@@ -180,6 +183,8 @@ const run = async () => {
     check('the note says what the list holds against the headline: 7 of 9 stumpings and 3 of 5 catches',
       /Listed here: 7 of 9 stumpings and 3 of 5 catches\./.test(body), body.slice(body.indexOf('Listed'), body.indexOf('Listed') + 120))
     check('run outs are explained as absent', /Run outs are not listed/.test(body))
+    check('player A has no row without a bowler (the hidden one is a different case), so no footnote about them',
+          !/no bowler or batter/.test(body) && !/Not recorded/.test(body))
     check('the headline cards are still there above the list', /CATCHES \(WK\)/.test(body) && /STUMPINGS/.test(body))
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/fielding-desktop.png`, fullPage: true })
     await ctx.close()
@@ -209,7 +214,15 @@ const run = async () => {
     check('where the list holds every stumping the headline counts, there is no "Listed here" note', !/Listed here/.test(body))
     check('(and the same page does explain run outs, so the note check is not just an empty page)', /Run outs are not listed/.test(body))
     const chips = await page.locator('button').evaluateAll(bs => bs.map(b => b.innerText.replace(/\s+/g, ' ').trim()).filter(t => /^(ALL|STUMPINGS|CATCHES|CT \(WK\)) \d+$/.test(t)))
-    check('with one kind only, the chips are ALL 2 and STUMPINGS 2 (no empty CATCHES chip)', JSON.stringify(chips) === JSON.stringify(['ALL 2', 'STUMPINGS 2']), JSON.stringify(chips))
+    check('with one kind only, the chips are ALL 3 and STUMPINGS 3 (no empty CATCHES chip)', JSON.stringify(chips) === JSON.stringify(['ALL 3', 'STUMPINGS 3']), JSON.stringify(chips))
+    const brows = await logRows(page)
+    check('a row with no bowler reads "Not recorded" (not "Not shown", which means hidden), no batter, not a link',
+      /Not recorded/.test(brows[2]?.[3] || '') && !/Not shown/.test(brows[2]?.[3] || '') && /^—/.test(brows[2]?.[4] || '')
+      && (await logTable(page).locator('a', { hasText: 'Not recorded' }).count()) === 0, JSON.stringify(brows[2]))
+    const sum = page.locator('table', { has: page.locator('th', { hasText: /^BOWLER$/ }) })
+    const srows = await sum.locator('tbody tr').evaluateAll(trs => trs.map(tr => [...tr.querySelectorAll('td')].map(td => td.innerText.replace(/\s+/g, ' ').trim())))
+    check('the summary has Olly (2) then the not-recorded line (1) last', /Olly/.test(srows[0]?.[0]) && srows[0]?.[2] === '2' && /Not recorded/.test(srows[1]?.[0]), JSON.stringify(srows))
+    check('the footnote explains the row with no bowler', /1 row shows no bowler or batter/.test(body), body.slice(-300))
     await ctx.close()
   }
 
