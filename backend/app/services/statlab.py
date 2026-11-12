@@ -4860,6 +4860,316 @@ async def derived_bowler_fielder_combo(
     return [dict(r) for r in result.mappings()]
 
 
+# ─── Teammate pairs: who plays, bowls, fields and bats alongside whom ──────────
+#
+# Every report in this block ranks PAIRS of the club's own players. A pair report
+# answers a different question from the per-player ones, so a few rules are shared:
+#   * Match, season, grade, grade type and match type filters apply (they scope the
+#     games, in `game_universe`). The player attribute filters (gender, captain,
+#     keeper flag...) do not: a pair has two players and one flag cannot describe both.
+#   * `context.player_id` narrows the table to pairs that include that player, so
+#     "who does Smith play with most" is one pick away. It never changes a figure.
+#   * A game belongs to no club, and an intra-club fixture puts two rows per game in
+#     `game_universe`, so every read here joins `SELECT DISTINCT game_id`, never the
+#     universe itself, or a count doubles.
+
+_FIELDER_ROLES = ("all", "keeper", "fielder")
+
+
+def _pair_player_clause(context: dict, params: dict, a_col: str, b_col: str) -> str:
+    """`AND <picked player> is one of the pair`, or nothing when no player is picked."""
+    pid = _context_player_id(context)
+    if not pid:
+        return ""
+    params["ctx_player_id"] = pid
+    return f" AND CAST(:ctx_player_id AS UUID) IN ({a_col}, {b_col})"
+
+
+def _fielder_role(context: dict) -> str:
+    role = str((context or {}).get("fielder_role") or "all").lower()
+    return role if role in _FIELDER_ROLES else "all"
+
+
+def _min_games(context: dict, default: int = 10) -> int:
+    try:
+        return min(max(1, int(float((context or {}).get("min_games") or default))), 500)
+    except (TypeError, ValueError):
+        return default
+
+
+async def _club_player_ids(session: AsyncSession, org_id: str) -> list:
+    """The club's player ids, once, to bind as `= ANY(CAST(:club_ids AS uuid[]))`.
+
+    A bound array is pushed down into the `v_effective_*` views; an `IN (SELECT ...)` is a
+    semi-join on the whole view (CLAUDE.md rule 11).
+    """
+    return (await session.execute(
+        text("SELECT array_agg(id) FROM players WHERE organisation_id = CAST(:o AS UUID)"),
+        {"o": str(org_id)})).scalar() or []
+
+
+async def _games_together_rows(
+    session: AsyncSession, *, org_id: str, limit: int, offset: int, context: dict,
+    min_sided: int, order_by: str,
+) -> list[dict]:
+    """One row per pair of club players who were in the same side in the same match.
+
+    'In the match' is the same four sources StatLab's own MATCHES column unions (an
+    innings, a spell, a fielding row, or a roster line that survives the called-off and
+    reserve rules), so a pair's games never disagree with either player's own count.
+    The side comes from the roster line's team name. A player with no roster line (an
+    imported or hand-typed match) is placed on whichever side his partner is on, and a
+    game where neither side is known counts as a game together but has no result, so
+    win and loss figures cover games whose side is known and say so in `sided_games`.
+    """
+    mc, mp, _ic, _ip, _pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), "offset": offset,
+              "min_sided": min_sided, **mp, **pp}
+    universe = _game_universe_sql(mc)
+    pair_clause = _pair_player_clause(context, params, "a.player_id", "b.player_id")
+    # `game_universe` is a temp table here (run_on_copies materialises it), so it is read, not defined.
+    sql = f"""
+        WITH pg AS (
+            SELECT bi.game_id, bi.player_id
+            FROM game_universe gu JOIN v_effective_batting_innings bi ON bi.game_id = gu.game_id
+            UNION
+            SELECT bs.game_id, bs.player_id
+            FROM game_universe gu JOIN v_effective_bowling_spells bs ON bs.game_id = gu.game_id
+            UNION
+            SELECT fs.game_id, fs.player_id
+            FROM game_universe gu JOIN v_effective_fielding_stats fs ON fs.game_id = gu.game_id
+            WHERE fs.player_id IS NOT NULL
+            UNION
+            SELECT gap0.game_id, gap0.player_id
+            FROM game_universe gu JOIN game_appearances gap0 ON gap0.game_id = gu.game_id
+            WHERE {appearance_counts_as_match("gap0")}
+        ),
+        side AS (
+            SELECT cp.game_id, cp.player_id, ga.team_name
+            FROM (SELECT DISTINCT pg.game_id, pg.player_id
+                  FROM pg JOIN players pp ON pp.id = pg.player_id AND pp.organisation_id = :org_id) cp
+            LEFT JOIN game_appearances ga ON ga.game_id = cp.game_id AND ga.player_id = cp.player_id
+        ),
+        gm  AS (SELECT DISTINCT game_id, played_at FROM game_universe),
+        res AS (SELECT DISTINCT game_id, club_team, result FROM game_universe WHERE club_team IS NOT NULL),
+        pairs AS (
+            SELECT a.player_id AS a_id, b.player_id AS b_id, a.game_id,
+                   COALESCE(a.team_name, b.team_name) AS team
+            FROM side a
+            JOIN side b ON b.game_id = a.game_id AND a.player_id < b.player_id
+                       AND (a.team_name IS NULL OR b.team_name IS NULL OR a.team_name = b.team_name)
+            WHERE TRUE {pair_clause}
+        ),
+        agg AS (
+            SELECT pr.a_id, pr.b_id,
+                   COUNT(*)::int                                          AS games,
+                   COUNT(r.game_id)::int                                  AS sided_games,
+                   (COUNT(*) FILTER (WHERE r.result = 'won'))::int        AS wins,
+                   (COUNT(*) FILTER (WHERE r.result = 'lost'))::int       AS losses,
+                   (COUNT(*) FILTER (WHERE r.result = 'drawn'))::int      AS draws,
+                   MIN(gm.played_at)                                      AS first_game,
+                   MAX(gm.played_at)                                      AS last_game
+            FROM pairs pr
+            JOIN gm ON gm.game_id = pr.game_id
+            LEFT JOIN res r ON r.game_id = pr.game_id AND r.club_team = pr.team
+            GROUP BY pr.a_id, pr.b_id
+        )
+        SELECT pa.id::text AS player_a_id, COALESCE(pa.display_name_override, pa.name) AS player_a_name,
+               pb.id::text AS player_b_id, COALESCE(pb.display_name_override, pb.name) AS player_b_name,
+               agg.games, agg.wins, agg.losses, agg.draws, agg.sided_games,
+               CASE WHEN agg.sided_games > 0
+                    THEN ROUND(100.0 * agg.wins / agg.sided_games, 1) END AS win_pct,
+               agg.first_game, agg.last_game
+        FROM agg
+        JOIN players pa ON pa.id = agg.a_id
+        JOIN players pb ON pb.id = agg.b_id
+        WHERE agg.sided_games >= :min_sided
+        ORDER BY {order_by}
+        LIMIT :limit OFFSET :offset
+    """
+    result = await statlab_rows.run_on_copies(session, org_id, sql, params, universe=universe)
+    return [dict(r) for r in result.mappings()]
+
+
+async def derived_games_together(
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
+) -> list[dict]:
+    """Pairs of players ranked by matches played in the same side."""
+    return await _games_together_rows(
+        session, org_id=org_id, limit=limit, offset=offset, context=context, min_sided=0,
+        order_by="agg.games DESC, agg.wins DESC, player_a_name, player_b_name")
+
+
+async def derived_win_rate_together(
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
+) -> list[dict]:
+    """Pairs ranked by win percentage in matches where both played, above a games floor."""
+    return await _games_together_rows(
+        session, org_id=org_id, limit=limit, offset=offset, context=context,
+        min_sided=_min_games(context),
+        order_by="win_pct DESC, agg.sided_games DESC, player_a_name, player_b_name")
+
+
+async def derived_bowler_fielder_dismissals(
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
+) -> list[dict]:
+    """Bowler and fielder pairs ranked by dismissals taken together.
+
+    A dismissal counts when the scorecard names both the bowler and the fielder: a catch
+    (keeper or not) or a stumping. Caught-and-bowled, bowled and lbw have no second player.
+    `fielder_role` narrows the fielder: 'keeper' is a stumping or a catch behind, 'fielder'
+    is a catch by anyone who was NOT keeping. A catch recorded before the keeper flag
+    existed (`caught_behind` NULL) is neither, so it shows under 'all' only.
+    """
+    mc, mp, _ic, _ip, _pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), "offset": offset, **mp, **pp}
+    params["club_ids"] = await _club_player_ids(session, org_id)
+    universe = _game_universe_sql(mc)
+    role = _fielder_role(context)
+    role_clause = {
+        "all": "",
+        "keeper": "AND (bw.dismissal_type = 'stumped' OR bw.caught_behind IS TRUE)",
+        "fielder": "AND bw.dismissal_type = 'caught' AND bw.caught_behind IS FALSE",
+    }[role]
+    pair_clause = _pair_player_clause(context, params, "agg.bowler_id", "agg.fielder_id")
+    sql = f"""
+        WITH {universe},
+        gu1 AS (SELECT DISTINCT game_id FROM game_universe),
+        wkts AS (
+            SELECT bw.bowler_id, bw.fielder_id, bw.dismissal_type, bw.caught_behind
+            FROM gu1
+            JOIN v_effective_bowler_wickets bw ON bw.game_id = gu1.game_id
+            WHERE bw.bowler_id = ANY(CAST(:club_ids AS uuid[]))
+              AND bw.fielder_id IS NOT NULL
+              AND bw.fielder_id <> bw.bowler_id
+              AND bw.dismissal_type IN ('caught', 'stumped')
+              {role_clause}
+        ),
+        agg AS (
+            SELECT bowler_id, fielder_id,
+                   COUNT(*)::int                                          AS dismissals,
+                   (COUNT(*) FILTER (WHERE dismissal_type = 'caught'))::int  AS catches,
+                   (COUNT(*) FILTER (WHERE caught_behind IS TRUE))::int      AS catches_wk,
+                   (COUNT(*) FILTER (WHERE dismissal_type = 'stumped'))::int AS stumpings
+            FROM wkts
+            GROUP BY bowler_id, fielder_id
+        )
+        SELECT agg.bowler_id::text  AS player_a_id,
+               COALESCE(pb.display_name_override, pb.name) AS player_a_name,
+               agg.fielder_id::text AS player_b_id,
+               COALESCE(pf.display_name_override, pf.name) AS player_b_name,
+               agg.dismissals, agg.catches, agg.catches_wk, agg.stumpings
+        FROM agg
+        JOIN players pb ON pb.id = agg.bowler_id AND pb.organisation_id = :org_id
+        JOIN players pf ON pf.id = agg.fielder_id
+        WHERE TRUE {pair_clause}
+        ORDER BY agg.dismissals DESC, agg.stumpings DESC, player_a_name, player_b_name
+        LIMIT :limit OFFSET :offset
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def derived_opening_bowling_pairs(
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
+) -> list[dict]:
+    """Pairs who opened the bowling together, most innings first.
+
+    The openers are the first two bowlers on the card (lowest spell id, the same proxy
+    'Top opening bowlers' uses). The two are numbered across EVERY spell in the innings
+    before the club's players are picked out, so a borrowed fill-in opening the bowling
+    does not push the club's third bowler into the second slot.
+    """
+    mc, mp, _ic, _ip, _pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), "offset": offset, **mp, **pp}
+    universe = _game_universe_sql(mc)
+    pair_clause = _pair_player_clause(context, params, "a.player_id", "b.player_id")
+    sql = f"""
+        WITH {universe},
+        gu1 AS (SELECT DISTINCT game_id FROM game_universe),
+        numbered AS (
+            SELECT bs.game_id, bs.innings_number, bs.player_id, COALESCE(bs.wickets, 0) AS wickets,
+                   ROW_NUMBER() OVER (PARTITION BY bs.game_id, bs.innings_number ORDER BY bs.id) AS rn
+            FROM gu1
+            JOIN v_effective_bowling_spells bs ON bs.game_id = gu1.game_id
+            WHERE bs.innings_number IS NOT NULL
+        ),
+        openers AS (
+            SELECT n.* FROM numbered n
+            JOIN players p ON p.id = n.player_id AND p.organisation_id = :org_id
+            WHERE n.rn <= 2
+        ),
+        pairs AS (
+            SELECT LEAST(a.player_id, b.player_id)    AS a_id,
+                   GREATEST(a.player_id, b.player_id) AS b_id,
+                   a.game_id, a.wickets + b.wickets   AS wickets
+            FROM openers a
+            JOIN openers b ON b.game_id = a.game_id AND b.innings_number = a.innings_number
+                          AND a.rn = 1 AND b.rn = 2 AND a.player_id <> b.player_id
+            WHERE TRUE {pair_clause}
+        ),
+        agg AS (
+            SELECT a_id, b_id, COUNT(*)::int AS innings, COUNT(DISTINCT game_id)::int AS matches,
+                   SUM(wickets)::int AS wickets
+            FROM pairs GROUP BY a_id, b_id
+        )
+        SELECT pa.id::text AS player_a_id, COALESCE(pa.display_name_override, pa.name) AS player_a_name,
+               pb.id::text AS player_b_id, COALESCE(pb.display_name_override, pb.name) AS player_b_name,
+               agg.innings, agg.matches, agg.wickets
+        FROM agg
+        JOIN players pa ON pa.id = agg.a_id
+        JOIN players pb ON pb.id = agg.b_id
+        ORDER BY agg.innings DESC, agg.wickets DESC, player_a_name, player_b_name
+        LIMIT :limit OFFSET :offset
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def derived_opening_batting_pairs(
+    session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
+) -> list[dict]:
+    """Pairs who shared the first-wicket stand, most stands first, with the runs they made."""
+    mc, mp, _ic, _ip, _pc, pp, _ = _build_context_filters(context)
+    params = {"org_id": org_id, "limit": min(max(1, limit), 500), "offset": offset, **mp, **pp}
+    params["club_ids"] = await _club_player_ids(session, org_id)
+    universe = _game_universe_sql(mc)
+    pair_clause = _pair_player_clause(context, params, "agg.a_id", "agg.b_id")
+    sql = f"""
+        WITH {universe},
+        gu1 AS (SELECT DISTINCT game_id FROM game_universe),
+        stands AS (
+            SELECT LEAST(pt.batter1_id, pt.batter2_id)    AS a_id,
+                   GREATEST(pt.batter1_id, pt.batter2_id) AS b_id,
+                   COALESCE(pt.runs, 0) AS runs, pt.game_id
+            FROM gu1
+            JOIN v_effective_partnerships pt ON pt.game_id = gu1.game_id
+            WHERE pt.wicket_number = 1
+              AND pt.is_club_innings IS NOT FALSE
+              AND pt.batter1_id = ANY(CAST(:club_ids AS uuid[]))
+              AND pt.batter2_id = ANY(CAST(:club_ids AS uuid[]))
+              AND pt.batter1_id <> pt.batter2_id
+        ),
+        agg AS (
+            SELECT a_id, b_id, COUNT(*)::int AS stands, SUM(runs)::int AS total_runs,
+                   MAX(runs)::int AS best, ROUND(AVG(runs), 1) AS average,
+                   (COUNT(*) FILTER (WHERE runs >= 50))::int AS fifty_stands
+            FROM stands GROUP BY a_id, b_id
+        )
+        SELECT pa.id::text AS player_a_id, COALESCE(pa.display_name_override, pa.name) AS player_a_name,
+               pb.id::text AS player_b_id, COALESCE(pb.display_name_override, pb.name) AS player_b_name,
+               agg.stands, agg.total_runs, agg.average, agg.best, agg.fifty_stands
+        FROM agg
+        JOIN players pa ON pa.id = agg.a_id AND pa.organisation_id = :org_id
+        JOIN players pb ON pb.id = agg.b_id AND pb.organisation_id = :org_id
+        WHERE TRUE {pair_clause}
+        ORDER BY agg.stands DESC, agg.total_runs DESC, player_a_name, player_b_name
+        LIMIT :limit OFFSET :offset
+    """
+    result = await session.execute(text(sql), params)
+    return [dict(r) for r in result.mappings()]
+
+
 async def derived_top_opening_bowlers(
     session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
@@ -5745,6 +6055,75 @@ DERIVED_QUERIES: dict[str, dict] = {
             {"key": "player_a_id", "label": "BOWLER", "kind": "player_a"},
             {"key": "player_b_id", "label": "FIELDER", "kind": "player_b"},
             {"key": "catches", "label": "CT", "decimal": False},
+        ],
+    },
+    "bowler_fielder_dismissals": {
+        "label": "Bowler and fielder dismissals",
+        "description": "Bowler and fielder pairs ranked by dismissals taken together: catches and stumpings. Narrow the fielder to the wicketkeeper (stumpings and catches behind) or to everyone else. Counts only where the scorecard names the fielder, and a catch recorded before keeper catches were tracked shows under All fielders only, so keeper figures are a floor. Pick a player to see their pairs.",
+        "fn": derived_bowler_fielder_dismissals,
+        "columns": [
+            {"key": "player_a_id", "label": "BOWLER", "kind": "player_a"},
+            {"key": "player_b_id", "label": "FIELDER", "kind": "player_b"},
+            {"key": "dismissals", "label": "DISMISSALS", "short": "TOTAL", "decimal": False},
+            {"key": "catches", "label": "CT", "decimal": False},
+            {"key": "catches_wk", "label": "CT (WK)", "decimal": False},
+            {"key": "stumpings", "label": "ST", "decimal": False},
+        ],
+    },
+    "games_together": {
+        "label": "Most games played together",
+        "description": "Pairs of players ranked by matches played in the same side. A match counts the way each player's own Matches figure does. Wins and losses cover games where the side is known (not hand-typed or imported matches with no team named). Pick a player to see who they play with most.",
+        "fn": derived_games_together,
+        "columns": [
+            {"key": "player_a_id", "label": "PLAYER A", "kind": "player_a"},
+            {"key": "player_b_id", "label": "PLAYER B", "kind": "player_b"},
+            {"key": "games", "label": "GAMES", "decimal": False},
+            {"key": "wins", "label": "W", "decimal": False},
+            {"key": "losses", "label": "L", "decimal": False},
+            {"key": "draws", "label": "D", "decimal": False},
+            {"key": "win_pct", "label": "WIN %", "decimal": True},
+            {"key": "first_game", "label": "FIRST"},
+            {"key": "last_game", "label": "LAST"},
+        ],
+    },
+    "win_rate_together": {
+        "label": "Best win rate together",
+        "description": "Pairs ranked by the share of their matches the side won, among games where the side is known. Needs a minimum number of games (set below, 10 by default) so a pair who won their only game does not top it.",
+        "fn": derived_win_rate_together,
+        "columns": [
+            {"key": "player_a_id", "label": "PLAYER A", "kind": "player_a"},
+            {"key": "player_b_id", "label": "PLAYER B", "kind": "player_b"},
+            {"key": "win_pct", "label": "WIN %", "decimal": True},
+            {"key": "sided_games", "label": "GAMES", "decimal": False},
+            {"key": "wins", "label": "W", "decimal": False},
+            {"key": "losses", "label": "L", "decimal": False},
+            {"key": "draws", "label": "D", "decimal": False},
+        ],
+    },
+    "opening_bowling_pairs": {
+        "label": "Opening bowling pairs",
+        "description": "Pairs who took the new ball together, by innings. The openers are the first two bowlers on the card. Wickets is their combined total in those innings.",
+        "fn": derived_opening_bowling_pairs,
+        "columns": [
+            {"key": "player_a_id", "label": "PLAYER A", "kind": "player_a"},
+            {"key": "player_b_id", "label": "PLAYER B", "kind": "player_b"},
+            {"key": "innings", "label": "INNINGS", "short": "INN", "decimal": False},
+            {"key": "matches", "label": "MATCHES", "short": "M", "decimal": False},
+            {"key": "wickets", "label": "WKTS", "decimal": False},
+        ],
+    },
+    "opening_batting_pairs": {
+        "label": "Opening batting pairs",
+        "description": "Pairs who shared the first-wicket stand, ranked by number of stands, with the runs they put on.",
+        "fn": derived_opening_batting_pairs,
+        "columns": [
+            {"key": "player_a_id", "label": "PLAYER A", "kind": "player_a"},
+            {"key": "player_b_id", "label": "PLAYER B", "kind": "player_b"},
+            {"key": "stands", "label": "STANDS", "decimal": False},
+            {"key": "total_runs", "label": "RUNS", "decimal": False},
+            {"key": "average", "label": "AVG", "decimal": True},
+            {"key": "best", "label": "BEST", "decimal": False},
+            {"key": "fifty_stands", "label": "50+", "decimal": False},
         ],
     },
     # Top opening bowlers
