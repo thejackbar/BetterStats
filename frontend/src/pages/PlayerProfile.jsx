@@ -491,7 +491,7 @@ function BowlingTab({ bowling, seasonStats }) {
 }
 
 // ── Fielding tab ─────────────────────────────────────────────────────────
-function FieldingTab({ fielding, seasonStats }) {
+function FieldingTab({ fielding, seasonStats, playerId, seasonId = null, scope = null, fmtName = n => n }) {
   // No default sort key: the server already returns these newest-first, and it
   // orders on the season's YEAR. Sorting the raw name here instead put a
   // "Winter 2013" row above "Summer 2025/26" (W sorts after S), which is what
@@ -550,6 +550,231 @@ function FieldingTab({ fielding, seasonStats }) {
           </div>
         </Card>
       )}
+
+      {playerId && (
+        <FieldingPairings playerId={playerId} seasonId={seasonId} scope={scope} fielding={fielding} fmtName={fmtName} />
+      )}
+    </div>
+  )
+}
+
+// ── Fielding: every catch and stumping, and the bowler it came off ───────
+const PAIRING_HOW = { stumping: 'Stumped', catch: 'Caught', caught_behind: 'Caught behind' }
+const PAIRING_FILTERS = [
+  { key: 'all', label: 'ALL' },
+  { key: 'stumping', label: 'STUMPINGS' },
+  { key: 'catch', label: 'CATCHES' },
+  { key: 'caught_behind', label: 'CT (WK)' },
+]
+const PAIRING_PAGE = 25
+
+// A 'YYYY-MM-DD' day as a local date. new Date('2000-10-07') is UTC midnight and
+// reads a day early anywhere west of Greenwich.
+function fmtDay(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || '')
+  if (!m) return '—'
+  return new Date(+m[1], +m[2] - 1, +m[3])
+    .toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: '2-digit' })
+}
+
+function BowlerName({ id, name, hidden, fmtName }) {
+  if (hidden || !name) return <span className="text-pb-faint italic">Not shown</span>
+  const label = fmtName(name)
+  return id
+    ? <Link to={`/players/${id}`} className="text-pb-text hover:text-pb-accent">{label}</Link>
+    : <span className="text-pb-text">{label}</span>
+}
+
+function FieldingPairings({ playerId, seasonId = null, scope = null, fielding = null, fmtName = n => n }) {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [kind, setKind] = useState('all')
+  const [newestFirst, setNewestFirst] = useState(false)
+  const [showAll, setShowAll] = useState(false)
+  const { categories = null, formats = null, competitions = null, grades = null } = scope || {}
+  // By value, so a grade list rebuilt on every render does not re-fire the load.
+  const gradesKey = JSON.stringify(grades ?? null)
+
+  // Per-player state is reset with the load: this page stays mounted when the
+  // profile moves to another player, and a reply from a load it has left is dropped.
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    setData(null)
+    setKind('all')
+    setShowAll(false)
+    api.getPlayerFieldingDismissals(playerId, { categories, formats, competitions, grades }, seasonId)
+      .then(d => { if (!cancelled) setData(d) })
+      .catch(e => { if (!cancelled) setError(e.message || 'request failed') })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [playerId, seasonId, categories, formats, competitions, gradesKey])
+
+  const counts = data?.counts || { catch: 0, caught_behind: 0, stumping: 0, total: 0 }
+  const activeKind = kind === 'all' || counts[kind] > 0 ? kind : 'all'
+
+  // Numbered from the oldest, so "stumping 12" is the same one whichever way the list is read.
+  const shown = useMemo(() => {
+    const rows = (data?.rows || []).filter(r => activeKind === 'all' || r.kind === activeKind)
+      .map((r, i) => ({ ...r, n: i + 1 }))
+    if (!newestFirst) return rows
+    return [...rows.filter(r => r.played_at).reverse(), ...rows.filter(r => !r.played_at)]
+  }, [data, activeKind, newestFirst])
+
+  if (loading) return <PbSpinner message="Loading who the catches and stumpings came off…" />
+  if (error) return <p className="text-pb-red text-sm py-4">Couldn't load the catch and stumping list: {error}</p>
+
+  const catchesListed = counts.catch + counts.caught_behind
+  const headCatches = fielding?.total_catches != null ? Number(fielding.total_catches) : null
+  const headStumpings = fielding?.total_stumpings != null ? Number(fielding.total_stumpings) : null
+  // Said only where the list holds fewer than the headline above it.
+  const short = []
+  if (headStumpings != null && counts.stumping < headStumpings) short.push(`${counts.stumping} of ${headStumpings} stumpings`)
+  if (headCatches != null && catchesListed < headCatches) short.push(`${catchesListed} of ${headCatches} catches`)
+  const shortNote = short.length > 0 && (
+    <p className="text-[12px] text-pb-faint">
+      Listed here: {short.join(' and ')}. The totals above also count seasons we only hold a total for,
+      caught and bowled, and fielders a scorecard did not name.
+    </p>
+  )
+
+  if (!counts.total) {
+    if (!short.length) return null
+    return (
+      <Card title="WHO THE CATCHES AND STUMPINGS CAME OFF">
+        <div className="space-y-2">
+          <p className="text-pb-faint text-sm">No catch or stumping here can be matched to a bowler on a scorecard we hold.</p>
+          {shortNote}
+        </div>
+      </Card>
+    )
+  }
+
+  const bowlers = data.by_bowler || []
+  const showStump = counts.stumping > 0
+  const showCatch = counts.catch > 0
+  const showBehind = counts.caught_behind > 0
+  const visible = showAll ? shown : shown.slice(0, PAIRING_PAGE)
+  const filters = PAIRING_FILTERS.filter(f => f.key === 'all' || counts[f.key] > 0)
+  const dash = n => (n ? n : '—')
+
+  return (
+    <div className="space-y-6">
+      <Card title="WHO THE CATCHES AND STUMPINGS CAME OFF" pad="p-0">
+        <div className="overflow-x-auto pb-scroll">
+          <table className="w-full min-w-[520px] text-[13px]">
+            <thead className="text-pb-faint font-mono text-[10px] tracking-wide3">
+              <tr>
+                <th className="py-3 pl-5 text-left pb-2">BOWLER</th>
+                {showStump && <th className="py-3 text-right pb-2">STUMPINGS</th>}
+                {showCatch && <th className="py-3 text-right pb-2">CATCHES</th>}
+                {showBehind && <th className="py-3 text-right pb-2">CT (WK)</th>}
+                <th className="py-3 text-right pb-2">TOTAL</th>
+                <th className="py-3 text-right pb-2">FIRST</th>
+                <th className="py-3 pr-5 text-right pb-2">LATEST</th>
+              </tr>
+            </thead>
+            <tbody>
+              {bowlers.map((g, i) => (
+                <tr key={g.bowler_id || `hidden-${i}`} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                  <td className="py-2.5 pl-5">
+                    <BowlerName id={g.bowler_id} name={g.bowler_name} hidden={g.bowler_hidden} fmtName={fmtName} />
+                  </td>
+                  {showStump && <td className="py-2.5 font-mono text-right text-pb-dim">{dash(g.stumping)}</td>}
+                  {showCatch && <td className="py-2.5 font-mono text-right text-pb-dim">{dash(g.catch)}</td>}
+                  {showBehind && <td className="py-2.5 font-mono text-right text-pb-dim">{dash(g.caught_behind)}</td>}
+                  <td className="py-2.5 font-mono font-bold text-right pb-num" style={{ color: 'var(--pb-accent)' }}>{g.total}</td>
+                  <td className="py-2.5 font-mono text-right text-pb-faint text-[11px] whitespace-nowrap">{fmtDay(g.first_played_at)}</td>
+                  <td className="py-2.5 pr-5 font-mono text-right text-pb-faint text-[11px] whitespace-nowrap">{fmtDay(g.last_played_at)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      <Card title="EVERY CATCH AND STUMPING" pad="p-0">
+        <div className="flex items-end justify-between gap-3 border-b border-pb-hairline">
+          <div className="flex overflow-x-auto pb-no-scrollbar min-w-0">
+            {filters.map(f => (
+              <button
+                key={f.key}
+                onClick={() => { setKind(f.key); setShowAll(false) }}
+                className={`relative px-4 py-2.5 text-[11px] font-mono font-semibold tracking-wide3 whitespace-nowrap transition ${
+                  activeKind === f.key ? 'text-pb-text' : 'text-pb-faint hover:text-pb-dim'
+                }`}
+              >
+                {f.label} {f.key === 'all' ? counts.total : counts[f.key]}
+                {activeKind === f.key && <span className="absolute left-2 right-2 -bottom-px h-[2px]" style={{ background: 'var(--pb-accent)' }} />}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={() => setNewestFirst(v => !v)}
+            className="shrink-0 px-4 py-2.5 text-[11px] font-mono font-semibold tracking-wide3 text-pb-faint hover:text-pb-dim whitespace-nowrap"
+          >
+            {newestFirst ? 'NEWEST FIRST' : 'OLDEST FIRST'}
+          </button>
+        </div>
+        <div className="overflow-x-auto pb-scroll">
+          <table className="w-full min-w-[640px] text-[13px]">
+            <thead className="text-pb-faint font-mono text-[10px] tracking-wide3">
+              <tr>
+                <th className="py-3 pl-5 text-left pb-2">#</th>
+                <th className="py-3 text-left pb-2">DATE</th>
+                <th className="py-3 text-left pb-2">HOW</th>
+                <th className="py-3 text-left pb-2">OFF BOWLER</th>
+                <th className="py-3 text-left pb-2">BATTER</th>
+                <th className="py-3 pr-5 text-left pb-2">MATCH</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map((r, i) => (
+                <tr key={r.wicket_id ? `${r.source}-${r.wicket_id}` : i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                  <td className="py-2.5 pl-5 font-mono text-[11px] text-pb-faint">{r.n}</td>
+                  <td className="py-2.5 font-mono text-[11px] text-pb-faint whitespace-nowrap">
+                    {r.game_id
+                      ? <Link to={`/games/${r.game_id}`} className="hover:text-pb-accent transition-colors">{fmtDay(r.played_at)}</Link>
+                      : fmtDay(r.played_at)}
+                  </td>
+                  <td className="py-2.5 whitespace-nowrap" style={r.kind === 'stumping' ? { color: 'var(--pb-accent)' } : undefined}>
+                    <span className={r.kind === 'stumping' ? 'font-semibold' : 'text-pb-dim'}>{PAIRING_HOW[r.kind]}</span>
+                  </td>
+                  <td className="py-2.5">
+                    <BowlerName id={r.bowler_id} name={r.bowler_name} hidden={r.bowler_hidden} fmtName={fmtName} />
+                  </td>
+                  <td className="py-2.5 text-pb-dim whitespace-nowrap">
+                    {r.batter_name || '—'}{r.batter_runs != null && <span className="font-mono text-[11px] text-pb-faint"> · {r.batter_runs}</span>}
+                  </td>
+                  <td className="py-2.5 pr-5 text-pb-dim">
+                    {r.home_team && r.away_team ? `${r.home_team} vs ${r.away_team}` : (r.home_team || r.away_team || '—')}
+                    {r.grade_name && <span className="block text-[11px] text-pb-faint">{r.grade_name}</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {shown.length > PAIRING_PAGE && (
+          <div className="border-t border-pb-hairline px-5 py-3">
+            <button
+              onClick={() => setShowAll(v => !v)}
+              className="text-[11px] font-mono font-semibold tracking-wide3 text-pb-faint hover:text-pb-text"
+            >
+              {showAll ? 'SHOW FEWER' : `SHOW ALL ${shown.length}`}
+            </button>
+          </div>
+        )}
+      </Card>
+
+      <div className="space-y-1">
+        {shortNote}
+        <p className="text-[12px] text-pb-faint">
+          Run outs are not listed, because no bowler is credited with one. Rows come from scorecards, so a game with no scorecard held is not here.
+        </p>
+      </div>
     </div>
   )
 }
@@ -3364,7 +3589,7 @@ export default function PlayerProfile() {
         {/* Tab content */}
         {tab === 'batting' && <BattingTab batting={batting} seasonStats={seasonStats} seasons={seasons} />}
         {tab === 'bowling' && <BowlingTab bowling={bowling} seasonStats={seasonStats} />}
-        {tab === 'fielding' && <FieldingTab fielding={fielding} seasonStats={seasonStats} />}
+        {tab === 'fielding' && <FieldingTab fielding={fielding} seasonStats={seasonStats} playerId={playerId} seasonId={seasonId} scope={filterPick} fmtName={fmtName} />}
         {tab === 'analysis' && <AnalysisTab playerId={playerId} seasonId={seasonId} dismissals={dismissals} partnerships={partnerships} byGrade={byGrade} byPosition={byPosition} seasonStats={seasonStats} bowlingByGrade={bowlingByGrade} bowlingDismissals={bowlingDismissals} bowlingByBatterPosition={bowlingByBatterPosition} battingInnings={battingInnings} bowlingSpells={bowlingSpells} teamBreakdown={teamBreakdown} seasonLabel={seasonId ? (seasons.find(s => s.id === seasonId)?.name || null) : null} captainStats={captainStats} byVenue={byVenue} byOpposition={byOpposition} careerBatting={batting} careerBowling={bowling} careerFielding={fielding} matchCoverage={matchCoverage} gradeScope={gradeScope} filterPick={filterPick} filterScope={filterScope} />}
         {tab === 'milestones' && <MilestonesTab playerId={playerId} upcomingMilestones={upcomingMilestones} milestones={milestones} filterPick={filterPick} />}
         {tab === 'achievements' && (
