@@ -1,8 +1,8 @@
 export default {
   version: 'v9.143.6',
   date: '2026-11-12',
-  // Above v9.143.5.3's sortKey (2026-11-20T02:00:00Z). Check origin/main at merge time.
-  sortKey: '2026-11-20T03:00:00Z',
+  // Above v9.143.5.4's sortKey (2026-11-20T03:00:00Z). Check origin/main at merge time.
+  sortKey: '2026-11-20T04:00:00Z',
   title: 'StatLab: who plays, bowls and fields together',
   items: [
     "StatLab has a new Teammates & Pairs group. Most games played together ranks every pair of players by matches in the same side, with their wins, losses, draws and win percentage. Best win rate together ranks the same pairs by how often the side won, with a minimum games setting so a pair who won their only match does not top it.",
