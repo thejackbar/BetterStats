@@ -143,6 +143,32 @@ def club_roster(scorecard: dict, org_id_lower: str, pid_by_guid: dict, merged_aw
     return pids, game_map
 
 
+def club_bowling_innings(scorecard: dict, our_pids: set, game_pid_by_guid: dict, merged_away: dict) -> set:
+    """The innings numbers (as `extract_bowler_wickets` numbers them) in which one of the club's players bowled.
+
+    A wicket stored against any OTHER innings of the game was taken off the opposition's bowling, so it
+    is not the club's. Older syncs stored such rows: they matched an opposition bowler (and the fielders
+    behind him) to a club player who shares his short name ("T Overton"), and that is why a rebuild, which
+    gates on the club's own side, reads about an innings' worth fewer rows than were stored.
+    """
+    def ours(raw):
+        g = _parse_guid(raw)
+        if g is None:
+            return False
+        p = game_pid_by_guid.get(g)
+        if p is None:
+            p = merged_away.get(g)
+            if p is None:
+                return False
+        return merged_away.get(p, p) in our_pids
+
+    out = set()
+    for inn in scorecard.get("innings") or []:
+        if any(ours(b.get("participantId")) for b in (inn.get("bowling") or [])):
+            out.add(inn.get("inningsOrder") or inn.get("inningsNumber") or 1)
+    return out
+
+
 async def rebuild_for_org(org_id_str: str, mode: str = "default") -> None:
     org_id = uuid.UUID(org_id_str)
 
@@ -201,6 +227,7 @@ async def rebuild_for_org(org_id_str: str, mode: str = "default") -> None:
     errors = 0
     skipped_incomplete = 0
     skipped_fewer = 0
+    removed_opposition = 0
     org_id_str_lower = org_id_str.lower()
     for i, gid in enumerate(game_ids, start=1):
         try:
@@ -227,20 +254,24 @@ async def rebuild_for_org(org_id_str: str, mode: str = "default") -> None:
             # game that now yields no wickets.
             async with async_session_maker() as session:
                 if mode != "default":
-                    # A targeted rebuild exists to ADD links, so it never replaces a game with
-                    # fewer rows, or with fewer rows that name a fielder, than it holds: that is a
-                    # card (or a club roster) that reads worse than the sync did, not a correction.
-                    # Counting rows alone is not enough: a fielder the rebuild cannot place leaves
-                    # the row, and loses the link.
-                    held, held_fielder = (await session.execute(
-                        sql_text("SELECT COUNT(*), COUNT(fielder_id) FROM bowler_wickets WHERE game_id = :gid"),
-                        {"gid": gid})).one()
+                    # A targeted rebuild exists to ADD links, so it never gives up a row, or a row's
+                    # fielder, that is the club's. Only the innings the club BOWLED in count: a stored
+                    # row in the opposition's innings is a namesake mismatch from an older sync and goes.
+                    # When the card shows no innings of the club's bowling at all, the club cannot be
+                    # told apart from the opposition, so the game is left as it is.
+                    club_inns = club_bowling_innings(scorecard, our_team_pids, game_pid_by_guid, merged_away)
+                    held, held_fielder, held_all = (await session.execute(
+                        sql_text("SELECT COUNT(*) FILTER (WHERE innings_number = ANY(CAST(:inns AS int[]))), "
+                                 "COUNT(fielder_id) FILTER (WHERE innings_number = ANY(CAST(:inns AS int[]))), COUNT(*) "
+                                 "FROM bowler_wickets WHERE game_id = :gid"),
+                        {"gid": gid, "inns": list(club_inns)})).one()
                     new_fielder = sum(1 for r in rows if r.fielder_id is not None)
-                    if len(rows) < held or new_fielder < held_fielder:
+                    if (not club_inns and held_all) or len(rows) < held or new_fielder < held_fielder:
                         skipped_fewer += 1
-                        print(f"  left alone {gid}: the card gives {len(rows)} rows ({new_fielder} with a fielder), "
-                              f"{held} are stored ({held_fielder} with a fielder)")
+                        print(f"  left alone {gid}: the card gives {len(rows)} rows ({new_fielder} with a fielder) "
+                              f"for the club's bowling, {held} are stored for it ({held_fielder} with a fielder)")
                         continue
+                    removed_opposition += held_all - held
                 await session.execute(
                     sql_text("DELETE FROM bowler_wickets WHERE game_id = :gid"),
                     {"gid": gid},
@@ -261,7 +292,8 @@ async def rebuild_for_org(org_id_str: str, mode: str = "default") -> None:
         f"Done. Inserted {inserted_total} bowler_wickets across "
         f"{len(game_ids)} games ({errors} errors). "
         f"Left alone: {skipped_incomplete} games whose card CA returned incomplete, "
-        f"{skipped_fewer} games where the card gave fewer rows, or fewer fielder links, than are stored."
+        f"{skipped_fewer} games where the card gave fewer of the club's own rows, or fewer fielder links, than are stored. "
+        f"Removed {removed_opposition} stored rows that belonged to the opposition's innings."
     )
 
 

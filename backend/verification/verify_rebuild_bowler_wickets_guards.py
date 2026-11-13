@@ -9,13 +9,16 @@ game with fewer rows than it holds.
 Runs the SHIPPED `rebuild_for_org` over a real Postgres, with only the CA fetch stubbed.
 
   I1  stored rows, CA card incomplete (totals, no batting)         -> rows untouched      (every mode)
-  F1  3 stored rows, a complete card that yields 1                 -> rows untouched      (short, force)
+  F1  3 stored rows of the club's own bowling, a card yielding 1   -> rows untouched      (short, force)
   M1  1 stored row (no fielder), complete card names the keeper    -> replaced, keeper set (short)
   N1  the keeper's card id was never stored, his full name is on the roster and matches one
       player (sync attaches him; the rebuild now does too)         -> replaced, fielder kept
   N2  same, but his roster name is only an initial and surname      -> left alone (a rebuild that
       cannot place him must not strip the fielder from the stored row)
   T1  the club plays itself: two teams of ours, a bowler on each    -> replaced (both sides read)
+  B1  stored rows in BOTH innings, but the club bowled in innings 1 only: the innings-2 rows are an
+      opposition bowler's, credited by an older sync to a club namesake   -> replaced, they go
+  B2  the card shows none of the club's players (cannot tell ours from theirs) -> left alone
 
 Run:  DATABASE_URL=postgresql+asyncpg://root@/pl_verify?host=/var/run/postgresql \
       python verification/verify_rebuild_bowler_wickets_guards.py
@@ -89,6 +92,27 @@ def two_sides_card():
             "innings": [inn(1, S, "S Bowler", 1), inn(2, B2, "B Second", 2)]}
 
 
+def namesake_card():
+    """The club bowls in innings 1 (S, one wicket). Innings 2 is the OPPOSITION bowling: their bowler X shares
+    S's short name, and his wicket must never be credited to S."""
+    X = uuid.uuid4()
+    def inn(n, pid, text_name):
+        return {"id": f"i{n}", "inningsOrder": n, "numberOfWicketsFallen": 1, "runsScored": 60,
+                "batting": [{"dismissalType": "Bowled", "dismissalText": f"b: {text_name}", "playerShortName": f"Bat{n}",
+                             "batOrder": 1, "runsScored": 4, "ballsFaced": 6}],
+                "bowling": [{"participantId": str(pid), "playerShortName": text_name, "wicketsTaken": 1}], "fielding": []}
+    return {"teams": [{"owningOrganisation": {"id": str(ORG)}, "players": [{"participantId": str(S), "name": "Sam Bowler"}]},
+                      {"owningOrganisation": {"id": str(uuid.uuid4())}, "players": [{"participantId": str(X), "name": "Sid Bowler"}]}],
+            "innings": [inn(1, S, "S Bowler"), inn(2, X, "S Bowler")]}
+
+
+def foreign_card():
+    """A card that names none of the club's players, so the club cannot be told from the opposition."""
+    c = namesake_card()
+    c["teams"][0]["owningOrganisation"]["id"] = str(uuid.uuid4())
+    return c
+
+
 def incomplete_card():
     return {"teams": team_block(),
             "innings": [{"id": "i1", "inningsOrder": 1, "numberOfWicketsFallen": 6, "runsScored": 90,
@@ -112,7 +136,7 @@ async def main() -> None:
             await ex("INSERT INTO players (id, organisation_id, name, grassroots_id, status) VALUES (:p,:o,:n,:g,'active')",
                      p=pid, o=ORG, n=nm, g=str(pid))
 
-        async def game(label, held, card, *, fielder=None, bowlers=None):
+        async def game(label, held, card, *, fielder=None, bowlers=None, innings=None):
             g = uuid.uuid4()
             games[label] = g
             cards[str(g)] = card
@@ -121,14 +145,16 @@ async def main() -> None:
             for i in range(held):
                 await ex("INSERT INTO bowler_wickets (game_id, innings_number, bowler_id, fielder_id, batter_name, "
                          "dismissal_type, caught_behind) VALUES (:g,:i,:b,:f,'OLD','stumped',FALSE)",
-                         g=g, i=i + 1, b=(bowlers or [S] * held)[i], f=fielder)
+                         g=g, i=(innings or list(range(1, held + 1)))[i], b=(bowlers or [S] * held)[i], f=fielder)
 
         await game("I1", 2, incomplete_card())
-        await game("F1", 3, complete_card(["st: K Keeper b: S Bowler"]))
+        await game("F1", 3, complete_card(["st: K Keeper b: S Bowler"]), innings=[1, 1, 1])
         await game("M1", 1, complete_card(["st:  b: S Bowler"]))
         await game("N1", 1, keeper_card("Kev Keeper"), fielder=K)
         await game("N2", 1, keeper_card("K Keeper"), fielder=K)
         await game("T1", 2, two_sides_card(), bowlers=[S, B2])
+        await game("B1", 3, namesake_card(), innings=[1, 2, 2])
+        await game("B2", 2, foreign_card(), innings=[1, 2])
         await s.commit()
 
     async def fake(match_id, **kw):
@@ -167,6 +193,10 @@ async def main() -> None:
           n1 == (1, 1, 0), str(n1))
     check("a keeper who cannot be placed leaves the stored row, fielder and all (N2)", n2 == (1, 1, 1), str(n2))
     check("a club playing itself: both sides read, the game is rewritten (T1)", t1[0] == 2 and t1[2] == 0, str(t1))
+    b1, b2 = await replaced("B1"), await replaced("B2")
+    check("the opposition-innings rows go, the club's own are rewritten (B1: 1 row, none left as OLD)",
+          b1 == (1, 0, 0), str(b1))
+    check("a card that shows none of the club's players leaves the stored rows alone (B2)", b2 == (2, 0, 2), str(b2))
     print(f"\n{base.PASS} passed, {base.FAIL} failed")
     sys.exit(1 if base.FAIL else 0)
 
