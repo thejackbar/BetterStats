@@ -770,6 +770,20 @@ export default function AdminScorecardUpload() {
   })
   )
 
+  // A scorer who runs out of analysis rows writes the extra bowlers in the unused part
+  // of the grid (a 9th and 10th beside the first rows), and the reader can miss them.
+  // The review screen must let a person add one, or remove a misread row, by hand.
+  // An opposition bowler (our innings) has no roster player, so no player_id key.
+  const addBowler = innIdx => setInnings(prev => prev.map((x, i) => {
+    if (i !== innIdx) return x
+    const row = { name: '', overs: null, maidens: null, runs: null, wickets: null, wides: null, no_balls: null }
+    if (!x.is_our_team) row.player_id = ''
+    return { ...x, bowling: [...(x.bowling || []), row] }
+  }))
+  const removeBowler = (innIdx, rowIdx) => setInnings(prev => prev.map((x, i) => (
+    i !== innIdx ? x : { ...x, bowling: (x.bowling || []).filter((_, j) => j !== rowIdx) }
+  )))
+
   // Mark an innings as ours / the opposition's and re-flow the player matching:
   // batters match the roster when it's our innings, bowlers when it's the opposition's,
   // and a dismissal's fielder/bowler become our roster picks for an opposition innings.
@@ -1259,11 +1273,11 @@ export default function AdminScorecardUpload() {
                 </div>
 
                 {/* Bowling table */}
-                {(inn.bowling || []).length > 0 && (
-                  <div className="overflow-x-auto mt-4">
-                    <div className="text-[10px] font-mono text-pb-faint mb-1">
-                      {inn.is_our_team ? 'OPPOSITION BOWLING' : 'OUR BOWLING'}
-                    </div>
+                <div className="overflow-x-auto mt-4">
+                  <div className="text-[10px] font-mono text-pb-faint mb-1">
+                    {inn.is_our_team ? 'OPPOSITION BOWLING' : 'OUR BOWLING'}
+                  </div>
+                  {(inn.bowling || []).length > 0 && (
                     <table className="w-full text-sm">
                       <thead><tr className="border-b pb-hairline">
                         <th className={TH}>Bowler</th>
@@ -1273,6 +1287,7 @@ export default function AdminScorecardUpload() {
                         <th className={TH}>R</th><th className={TH}>W</th>
                         {tracked.bowler_extras && <th className={TH}>Wd</th>}
                         {tracked.bowler_extras && <th className={TH}>Nb</th>}
+                        <th className={TH} aria-label="Remove" />
                       </tr></thead>
                       <tbody>
                         {(inn.bowling || []).map((b, ri) => (
@@ -1289,12 +1304,26 @@ export default function AdminScorecardUpload() {
                             <td className={TD}><input className={`${SMALL_INPUT} w-12`} value={b.wickets ?? ''} onChange={e => editRow(ii, 'bowling', ri, { wickets: e.target.value })} /></td>
                             {tracked.bowler_extras && <td className={TD}><input className={`${SMALL_INPUT} w-12`} value={b.wides ?? ''} onChange={e => editRow(ii, 'bowling', ri, { wides: e.target.value })} /></td>}
                             {tracked.bowler_extras && <td className={TD}><input className={`${SMALL_INPUT} w-12`} value={b.no_balls ?? ''} onChange={e => editRow(ii, 'bowling', ri, { no_balls: e.target.value })} /></td>}
+                            <td className={TD}>
+                              <button type="button" aria-label={`Remove bowler ${b.name || ri + 1}`} title="Remove this bowler"
+                                className="text-pb-faint hover:text-red-400 px-2 text-lg leading-none"
+                                onClick={() => removeBowler(ii, ri)}>×</button>
+                            </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
-                  </div>
-                )}
+                  )}
+                  {(inn.bowling || []).length === 0 && (
+                    <p className="text-[11px] text-pb-faint mb-1">No bowlers were read for this innings.</p>
+                  )}
+                  <button type="button" data-testid={`add-bowler-${ii}`}
+                    className="mt-2 text-xs px-2 py-1 rounded border pb-hairline text-pb-faint hover:text-pb-text"
+                    onClick={() => addBowler(ii)}>+ Add bowler</button>
+                  <p className="text-[11px] text-pb-faint mt-1">
+                    A card with more bowlers than rows often writes the extras in the unused part of the grid. Add each one here.
+                  </p>
+                </div>
 
                 {/* Fall of wickets / partnerships */}
                 {(inn.fall_of_wickets || []).length > 0 && (
