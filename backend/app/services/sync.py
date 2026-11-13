@@ -1492,6 +1492,91 @@ def _norm_name(s: str) -> str:
     return s.replace("’", "'").replace("‘", "'")
 
 
+# The dismissal method for a bowler-credit dismissalType when the text could not say (blank text).
+_METHOD_BY_DT = {"Caught": "caught", "Bowled": "bowled", "LBW": "lbw", "Stumped": "stumped",
+                 "Hit Wicket": "hit wicket"}
+
+
+def _recover_unnamed_links(items: list, bowling_rows: list, fielding_rows: list) -> None:
+    """Name the bowler or fielder of a dismissal whose text names none, by elimination.
+
+    CA sometimes sends dismissalText with the names left out ("st:  b: ", or "st:  b: S Shub"
+    with the keeper blank). The same card still says how many wickets each bowler took
+    (`wicketsTaken`) and how many catches, keeper catches and stumpings each fielder made, so
+    when the named dismissals leave exactly one bowler (or one fielder) with wickets
+    (catches, stumpings) unaccounted for, the blank ones are his. Only a single answer is
+    taken: two bowlers with a shortfall, a shortfall smaller than the number of blanks, or a
+    NAMED dismissal that matched nobody (the name might be the missing one) leaves the
+    dismissals as they were. Never guesses.
+
+    `items` are dicts with `method`, `bowler_name`, `fielder_name`, `bowler_s`, `fielder_s`
+    (participant ids as CA writes them, None when unresolved) and `recovered_cb`. Mutated.
+    """
+    # ── bowlers ──
+    blank_b = [i for i in items if not i["bowler_name"] and not i["bowler_s"]]
+    unmatched_b = [i for i in items if i["bowler_name"] and not i["bowler_s"]]
+    if blank_b and not unmatched_b:
+        named = {}
+        for i in items:
+            if i["bowler_s"]:
+                named[i["bowler_s"]] = named.get(i["bowler_s"], 0) + 1
+        taken: dict = {}
+        for r in bowling_rows:
+            pid = r.get("participantId")
+            if pid:
+                taken[pid] = taken.get(pid, 0) + int(r.get("wicketsTaken") or 0)
+        short = {p: taken[p] - named.get(p, 0) for p in taken}
+        positive = [p for p, v in short.items() if v > 0]
+        if len(positive) == 1 and len(blank_b) <= short[positive[0]]:
+            for i in blank_b:
+                i["bowler_s"] = positive[0]
+
+    # ── fielders ──
+    fielding: dict = {}
+    for r in fielding_rows:
+        pid = r.get("participantId")
+        if pid:
+            f = fielding.setdefault(pid, {"ct": 0, "wk": 0, "st": 0})
+            f["ct"] += int(r.get("catches") or 0)
+            f["wk"] += int(r.get("wicketKeeperCatches") or 0)
+            f["st"] += int(r.get("stumpings") or 0)
+
+    def _eliminate(method: str, remaining_of) -> list:
+        blank = [i for i in items if i["method"] == method and not i["fielder_name"] and not i["fielder_s"]]
+        unmatched = [i for i in items if i["method"] == method and i["fielder_name"] and not i["fielder_s"]]
+        if not blank or unmatched:
+            return []
+        left = {p: remaining_of(p) for p in fielding}
+        positive = [p for p, v in left.items() if v > 0]
+        if len(positive) != 1 or len(blank) > left[positive[0]]:
+            return []
+        for i in blank:
+            i["fielder_s"] = positive[0]
+        return blank
+
+    named_st: dict = {}
+    named_ct: dict = {}
+    for i in items:
+        if i["fielder_s"] and i["method"] == "stumped":
+            named_st[i["fielder_s"]] = named_st.get(i["fielder_s"], 0) + 1
+        elif i["fielder_s"] and i["method"] == "caught":
+            named_ct[i["fielder_s"]] = named_ct.get(i["fielder_s"], 0) + 1
+    # A caught-and-bowled is the bowler's own catch and sits in his fielding row too.
+    cb_own: dict = {}
+    for i in items:
+        if i["method"] == "caught and bowled" and i["bowler_s"]:
+            cb_own[i["bowler_s"]] = cb_own.get(i["bowler_s"], 0) + 1
+
+    _eliminate("stumped", lambda p: fielding[p]["st"] - named_st.get(p, 0))
+    got = _eliminate("caught", lambda p: fielding[p]["ct"] + fielding[p]["wk"]
+                     - named_ct.get(p, 0) - cb_own.get(p, 0))
+    for i in got:
+        f = fielding[i["fielder_s"]]
+        # Behind the stumps only when every catch he made was a keeper catch; a fielder who
+        # made none is not; a mix could be either, so the flag stays unknown.
+        i["recovered_cb"] = True if f["wk"] > 0 and f["ct"] == 0 else (False if f["wk"] == 0 else None)
+
+
 def extract_bowler_wickets(
     scorecard: dict,
     game_uuid: uuid.UUID,
@@ -1523,7 +1608,10 @@ def extract_bowler_wickets(
     def _resolve(name_to_pid: dict, name):
         if not name:
             return None
-        pid_str = name_to_pid.get(_norm_name(name))
+        return _ours(name_to_pid.get(_norm_name(name)))
+
+    def _ours(pid_str):
+        """A CA participant id -> this club's player id, or None when not one of ours."""
         if not pid_str:
             return None
         try:
@@ -1576,18 +1664,36 @@ def extract_bowler_wickets(
                 if norm not in field_name_to_pid:
                     field_name_to_pid[norm] = pid_s
 
+        # Pass 1: read every credit dismissal's text. Pass 2 names the blanks by elimination.
+        items: list = []
         for row in batting_rows:
             dt_long = row.get("dismissalType") or ""
             if dt_long not in _BOWLER_CREDIT_DT:
                 continue
             d_text = row.get("dismissalText") or ""
             bowler_name, fielder_name, method = _parse_bowler_and_fielder(d_text, dt_long)
-            bowler_pid = _resolve(bowl_name_to_pid, bowler_name)
+            items.append({
+                "row": row, "d_text": d_text,
+                "method": method or _METHOD_BY_DT.get(dt_long, ""),
+                "bowler_name": bowler_name, "fielder_name": fielder_name,
+                "bowler_s": bowl_name_to_pid.get(_norm_name(bowler_name)) if bowler_name else None,
+                "fielder_s": field_name_to_pid.get(_norm_name(fielder_name)) if fielder_name else None,
+                "recovered_cb": None,
+            })
+        _recover_unnamed_links(items, bowling_rows, fielding_rows)
+
+        for it in items:
+            row, d_text, method = it["row"], it["d_text"], it["method"]
+            bowler_pid = _ours(it["bowler_s"])
             if bowler_pid is None:
                 continue
-            fielder_pid = _resolve(field_name_to_pid, fielder_name) if fielder_name else None
+            fielder_pid = _ours(it["fielder_s"])
             b_runs = row.get("runsScored")
             b_balls = row.get("ballsFaced")
+            if it["recovered_cb"] is not None or (it["fielder_s"] and not it["fielder_name"]):
+                caught_behind = it["recovered_cb"] if method == "caught" else False
+            else:
+                caught_behind = (method == "caught" and _caught_by_keeper(d_text, keeper_names))
             out.append(BowlerWicket(
                 game_id=game_uuid,
                 innings_number=inn_num,
@@ -1596,7 +1702,7 @@ def extract_bowler_wickets(
                 batter_name=row.get("playerShortName") or pid_to_short_name.get(row.get("participantId") or ""),
                 batter_position=row.get("batOrder"),
                 dismissal_type=method or None,
-                caught_behind=(method == "caught" and _caught_by_keeper(d_text, keeper_names)),
+                caught_behind=caught_behind,
                 batter_runs=int(b_runs) if b_runs is not None else None,
                 batter_balls=int(b_balls) if b_balls is not None else None,
             ))
