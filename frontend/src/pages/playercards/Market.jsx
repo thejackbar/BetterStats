@@ -1,6 +1,6 @@
-// Market: what the club is after. Your cards that other players want come first (so you can see what you hold that is worth
-// something to someone), then every player with a visible wish list, the ones whose list lines up with your cards at the top.
-// A player's page shows their list against yours and starts a swap in one tap.
+// Market: what the club is after, and what it has spare. Spares of cards on your wish list come first (doubles other players hold,
+// and the ones they have put in their pile), then your cards that other players want, then every player to trade with, the ones whose
+// cards line up with yours at the top. A player's page shows their pile and list against yours and starts a swap in one tap.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../../lib/api'
@@ -11,6 +11,33 @@ import { usePC } from './context'
 
 const MONO = "'JetBrains Mono', monospace"
 const chip = { padding: '2px 9px', borderRadius: 999, fontSize: 11.5, fontWeight: 700, border: '1px solid var(--pb-hairline, rgba(255,255,255,.25))' }
+
+// Cards on your wish list that somebody holds a spare of. A name tagged "pile" has flagged it as happy to swap.
+function Doubles({ list, ui, basePath }) {
+  if (!list.length) return null
+  return (
+    <>
+      <h2 className="font-mono text-[11px] tracking-wide2 uppercase text-pb-faint mb-1" data-market-doubles-head>Spares of cards you want ({list.length})</h2>
+      <p className="text-[12.5px] text-pb-dim mb-3">Cards on your wish list that another player holds a double of. Open a player to ask for it.</p>
+      <div className="grid gap-3 mb-6" data-doubles-list style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 340px), 1fr))' }}>
+        {list.map((c) => (
+          <div key={c.key} data-double={c.key} className="flex gap-3 rounded-xl border bg-pb-surface p-3" style={{ borderColor: ui.accent }}>
+            <Mini card={c} {...ui} width={84} count={1} />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-semibold" style={{ overflowWrap: 'anywhere' }}>{cardLine(c)}</div>
+              <div className="text-[12.5px] mt-1.5" data-double-holders>
+                {c.holders.map((h, i) => (
+                  <span key={h.player_id}>{i > 0 && ', '}<Link to={`${basePath}/market/${h.player_id}`} className="underline font-semibold" data-double-holder={h.player_id}>{h.name}</Link>
+                    {h.piled && <span data-double-piled style={{ color: ui.accent }}> (pile)</span>}</span>
+                ))}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
+  )
+}
 
 function Demand({ list, focus, ui, basePath }) {
   const focused = useRef(null)
@@ -56,13 +83,14 @@ export default function Market() {
   if (!data) return <div className="text-sm text-pb-faint" data-market-loading>Loading the Market…</div>
   return (
     <div data-screen="market">
-      <PageHead title="Market" sub="See what other players are after. Your cards that someone wants are shown first, and a player's page lines their wish list up against yours so you can plan swaps that lead you to the cards you want."
+      <PageHead title="Market" sub="See what other players are after and what they have spare. Doubles of cards on your wish list come first, then your cards that someone wants. A player's page lines their pile and wish list up against yours so you can plan swaps that lead you to the cards you want."
         actions={<Link to={`${basePath}/wishlist`} className="px-4 py-2 rounded-lg border pb-hairline text-sm font-semibold">My wish list{data.my_wants ? ` (${data.my_wants})` : ''}</Link>} />
+      <Doubles list={data.my_doubles || []} ui={ui} basePath={basePath} />
       <h2 className="font-mono text-[11px] tracking-wide2 uppercase text-pb-faint mb-2" data-market-demand-head>Your cards in demand ({data.demand.length})</h2>
       <Demand list={data.demand} focus={params.get('card')} ui={ui} basePath={basePath} />
-      <h2 className="font-mono text-[11px] tracking-wide2 uppercase text-pb-faint mb-2" data-market-players-head>Wish lists ({data.players.length})</h2>
+      <h2 className="font-mono text-[11px] tracking-wide2 uppercase text-pb-faint mb-2" data-market-players-head>Players ({data.players.length})</h2>
       {data.players.length === 0 ? (
-        <div data-no-wishers className="rounded-2xl border pb-hairline bg-pb-surface p-5 text-sm text-pb-dim">Nobody has a wish list the club can see yet. Add cards to yours from Club cards and others will find you here.</div>
+        <div data-no-wishers className="rounded-2xl border pb-hairline bg-pb-surface p-5 text-sm text-pb-dim">Nobody has a wish list or a pile the club can see yet. Add cards to your wish list from Club cards, or put a spare in your pile from Spares, and others will find you here.</div>
       ) : (
         <>
           {data.my_wants === 0 && <p data-market-hint className="text-sm text-pb-dim mb-3">Your own wish list is empty, so there is no match against it yet. Add the cards you are after and the players who hold them rise to the top.</p>}
@@ -72,7 +100,9 @@ export default function Market() {
               <Link key={p.player_id} to={`${basePath}/market/${p.player_id}`} data-market-player={p.player_id} data-swap-possible={p.swap_possible ? 'yes' : 'no'}
                 className="flex items-center gap-3 flex-wrap rounded-xl border pb-hairline bg-pb-surface px-4 py-3">
                 <span className="font-semibold min-w-0 flex-1" style={{ overflowWrap: 'anywhere' }}>{p.name}</span>
-                <span className="text-[12.5px] text-pb-dim">wants {p.wants} {p.wants === 1 ? 'card' : 'cards'}</span>
+                {p.wants > 0 && <span className="text-[12.5px] text-pb-dim">wants {p.wants} {p.wants === 1 ? 'card' : 'cards'}</span>}
+                {p.pile > 0 && <span data-chip="pile" className="text-[12.5px] text-pb-dim">{p.pile} in pile</span>}
+                {p.pile_i_want > 0 && <span data-chip="pile-want" style={{ ...chip, borderColor: accent, color: accent }}>{p.pile_i_want} spare{p.pile_i_want === 1 ? '' : 's'} you want</span>}
                 {p.they_want_mine > 0 && <span data-chip="they-want" style={{ ...chip, background: accent, color: onColor(accent), borderColor: accent }}>{p.they_want_mine} of yours</span>}
                 {p.i_want_theirs > 0 && <span data-chip="i-want" style={chip}>{p.i_want_theirs} you want</span>}
                 {p.swap_possible && <span data-chip="swap" style={{ font: `700 10px ${MONO}`, letterSpacing: 1.1, textTransform: 'uppercase', color: accent }}>Swap possible</span>}

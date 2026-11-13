@@ -107,6 +107,10 @@ if HAVE_SWAPS:
     except ImportError:   # the control run on the commit before the social side
         SOCIAL_DDL = []
     try:
+        from app.services.player_card_pile_ddl import STATEMENTS as PILE_DDL
+    except ImportError:   # the control run on the commit before the pile
+        PILE_DDL = []
+    try:
         from app.services.player_card_market_ddl import STATEMENTS as MARKET_DDL
         from app.services import player_card_market as market
     except ImportError:   # the control run on the commit before the Market
@@ -122,6 +126,7 @@ else:
     SOCIAL_DDL = []
     DISMISSED_DDL = []
     MARKET_DDL = []
+    PILE_DDL = []
     market = None
     COMMUNITY_DDL = []
     PACKS_DDL = []
@@ -208,7 +213,7 @@ async def build_schema() -> None:
             await conn.execute(text(sql.replace("OR REPLACE ", "")))
         for stmt in SUPERSEDED_DDL:
             await conn.execute(text(stmt))
-        for stmt in CARD_DDL + SWAP_DDL + SOCIAL_DDL + COMMUNITY_DDL + PACKS_DDL + DESIGNS_DDL + GIFTS_DDL + PHOTOS_DDL + LOOKS_DDL + CHALLENGES_DDL + WINNER_DDL + DISMISSED_DDL + MARKET_DDL:
+        for stmt in CARD_DDL + SWAP_DDL + SOCIAL_DDL + COMMUNITY_DDL + PACKS_DDL + DESIGNS_DDL + GIFTS_DDL + PHOTOS_DDL + LOOKS_DDL + CHALLENGES_DDL + WINNER_DDL + DISMISSED_DDL + MARKET_DDL + PILE_DDL:
             await conn.execute(text(stmt))
 
 
@@ -1926,15 +1931,64 @@ async def main() -> None:
                         dem_h = {c["key"]: c for c in ov_h["demand"]}
                         check("...is not named under the card, and is only counted ('hidden')", f"p:{ALPHA}" in dem_h and all(w["player_id"] != z2 for w in dem_h[f"p:{ALPHA}"]["wanted_by"]) and dem_h[f"p:{ALPHA}"]["hidden"] >= 1, str(dem_h.get(f"p:{ALPHA}")))
                         try:
-                            await market.player_detail(db, club, wl_snap, z1, z2); refused_hidden = False
-                        except Exception as exc:
-                            refused_hidden = isinstance(exc, swaps.SwapError) and exc.status == 404
-                        check("...and its page is refused", refused_hidden)
+                            det_h = await market.player_detail(db, club, wl_snap, z1, z2)
+                        except swaps.SwapError as exc:   # the control run: the old code refused a private list's page
+                            det_h = {"refused": exc.message}
+                        check("...its page opens but shows no wish list: empty, and marked private", det_h.get("wants") == [] and det_h.get("wants_private") is True and len(det_h.get("theirs", [])) >= 1, str({k: (v if k != "theirs" else len(v)) for k, v in det_h.items()}))
                         check("...but it still counts in the 'wanted by' numbers and still gets a suggested swap with the player it matches", (await social.wanted_counts(db, club, wl_snap, z1)).get((A_, None)) == 1 and len(await social.suggested_swaps(db, club, wl_snap, z1)) == 1)
                         await social.save_prefs(db, club, z2, {"alert_swaps": True}); await db.commit()
                         check("a settings change that does not mention it leaves it alone (an absent key is not a clear)", (await social.load_prefs(db, z2)).get("wants_hidden") is True)
                         await social.save_prefs(db, club, z2, {"wants_hidden": False, "alert_swaps": False}); await db.commit()
                         check("...and switching it back shows the list again", any(p["player_id"] == z2 for p in (await market.overview(db, club, wl_snap, z1))["players"]))
+                    # Doubles and the pile
+                    if market is not None and hasattr(social, "set_pile"):
+                        A_, B_, C_, D_ = str(ALPHA), str(BRAVO), str(CHARLIE), str(DELTA)
+                        sc = swaps.spare_copies
+                        check("a spare is a copy beyond the one kept (two held is one spare, one held is none), and every pulled copy of your own card is a spare", sc("o", ("x", None), 2) == 1 and sc("o", ("x", None), 1) == 0 and sc("o", ("x", None), 0) == 0 and sc("o", ("o", None), 1) == 1 and sc("o", ("o", None), 0) == 0)
+                        await wl_give(Z2, CHARLIE)   # Z2 now has two CHARLIE (one spare) and one DELTA
+                        th2 = {c["key"]: c for c in await swaps.tradeable_cards(db, club, wl_snap, z2)}
+                        check("another player's cards say which are doubles: CHARLIE has a spare, DELTA does not", th2[f"p:{CHARLIE}"]["spare"] == 1 and th2[f"p:{DELTA}"]["spare"] == 0 and th2[f"p:{CHARLIE}"]["tradeable"] == 2, str({k: (v["spare"], v["tradeable"]) for k, v in th2.items()}))
+                        ov = await market.overview(db, club, wl_snap, z1)
+                        md = {c["key"]: c for c in ov["my_doubles"]}
+                        check("the Market lists spares of cards on my wish list, with who holds them: CHARLIE (Z2, one spare)", f"p:{CHARLIE}" in md and any(h["player_id"] == z2 and h["spare"] == 1 and h["piled"] is False for h in md[f"p:{CHARLIE}"]["holders"]), str(md.get(f"p:{CHARLIE}", {}).get("holders")))
+                        check("...a card Z2 holds only once is not their double (DELTA: others in the club may hold spares of it, Z2 does not)", all(h["player_id"] != z2 for h in md.get(f"p:{DELTA}", {}).get("holders", [])))
+                        # the pile
+                        async def refused_pile(who, key):
+                            try:
+                                await social.set_pile(db, club, wl_snap, who, key, True); return False
+                            except swaps.SwapError:
+                                return True
+                        check("a card with no spare cannot go in the pile (DELTA, held once), nor can one the player does not hold", await refused_pile(z2, f"p:{DELTA}") and await refused_pile(z1, f"p:{CHARLIE}"))
+                        await social.set_pile(db, club, wl_snap, z2, f"p:{CHARLIE}", True); await db.commit()
+                        await social.set_pile(db, club, wl_snap, z2, f"p:{CHARLIE}", True); await db.commit()
+                        check("a spare can be flagged for the pile, and flagging twice is harmless", (await db.execute(text("SELECT count(*) FROM player_card_pile WHERE player_id = :p"), {"p": Z2})).scalar() == 1)
+                        ov = await market.overview(db, club, wl_snap, z1)
+                        row2 = next((p for p in ov["players"] if p["player_id"] == z2), None)
+                        check("the player's row says how many are in their pile and how many of those I want", row2 is not None and row2["pile"] == 1 and row2["pile_i_want"] == 1, str(row2))
+                        check("...and the double is marked as in their pile", any(h["piled"] for h in {c["key"]: c for c in ov["my_doubles"]}[f"p:{CHARLIE}"]["holders"]))
+                        det = await market.player_detail(db, club, wl_snap, z1, z2)
+                        check("their page has the pile, with the card marked as on my list and as a double", [c["key"] for c in det["pile"]] == [f"p:{CHARLIE}"] and det["pile"][0]["on_my_list"] is True and det["pile"][0]["spare"] == 1 and det["pile"][0]["piled"] is True, str(det["pile"])[:200])
+                        sp2 = {c["key"]: c for c in (await social.spares(db, club, wl_snap, z2))["cards"]}
+                        check("Spares says which of my spares are in my pile", sp2[f"p:{CHARLIE}"]["piled"] is True)
+                        # a private wish list does not hide the pile
+                        await social.save_prefs(db, club, z2, {"wants_hidden": True}); await db.commit()
+                        ov_p = await market.overview(db, club, wl_snap, z1)
+                        row_p = next((p for p in ov_p["players"] if p["player_id"] == z2), None)
+                        check("a player with a private wish list but a pile is still listed for the pile, with nothing of their list in the row", row_p is not None and row_p["wants"] == 0 and row_p["wants_private"] is True and row_p["they_want_mine"] == 0 and row_p["swap_possible"] is False and row_p["pile"] == 1, str(row_p))
+                        det_p = await market.player_detail(db, club, wl_snap, z1, z2)
+                        check("...and their page shows the pile and no wish list", det_p["wants"] == [] and det_p["wants_private"] is True and len(det_p["pile"]) == 1)
+                        await social.save_prefs(db, club, z2, {"wants_hidden": False}); await db.commit()
+                        # derived on read: lose the spare and the card leaves the pile; get another and it is back
+                        await db.execute(text("DELETE FROM player_card_copies WHERE id = (SELECT id FROM player_card_copies WHERE owner_player_id = :p AND subject_player_id = :s LIMIT 1)"), {"p": Z2, "s": CHARLIE}); await db.commit()
+                        det_g = await market.player_detail(db, club, wl_snap, z1, z2)
+                        row_g = next((p for p in (await market.overview(db, club, wl_snap, z1))["players"] if p["player_id"] == z2), None)
+                        check("a card with no spare left drops out of the pile by itself, and the flag is kept", det_g["pile"] == [] and (row_g is None or row_g["pile"] == 0) and (await db.execute(text("SELECT count(*) FROM player_card_pile WHERE player_id = :p"), {"p": Z2})).scalar() == 1)
+                        await wl_give(Z2, CHARLIE)
+                        check("...and comes back when another spare turns up", len((await market.player_detail(db, club, wl_snap, z1, z2))["pile"]) == 1)
+                        await social.set_pile(db, club, wl_snap, z2, f"p:{CHARLIE}", False); await db.commit()
+                        check("taking it out of the pile removes the flag, and the card is no longer in their pile", len((await market.player_detail(db, club, wl_snap, z1, z2))["pile"]) == 0 and (await db.execute(text("SELECT count(*) FROM player_card_pile WHERE player_id = :p"), {"p": Z2})).scalar() == 0)
+                        await db.execute(text("DELETE FROM player_card_copies WHERE id = (SELECT id FROM player_card_copies WHERE owner_player_id = :p AND subject_player_id = :s LIMIT 1)"), {"p": Z2, "s": CHARLIE}); await db.commit()
+                        check("the pile table is on merge_carry for both of its player columns", {("player_card_pile", "player_id"), ("player_card_pile", "subject_player_id")} <= {(t, c) for t, c, _i, _u in merge_carry.CARRIED})
                     # Roles: the club's own player records, as a code on every card
                     if hasattr(cards, "role_code"):
                         rc = cards.role_code

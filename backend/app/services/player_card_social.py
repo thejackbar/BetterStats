@@ -9,6 +9,8 @@ alert settings.
 * A card comes off the wish list the moment the player holds a copy, however it came (`player_cards.drop_fulfilled_wants`).
 * A player is told how many other players have a card they HOLD on their wish list, as a number, never as names
   (`wanted_counts`): in the book, on the card page and on Spares. A player already holding a copy does not count.
+* A player can put a spare in their pile (`set_pile`), a flag the whole club can see in the Market. Whether a card is in the pile is
+  derived from the copies held now (`piles`), so a card swapped away leaves it and returns if another spare turns up.
 * A suggested swap can be dismissed. It hides that exact pairing for the player who dismissed it and nobody else.
 * A spare is a copy beyond the one a player keeps: two copies of a card is one spare. A player's own card is theirs without a
   row, so every pulled copy of it is a spare.
@@ -257,6 +259,43 @@ async def suggested_swaps(db: AsyncSession, club: Organisation, snap: dict, me: 
     return out
 
 
+# ── The pile: spares flagged for swapping, visible to the club ───────────────────────────────────────────────
+
+async def piles(db: AsyncSession, club: Organisation, snap: dict, everyone: Optional[dict] = None, only: Optional[str] = None) -> dict[str, set[Card]]:
+    """`{owner: {card}}`: the cards each player has flagged AND still has a spare of. A flag on a card whose spare has gone is left
+    in the table and simply not counted. Players outside the pool are left out. `only` narrows it to one player."""
+    everyone = everyone if everyone is not None else await swaps._rows_by_card(db, club.id, only)
+    rows = (await db.execute(text(
+        "SELECT player_id::text, subject_player_id::text, special_id::text FROM player_card_pile "
+        "WHERE organisation_id = CAST(:o AS UUID)" + (" AND player_id = CAST(:p AS UUID)" if only else "")
+    ), {"o": str(club.id), **({"p": only} if only else {})})).fetchall()
+    out: dict[str, set[Card]] = {}
+    for owner, subject, special_id in rows:
+        card = (subject, special_id)
+        if owner not in snap["people"]:
+            continue
+        if swaps.spare_copies(owner, card, everyone.get(owner, {}).get(card, 0)) > 0:
+            out.setdefault(owner, set()).add(card)
+    return out
+
+
+async def set_pile(db: AsyncSession, club: Organisation, snap: dict, me: str, key: str, on: bool) -> None:
+    card, _payload = await swaps._resolve(db, club.id, snap, key)
+    if on:
+        held = (await swaps._rows_by_card(db, club.id, me)).get(me, {}).get(card, 0)
+        if swaps.spare_copies(me, card, held) < 1:
+            raise SwapError("You can only put a card in your pile when you have a spare of it.")
+        await db.execute(text(
+            "INSERT INTO player_card_pile (organisation_id, player_id, subject_player_id, special_id) "
+            "VALUES (CAST(:o AS UUID), CAST(:me AS UUID), CAST(:s AS UUID), CAST(:sp AS UUID)) ON CONFLICT DO NOTHING"
+        ), {"o": str(club.id), "me": me, **_card_args(card)})
+    else:
+        await db.execute(text(
+            "DELETE FROM player_card_pile WHERE organisation_id = CAST(:o AS UUID) AND player_id = CAST(:me AS UUID) "
+            "AND subject_player_id = CAST(:s AS UUID) AND special_id IS NOT DISTINCT FROM CAST(:sp AS UUID)"
+        ), {"o": str(club.id), "me": me, **_card_args(card)})
+
+
 # ── Spares and "open to offers" ───────────────────────────────────────────────────────────────────────────────
 
 async def spares(db: AsyncSession, club: Organisation, snap: dict, me: str) -> dict:
@@ -272,13 +311,14 @@ async def spares(db: AsyncSession, club: Organisation, snap: dict, me: str) -> d
     ), {"o": str(club.id), "me": me})).fetchall()
     open_set = {(r[0], r[1]) for r in open_rows}
     wanters = await wanted_counts(db, club, snap, me, set(spare_n))
+    in_pile = (await piles(db, club, snap, only=me)).get(me, set())
     out = []
     for card, n in spare_n.items():
         payload = swaps._payload(snap, card, specials)
         if payload is None:
             continue
         is_open = card in open_set
-        out.append({**payload, "key": swaps.key_of(*card), "spare": n, "tradeable": n, "open": is_open, "wanted_by": wanters.get(card, 0)})
+        out.append({**payload, "key": swaps.key_of(*card), "spare": n, "tradeable": n, "open": is_open, "piled": card in in_pile, "wanted_by": wanters.get(card, 0)})
     out.sort(key=lambda c: (c["kind"] != "special", (c.get("name") or "").lower(), c.get("title") or ""))
     return {"cards": out, "total": sum(c["spare"] for c in out)}
 

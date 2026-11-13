@@ -1,6 +1,8 @@
 // The Market, in Chromium on the production build with the API stubbed:
 //  * your cards in demand name who wants them (a link to that player), and say how many keep their list private;
 //  * every visible wish list is listed, the players whose list lines up with yours first, with what they want of yours and what you want of theirs;
+//  * spares of cards on your wish list (doubles other players hold, the pile ones marked) head the Market, and a player's row says how much is in their pile;
+//  * a player's page shows their pile first, tags the cards they have a spare of (Double), can show Doubles only, and for a private wish list says so and shows no list;
 //  * a player's page marks the cards you hold (and lets you pick them to give) beside their cards that are on your list (pick them to ask for),
 //    and Start a swap opens the builder with the player, the cards asked for and the cards given;
 //  * My cards filters by Wanted, Doubles and the club's role for the player, and says nothing about roles where none are recorded;
@@ -29,17 +31,22 @@ const COLE = card('p4', 'Cole, Chris', 'rare', 55, { role: null, wanted_by: 1 })
 let BOOK = [ME, ZED, ADAMS, COLE]
 const OVERVIEW = {
   my_wants: 2,
+  my_doubles: [{ ...ADAMS, holders: [{ player_id: 'p7', name: 'Dave, Dan', spare: 1, piled: true }, { player_id: 'p9', name: 'Fox, Fred', spare: 1, piled: false }] }],
   demand: [{ ...ZED, tradeable: 2, wanted_by: [{ player_id: 'p7', name: 'Dave, Dan' }, { player_id: 'p8', name: 'Eve, Ed' }], hidden: 1 }],
   players: [
-    { player_id: 'p7', name: 'Dave, Dan', wants: 4, they_want_mine: 1, i_want_theirs: 1, swap_possible: true },
-    { player_id: 'p9', name: 'Fox, Fred', wants: 2, they_want_mine: 0, i_want_theirs: 1, swap_possible: false },
-    { player_id: 'p8', name: 'Eve, Ed', wants: 1, they_want_mine: 1, i_want_theirs: 0, swap_possible: false },
+    { player_id: 'p7', name: 'Dave, Dan', wants: 4, wants_private: false, pile: 1, pile_i_want: 1, they_want_mine: 1, i_want_theirs: 1, swap_possible: true },
+    { player_id: 'p9', name: 'Fox, Fred', wants: 2, wants_private: false, pile: 0, pile_i_want: 0, they_want_mine: 0, i_want_theirs: 1, swap_possible: false },
+    { player_id: 'p8', name: 'Eve, Ed', wants: 1, wants_private: false, pile: 0, pile_i_want: 0, they_want_mine: 1, i_want_theirs: 0, swap_possible: false },
+    { player_id: 'p10', name: 'Gil, Gus', wants: 0, wants_private: true, pile: 2, pile_i_want: 0, they_want_mine: 0, i_want_theirs: 0, swap_possible: false },
   ],
 }
+const JONES = card('p11', 'Jones, Jim', 'rare', 50)
+const ADAMS_PILE = { ...ADAMS, tradeable: 2, spare: 1, on_my_list: true, piled: true }
 const DETAIL = {
+  wants_private: false, pile: [ADAMS_PILE],
   player: { player_id: 'p7', name: 'Dave, Dan' },
   wants: [{ ...ZED, tradeable: 2, mine: true }, { ...card('p5', 'Hill, Harry', 'legendary', 95), tradeable: 0, mine: false }],
-  theirs: [{ ...ADAMS, tradeable: 1, on_my_list: true }, { ...card('p6', 'Iles, Ian', 'common', 20), tradeable: 1, on_my_list: false }],
+  theirs: [ADAMS_PILE, { ...card('p6', 'Iles, Ian', 'common', 20), tradeable: 1, spare: 0, on_my_list: false, piled: false }, { ...JONES, tradeable: 2, spare: 1, on_my_list: false, piled: false }],
 }
 const calls = []
 let prefs = { alert_swaps: false, alert_wants: false, board_hidden: false, feed_hidden: false, wants_hidden: false, club_alerts: true, email_on_file: true, features: { sets: true, showcase: true, board: true, feed: true } }
@@ -57,6 +64,7 @@ const run = async () => {
       const rq = r.request(), url = rq.url(), method = rq.method()
       const json = (b, status = 200) => r.fulfill({ status, contentType: 'application/json', body: JSON.stringify(b) })
       if (!url.includes('/public/availability/')) return json({})
+      if (/\/me\/cards\/market\/p10$/.test(url)) return json({ player: { player_id: 'p10', name: 'Gil, Gus' }, wants: [], wants_private: true, pile: [{ ...JONES, tradeable: 2, spare: 1, on_my_list: false, piled: true }], theirs: [{ ...JONES, tradeable: 2, spare: 1, on_my_list: false, piled: true }] })
       if (/\/me\/cards\/market\/p7$/.test(url)) return json(DETAIL)
       if (/\/me\/cards\/market$/.test(url)) return json(OVERVIEW)
       if (/\/me\/cards\/prefs$/.test(url)) { if (method === 'PUT') { const body = JSON.parse(rq.postData()); calls.push({ method, body }); prefs = { ...prefs, ...body } } return json(prefs) }
@@ -84,10 +92,15 @@ const run = async () => {
     check('your cards in demand: the card, how many you hold, and who wants it (a link to each)', (await dem.count()) === 1 && /You hold 2 copies/.test(await dem.innerText()) && (await dem.locator('[data-wanter]').count()) === 2 && /Dave, Dan/.test(await dem.innerText()), await dem.innerText())
     check('...and says how many keep their list private, without naming them', /1 player who keeps their list private/.test(await dem.innerText()))
     const order = await page.locator('[data-market-player]').evaluateAll((els) => els.map((e) => e.getAttribute('data-market-player')))
-    check('players are listed as the server ranks them, swap possible first', JSON.stringify(order) === JSON.stringify(['p7', 'p9', 'p8']), JSON.stringify(order))
+    check('players are listed as the server ranks them, swap possible first', JSON.stringify(order) === JSON.stringify(['p7', 'p9', 'p8', 'p10']), JSON.stringify(order))
     const dave = await page.locator('[data-market-player="p7"]').innerText()
     check('a player shows what they want, how many of yours, how many you want, and that a swap is possible', /wants 4 cards/.test(dave) && /1 of yours/.test(dave) && /1 you want/.test(dave) && /swap possible/i.test(dave), dave)
     check('a player who wants none of yours has no "of yours" chip (and one who does, has)', (await page.locator('[data-market-player="p9"] [data-chip="they-want"]').count()) === 0 && (await page.locator('[data-market-player="p8"] [data-chip="they-want"]').count()) === 1)
+    const dbl = page.locator('[data-double="p:p3"]')
+    check('spares of cards on your wish list head the Market: the card, who holds a double, and which of them have it in their pile', (await dbl.count()) === 1 && (await dbl.locator('[data-double-holder]').count()) === 2 && (await dbl.locator('[data-double-piled]').count()) === 1 && /Dave, Dan/.test(await dbl.locator('[data-double-piled]').locator('xpath=..').innerText()), await dbl.innerText())
+    check('a row says how much is in the pile and how many of it you want', /1 in pile/.test(dave) && /1 spare you want/.test(dave), dave)
+    const gil = await page.locator('[data-market-player="p10"]').innerText()
+    check('a player with a private wish list is listed for their pile, with no "wants" and no "of yours" chip', /2 in pile/.test(gil) && !/wants/.test(gil) && (await page.locator('[data-market-player="p10"] [data-chip="they-want"]').count()) === 0, gil)
     await page.fill('[data-market-search]', 'fox')
     check('the search narrows the list', (await page.locator('[data-market-player]').count()) === 1 && (await page.locator('[data-market-player="p9"]').count()) === 1)
     await page.fill('[data-market-search]', 'nobody')
@@ -106,10 +119,17 @@ const run = async () => {
     await page.waitForSelector('[data-screen="market-player"]')
     check('their page marks the cards you hold, and only those', (await page.locator('[data-grid="wants"] [data-market-card="p:p2"][data-marked="yes"]').count()) === 1 && (await page.locator('[data-grid="wants"] [data-market-card="p:p5"][data-marked="no"]').count()) === 1)
     check('...says how many you have', /You have ×2/i.test(await page.locator('[data-market-card="p:p2"]').innerText()))
-    check('...and marks their cards that are on your wish list, and only those', (await page.locator('[data-grid="theirs"] [data-market-card="p:p3"][data-marked="yes"]').count()) === 1 && (await page.locator('[data-grid="theirs"] [data-market-card="p:p6"][data-marked="no"]').count()) === 1)
+    check('...marks their cards that are on your wish list, and only those', (await page.locator('[data-grid="pile"] [data-market-card="p:p3"][data-marked="yes"]').count()) === 1 && (await page.locator('[data-grid="theirs"] [data-market-card="p:p6"][data-marked="no"]').count()) === 1)
+    check("their pile comes first, and the card in it says it is on your list and in their pile", /Dan's pile \(1\)/i.test(await page.locator('[data-pile-head]').innerText()) && /On your list · In pile/i.test(await page.locator('[data-grid="pile"] [data-market-labels]').innerText()))
+    check('a pile card is not shown twice: the other cards are "everything else"', (await page.locator('[data-grid="theirs"] [data-market-card="p:p3"]').count()) === 0 && /everything else/i.test(await page.locator('[data-theirs-head]').innerText()))
+    check('a card they have a spare of is tagged Double, and one they hold once is not', /Double/i.test(await page.locator('[data-grid="theirs"] [data-market-card="p:p11"] [data-market-labels]').innerText()) && (await page.locator('[data-grid="theirs"] [data-market-card="p:p6"] [data-market-labels]').count()) === 0)
+    await page.click('[data-doubles-toggle]')
+    check('Doubles only keeps the cards with a spare', JSON.stringify(await page.locator('[data-grid="theirs"] [data-market-card]').evaluateAll((e) => e.map((x) => x.getAttribute('data-market-card')))) === JSON.stringify(['p:p11']))
+    await page.click('[data-doubles-toggle]')
+    check('...and switching it off brings the rest back', (await page.locator('[data-grid="theirs"] [data-market-card]').count()) === 2)
     check('a card you do not hold cannot be picked to give', (await page.locator('[data-market-card="p:p5"] button').count()) === 0)
     await page.click('[data-grid="wants"] [data-market-card="p:p2"] button')
-    await page.click('[data-grid="theirs"] [data-market-card="p:p3"] button')
+    await page.click('[data-grid="pile"] [data-market-card="p:p3"] button')
     const sum = await page.locator('[data-market-summary]').innerText()
     check('the bar says what you give and what you get', /You give 1 card/.test(sum) && /You get 1 card/.test(sum) && /Zed, Alan/.test(sum) && /Adams, Brian/.test(sum), sum)
     if (SHOT) await page.screenshot({ path: `${SHOT}/market-player-1280.png`, fullPage: true })
@@ -117,7 +137,14 @@ const run = async () => {
     await page.waitForSelector('[data-screen="new-swap"]')
     await page.waitForTimeout(600)
     const body = await page.locator('body').innerText()
+    check("in the swap builder their cards can be narrowed to doubles (the chip appears because some have a spare and some do not)", (await page.locator('[data-gallery-filter="doubles"]').count()) === 1)
     check('Start a swap opens the builder with Dave, the card asked for and the card given', /dave, dan/i.test(body) && /adams, brian, epic/i.test(body) && /zed, alan/i.test(body), body.slice(0, 300))
+    await ctx.close()
+  }
+  {
+    const { ctx, page } = await open(1280, '/market/p10', '[data-screen="market-player"]')
+    check('a private wish list is said to be private, with no wish list drawn', /keeps their wish list private/i.test(await page.locator('[data-page-title]').locator('xpath=..').innerText()) && (await page.locator('[data-wants-head]').count()) === 0 && (await page.locator('[data-grid="wants"]').count()) === 0)
+    check('...but their pile is still there to ask from', (await page.locator('[data-grid="pile"] [data-market-card="p:p11"]').count()) === 1)
     await ctx.close()
   }
   // ── My cards: Wanted, Doubles, roles ──
