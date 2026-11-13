@@ -41,7 +41,7 @@ from sqlalchemy import select, text as sql_text
 
 from app.models.db import Player, async_session_maker
 from app.services.sync import extract_bowler_wickets
-from app.services.grassroots_scores_client import get_match_scorecard
+from app.services.grassroots_scores_client import _scorecard_looks_incomplete, get_match_scorecard
 
 
 async def _build_merge_map(session, org_id: uuid.UUID) -> dict:
@@ -142,11 +142,20 @@ async def rebuild_for_org(org_id_str: str, mode: str = "default") -> None:
 
     inserted_total = 0
     errors = 0
+    skipped_incomplete = 0
+    skipped_fewer = 0
     org_id_str_lower = org_id_str.lower()
     for i, gid in enumerate(game_ids, start=1):
         try:
             scorecard = await get_match_scorecard(str(gid))
             if not scorecard:
+                continue
+            # CA sometimes returns a card with innings totals and no batting rows (a scorer
+            # mid-edit, or a match CA only holds the scoreline of). The client still hands it
+            # back, but it holds no dismissals, so rebuilding from it would wipe the pairings
+            # already stored for the game and write none. Leave the game as it is.
+            if _scorecard_looks_incomplete(scorecard):
+                skipped_incomplete += 1
                 continue
             # Restrict to bowlers on OUR team in this specific game.
             # A current club player who bowled AGAINST us in this game would
@@ -181,6 +190,15 @@ async def rebuild_for_org(org_id_str: str, mode: str = "default") -> None:
             # game's existing rows intact. An empty `rows` correctly clears a
             # game that now yields no wickets.
             async with async_session_maker() as session:
+                if mode != "default":
+                    # A targeted rebuild exists to ADD links, so it never replaces a game with
+                    # fewer rows than it holds: that is a degraded card, not a correction.
+                    held = (await session.execute(
+                        sql_text("SELECT COUNT(*) FROM bowler_wickets WHERE game_id = :gid"),
+                        {"gid": gid})).scalar() or 0
+                    if len(rows) < held:
+                        skipped_fewer += 1
+                        continue
                 await session.execute(
                     sql_text("DELETE FROM bowler_wickets WHERE game_id = :gid"),
                     {"gid": gid},
@@ -199,7 +217,9 @@ async def rebuild_for_org(org_id_str: str, mode: str = "default") -> None:
 
     print(
         f"Done. Inserted {inserted_total} bowler_wickets across "
-        f"{len(game_ids)} games ({errors} errors)."
+        f"{len(game_ids)} games ({errors} errors). "
+        f"Left alone: {skipped_incomplete} games whose card CA returned incomplete, "
+        f"{skipped_fewer} games where the card gave fewer rows than are stored."
     )
 
 
