@@ -8,10 +8,22 @@ extractor.
 Also the way to back-fill `bowler_wickets.caught_behind` (migration 076) — the
 extractor now records whether each caught wicket was off the keeper.
 
+By default it only rebuilds games not yet rebuilt with the caught_behind flag, which is
+almost none on a club that has already been through it. Two flags choose games for a parser
+change that the default skips (e.g. naming a bowler or keeper the card's text left blank,
+v9.143.8.2):
+  --short  only games where the stored fielding totals exceed the catches and stumpings
+           paired to a fielder (a caught-and-bowled is allowed for), or where a catch or
+           stumping has no fielder. The cheap one: the games that can actually change.
+  --force  every game of the club.
+
 Usage from the backend container:
   # one club:
   docker exec -e PYTHONPATH=/app betterstats-backend \\
     python -m app.scripts.rebuild_bowler_wickets <org_id>
+  # one club, only the games that are short (--force instead: every game):
+  docker exec -e PYTHONPATH=/app betterstats-backend \\
+    python -m app.scripts.rebuild_bowler_wickets <org_id> --short
   # every club (no arg, or "all"):
   docker exec -e PYTHONPATH=/app betterstats-backend \\
     python -m app.scripts.rebuild_bowler_wickets all
@@ -53,7 +65,33 @@ async def _build_merge_map(session, org_id: uuid.UUID) -> dict:
     return resolved
 
 
-async def rebuild_for_org(org_id_str: str) -> None:
+# Games whose stored fielding totals are more than the pairings held: the ones a better parse
+# can add to. A caught-and-bowled sits in the bowler's own fielding row and pairs to no fielder,
+# so it is allowed for.
+_SHORT_GAMES_SQL = (
+    "SELECT DISTINCT g.id FROM games g "
+    "JOIN grades gr ON gr.id = g.grade_id "
+    "JOIN seasons s ON s.id = gr.season_id "
+    "WHERE s.organisation_id = :org_id AND ("
+    "  EXISTS (SELECT 1 FROM bowler_wickets bw WHERE bw.game_id = g.id "
+    "          AND bw.fielder_id IS NULL AND bw.dismissal_type IN ('caught', 'stumped')) "
+    "  OR COALESCE((SELECT SUM(COALESCE(fs.stumpings, 0) + COALESCE(fs.catches, 0)) "
+    "               FROM fielding_stats fs WHERE fs.game_id = g.id), 0) "
+    "     > (SELECT COUNT(*) FROM bowler_wickets bw WHERE bw.game_id = g.id "
+    "        AND bw.dismissal_type IN ('caught', 'stumped') AND bw.fielder_id IS NOT NULL) "
+    "     + (SELECT COUNT(*) FROM bowler_wickets bw WHERE bw.game_id = g.id "
+    "        AND bw.dismissal_type = 'caught and bowled')"
+    ") ORDER BY g.id"
+)
+_ALL_GAMES_SQL = (
+    "SELECT DISTINCT g.id FROM games g "
+    "JOIN grades gr ON gr.id = g.grade_id "
+    "JOIN seasons s ON s.id = gr.season_id "
+    "WHERE s.organisation_id = :org_id ORDER BY g.id"
+)
+
+
+async def rebuild_for_org(org_id_str: str, mode: str = "default") -> None:
     org_id = uuid.UUID(org_id_str)
 
     async with async_session_maker() as session:
@@ -77,18 +115,23 @@ async def rebuild_for_org(org_id_str: str) -> None:
         # non-NULL). The wipe is now PER GAME, done only AFTER a successful
         # scorecard fetch (in the loop below), so a dropped connection can never
         # leave a game's bowler_wickets deleted-and-not-restored.
-        games = await session.execute(
-            sql_text(
-                "SELECT DISTINCT g.id FROM games g "
-                "JOIN grades gr ON gr.id = g.grade_id "
-                "JOIN seasons s ON s.id = gr.season_id "
-                "WHERE s.organisation_id = :org_id "
-                "  AND NOT EXISTS (SELECT 1 FROM bowler_wickets bw "
-                "                 WHERE bw.game_id = g.id AND bw.caught_behind IS NOT NULL) "
-                "ORDER BY g.id"
-            ),
-            {"org_id": str(org_id)},
-        )
+        if mode == "short":
+            games = await session.execute(sql_text(_SHORT_GAMES_SQL), {"org_id": str(org_id)})
+        elif mode == "force":
+            games = await session.execute(sql_text(_ALL_GAMES_SQL), {"org_id": str(org_id)})
+        else:
+            games = await session.execute(
+                sql_text(
+                    "SELECT DISTINCT g.id FROM games g "
+                    "JOIN grades gr ON gr.id = g.grade_id "
+                    "JOIN seasons s ON s.id = gr.season_id "
+                    "WHERE s.organisation_id = :org_id "
+                    "  AND NOT EXISTS (SELECT 1 FROM bowler_wickets bw "
+                    "                 WHERE bw.game_id = g.id AND bw.caught_behind IS NOT NULL) "
+                    "ORDER BY g.id"
+                ),
+                {"org_id": str(org_id)},
+            )
         game_ids = [r[0] for r in games.all()]
 
     print(
@@ -146,6 +189,8 @@ async def rebuild_for_org(org_id_str: str) -> None:
                     session.add(r)
                 await session.commit()
             inserted_total += len(rows)
+            # One fetch a game, politely paced: a whole club is a few thousand requests to CA.
+            await asyncio.sleep(0.25)
         except Exception as exc:
             errors += 1
             print(f"  err on {gid}: {exc}")
@@ -158,7 +203,7 @@ async def rebuild_for_org(org_id_str: str) -> None:
     )
 
 
-async def rebuild_all() -> None:
+async def rebuild_all(mode: str = "default") -> None:
     """Rebuild every organisation, sequentially, so one run repopulates the whole
     site (e.g. after adding bowler_wickets.caught_behind). One club's failure must
     not abort the rest."""
@@ -172,7 +217,7 @@ async def rebuild_all() -> None:
     for idx, (oid, name) in enumerate(orgs, start=1):
         print(f"=== [{idx}/{len(orgs)}] {name} ({oid}) ===")
         try:
-            await rebuild_for_org(str(oid))
+            await rebuild_for_org(str(oid), mode)
         except Exception as exc:
             failed.append(f"{name} ({oid}): {exc}")
             print(f"  !! org failed: {exc}")
@@ -182,8 +227,11 @@ async def rebuild_all() -> None:
 
 
 if __name__ == "__main__":
-    arg = sys.argv[1] if len(sys.argv) > 1 else "all"
+    flags = {a for a in sys.argv[1:] if a.startswith("--")}
+    positional = [a for a in sys.argv[1:] if not a.startswith("--")]
+    mode = "force" if "--force" in flags else ("short" if "--short" in flags else "default")
+    arg = positional[0] if positional else "all"
     if arg.lower() == "all":
-        asyncio.run(rebuild_all())
+        asyncio.run(rebuild_all(mode))
     else:
-        asyncio.run(rebuild_for_org(arg))
+        asyncio.run(rebuild_for_org(arg, mode))

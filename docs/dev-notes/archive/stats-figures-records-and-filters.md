@@ -2823,3 +2823,9 @@ Fix, at the source, in `sync.extract_bowler_wickets` (the same function `scripts
 Existing rows: `rebuild_bowler_wickets <org_id>` re-fetches each scorecard from CA (bounded, one fetch a game) and rewrites the club's `bowler_wickets`; the read-side top-up of v9.143.7.1 then shrinks on its own, because it only adds the shortfall between the fielding row and the pairings held. Not run from the sandbox: it needs the container.
 
 Proof: `backend/verification/verify_bowler_wicket_recovery.py` (13, pure, hand-built cards shaped like the 2008-12-13, 2010-10-09 and 2021-01-24 games; the control on the previous `sync.py` fails 6, and the ambiguity, club-gate and fully-named cases pass on both).
+
+## rebuild_bowler_wickets reaches games already rebuilt (v9.143.8.3)
+
+Reported: the Applecross rebuild after v9.143.8.2 "didn't change". Live API before and after: unpaired rows 56 to 52, stumpings with a named bowler 71 to 73, and only the two newest games (2026-10-17, 2026-11-07) changed; the 2008-12-13 stumping (`st:  b: S Shub`, Carmody credited) still read "Not recorded". Cause: the script's default selection is "games with no `caught_behind` value stored", written for the migration 076 backfill, so a club already through it re-reads almost nothing. The extractor was fine: the shipped `extract_bowler_wickets` run on that game's raw CA card (fetched with `get_match_scorecard`) emits Shub, Carmody, stumped.
+
+Fix: `--short` re-reads only games where the stored `fielding_stats` (stumpings + catches) exceed the `bowler_wickets` caught and stumped rows that have a fielder, plus caught-and-bowled rows, or where a caught or stumped row has no fielder (`_SHORT_GAMES_SQL`); `--force` re-reads every game of the club (`_ALL_GAMES_SQL`); the default is unchanged. A quarter-second pause follows each fetch. Check: `verify_rebuild_bowler_wickets_short.py` (7; `CONTROL=1` runs the default selection and fails 2: the games whose rows already carry the flag).
