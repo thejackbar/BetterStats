@@ -2854,7 +2854,7 @@ Not known: whether the 264 were this (roster gate), the guard working as intende
 
 Proof: `verify_rebuild_bowler_wickets_guards.py` (8; N1 unstored keeper id attached by full name, N2 keeper that cannot be placed keeps the stored fielder, T1 a club playing itself read on both sides). Control on the v9.143.8.4 script fails 3: N1 and N2 come back `(1 row, 0 fielder)`, T1 is left alone.
 
-## The 264 "fewer rows" games were the opposition's innings (v9.143.8.6)
+## The 264 "fewer rows" games were the opposition's innings (v9.143.9.1)
 
 The v9.143.8.5 `--short` run on Applecross was still leaving about 260 games alone, each with "the card gives N rows, N+~10 are stored". Raw cards (`get_match_scorecard`) for 31dac763, 36cfd475 and 37809ade showed the club bowled in ONE innings (two for a two-innings match) and the card gave exactly those wickets; the extra stored rows were an innings' worth in the opposition's bowling innings. Read back through the fielders' own lists (`/players/{id}/fielding-dismissals`), 37809ade held 6 rows in innings 2 whose fielders are club players and whose bowlers are club players (`Christie, Kyle`, `Barnett, Tyson`), where the card has the opposition's `K Christie` and `T Overton` bowling that innings and the opposition bowlers have no stored player id at all. An older sync matched an opposition bowler, and the fielders behind him, to club players with the same short name. Those rows are not the club's wickets. They also explain Carmody's list reading 226 catches against a headline of 223.
 
