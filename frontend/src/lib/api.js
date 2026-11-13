@@ -3591,6 +3591,7 @@ export const api = {
   availPublicMarket: (token) => request(`/public/availability/${token}/me/cards/market`),
   availPublicMarketPlayer: (token, playerId) => request(`/public/availability/${token}/me/cards/market/${encodeURIComponent(playerId)}`),
   availPublicSpares: (token) => request(`/public/availability/${token}/me/cards/spares`),
+  availPublicSetPile: (token, key, on) => request(`/public/availability/${token}/me/cards/pile`, { method: 'POST', body: JSON.stringify({ key, on }) }),
   availPublicSetSpareOpen: (token, key, open) => request(`/public/availability/${token}/me/cards/spares/open`, { method: 'POST', body: JSON.stringify({ key, open }) }),
   availPublicCard: (token, key) => request(`/public/availability/${token}/me/cards/card?key=${encodeURIComponent(key)}`),
   availPublicCardPrefs: (token) => request(`/public/availability/${token}/me/cards/prefs`),

@@ -382,6 +382,26 @@ async def get_market_player(token: str, player_id: str, request: Request, db: As
         raise _refuse(exc)
 
 
+class PileBody(BaseModel):
+    key: str
+    on: bool
+
+
+@router.post("/{token}/me/cards/pile")
+async def set_pile(token: str, body: PileBody, request: Request, db: AsyncSession = Depends(get_db)):
+    """Put a spare in the player's pile (visible to the club in the Market), or take it out."""
+    club, player, snap = await _ready(db, request, token)
+    rate_limit.enforce(f"cards-pile:{player.id}:{_client_ip(request)}", SWAP_LIMIT * 2, SWAP_WINDOW,
+                       detail="Slow down. Give it a few seconds and try again.")
+    try:
+        await social.set_pile(db, club, snap, str(player.id), body.key, body.on)
+    except swaps.SwapError as exc:
+        await db.rollback()
+        raise _refuse(exc)
+    await db.commit()
+    return {"ok": True}
+
+
 @router.get("/{token}/me/cards/spares")
 async def get_spares(token: str, request: Request, db: AsyncSession = Depends(get_db)):
     """The cards the player holds more of than they keep, and whether they are open to offers on each."""

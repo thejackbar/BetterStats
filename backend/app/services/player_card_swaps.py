@@ -69,6 +69,12 @@ def key_of(subject: str, special_id: Optional[str]) -> str:
     return f"s:{special_id}" if special_id else f"p:{subject}"
 
 
+def spare_copies(owner: str, card: Card, rows: int) -> int:
+    """Copies beyond the one the owner keeps: a double has one spare. A player's own card is theirs without a row, so every pulled
+    copy of it is a spare. Derived from the same rows as `tradeable`, so it tells nobody anything `tradeable` did not."""
+    return max(rows, 0) if card == (owner, None) else max(rows - 1, 0)
+
+
 def tradeable(owner: str, card: Card, rows: int) -> int:
     """How many copies of `card` the owner could part with: every row they hold. A player's own card is
     theirs without a row, so it never counts, and only the copies of it they have pulled can go."""
@@ -128,7 +134,7 @@ async def tradeable_cards(db: AsyncSession, club: Organisation, snap: dict, owne
     for card, n in wanted.items():
         payload = _payload(snap, card, specials)
         if payload:
-            out.append({**payload, "tradeable": n, "key": key_of(*card)})
+            out.append({**payload, "tradeable": n, "spare": spare_copies(owner, card, held[card]), "key": key_of(*card)})
     out.sort(key=lambda c: (c["kind"] != "special", (c.get("name") or "")))
     return out
 

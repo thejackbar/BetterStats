@@ -4582,6 +4582,10 @@ async def lifespan(app: FastAPI):
         from app.services.player_card_dismissed_ddl import STATEMENTS as _PLAYER_CARD_DISMISSED_DDL
         for _stmt in _PLAYER_CARD_DISMISSED_DDL:
             await conn.execute(text(_stmt))
+        # Migration 388: the pile, spares a player has flagged for swapping. Same one-copy rule.
+        from app.services.player_card_pile_ddl import STATEMENTS as _PLAYER_CARD_PILE_DDL
+        for _stmt in _PLAYER_CARD_PILE_DDL:
+            await conn.execute(text(_stmt))
         # Migration 387: the Market's wish list opt-out. Same one-copy rule.
         from app.services.player_card_market_ddl import STATEMENTS as _PLAYER_CARD_MARKET_DDL
         for _stmt in _PLAYER_CARD_MARKET_DDL:

@@ -1,5 +1,5 @@
 // Spares: the cards a player holds more of than they keep, in one place. Pick several and offer them to someone in one go, and
-// mark the ones they are open to swapping, which tells them how many players want each (a number, never names).
+// put the ones they are happy to move in their pile, which the whole club can see in the Market.
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../lib/api'
@@ -27,9 +27,9 @@ export default function Spares() {
   })
   const setQty = (card, qty) => setPicked((m) => new Map(m).set(card.key, { card, qty: Math.max(1, Math.min(qty, card.spare || 1)) }))
   const marked = useMemo(() => new Set(picked.keys()), [picked])
-  const setOpen = async (card, on) => {
+  const setPile = async (card, on) => {
     setErr('')
-    try { await api.availPublicSetSpareOpen(token, card.key, on); await read() } catch (e) { setErr(e?.message || 'That did not work.') }
+    try { await api.availPublicSetPile(token, card.key, on); await read() } catch (e) { setErr(e?.message || 'That did not work.') }
   }
   if (failed) return <div className="text-sm text-pb-faint" data-spares-failed>Your spares could not load. Reload to try again.</div>
   if (!data) return <div className="text-sm text-pb-faint" data-spares-loading>Loading your spares…</div>
@@ -64,22 +64,22 @@ export default function Spares() {
               <button type="button" onClick={offer} data-spares-offer-go style={{ ...btn, background: accent, color: onColor(accent), marginTop: 10 }}>Offer these to someone</button>
             </div>
           )}
-          <h2 className="font-mono text-[11px] tracking-wide2 uppercase text-pb-faint mt-8 mb-1">Open to offers</h2>
-          <p className="text-sm text-pb-dim mb-3 max-w-prose">Nobody is told you are open. Each spare shows how many other players have it on their wish list, as a number and never names.</p>
+          <h2 className="font-mono text-[11px] tracking-wide2 uppercase text-pb-faint mt-8 mb-1" data-pile-head>My pile ({data.cards.filter((c) => c.piled).length})</h2>
+          <p className="text-sm text-pb-dim mb-3 max-w-prose">Put a spare in your pile to say you are happy to swap it. Everyone in the club can see your pile in the Market, with your name, so people know what to ask you for. A card leaves the pile on its own when you no longer have a spare of it.</p>
           {err && <div role="alert" className="text-sm mb-2" style={{ color: 'var(--pb-red, #f87171)' }}>{err}</div>}
-          <div className="flex flex-col gap-2" data-open-list>
+          <div className="flex flex-col gap-2" data-pile-list>
             {data.cards.map((c) => (
-              <div key={c.key} data-open-row={c.key} className="flex items-center gap-3 rounded-xl border pb-hairline bg-pb-surface p-2.5">
+              <div key={c.key} data-pile-row={c.key} className="flex items-center gap-3 rounded-xl border pb-hairline bg-pb-surface p-2.5">
                 <Mini card={c} club={club} accent={accent} display={display} sponsor={sponsor} width={52} count={1} />
                 <div className="min-w-0 flex-1">
                   <div className="text-sm font-semibold" style={{ overflowWrap: 'anywhere' }}>{cardLine(c)}</div>
-                  <div className="text-[12.5px] text-pb-dim" data-open-note>
+                  <div className="text-[12.5px] text-pb-dim" data-pile-note>
                     {c.spare} {c.spare === 1 ? 'spare' : 'spares'}{c.wanted_by > 0 ? ` · on ${c.wanted_by} ${c.wanted_by === 1 ? 'wish list' : 'wish lists'}` : ''}
                   </div>
                 </div>
                 <label className="inline-flex items-center gap-2 text-sm shrink-0">
-                  <input type="checkbox" checked={c.open} onChange={(e) => setOpen(c, e.target.checked)} data-open-toggle={c.key} className="w-5 h-5" />
-                  <span>Open</span>
+                  <input type="checkbox" checked={!!c.piled} onChange={(e) => setPile(c, e.target.checked)} data-pile-toggle={c.key} className="w-5 h-5" style={{ accentColor: accent }} />
+                  <span>In my pile</span>
                 </label>
               </div>
             ))}

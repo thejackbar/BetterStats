@@ -76,7 +76,8 @@ export const ROLE_FILTERS = [['BAT', 'Batters'], ['BOWL', 'Bowlers'], ['AR', 'Al
 
 export function buildItems(cards, { filter, sort, meId, role = '' }) {
   let pool = cards
-  if (filter === 'doubles') pool = pool.filter((c) => (c.copies || 1) > 1)
+  // In your own book a double is a card held twice; in someone else's cards (browse) it is a card with a spare copy.
+  if (filter === 'doubles') pool = pool.filter((c) => (c.spare != null ? c.spare > 0 : (c.copies || 1) > 1))
   if (filter === 'wanted') pool = pool.filter((c) => c.wanted_by > 0)
   // The role comes from the club's own record of the player; `none` is the players it has no role for.
   if (role) pool = pool.filter((c) => (c.role || 'none') === role)
@@ -308,12 +309,13 @@ export default function CardGallery({ cards = [], totals, club, accent, display 
   const specialOwned = totals?.special_owned ?? 0
 
   const counts = useMemo(() => {
-    const out = { special: 0, doubles: 0, wanted: 0, none: 0, roles: {} }
+    const out = { special: 0, doubles: 0, wanted: 0, none: 0, noSpare: 0, roles: {} }
     for (const c of cards) {
       if (c.wanted_by > 0) out.wanted += 1
       if (c.role) out.roles[c.role] = (out.roles[c.role] || 0) + 1; else out.none += 1
       if (c.kind === 'special') { out.special += 1; const k = CAT_OF[c.special_kind]; out[k] = (out[k] || 0) + 1 }
-      if (countOf(c, browse) > 1) out.doubles += 1
+      if (browse ? c.spare > 0 : countOf(c, browse) > 1) out.doubles += 1
+      if (c.spare === 0) out.noSpare += 1
     }
     return out
   }, [cards, browse])
@@ -327,7 +329,8 @@ export default function CardGallery({ cards = [], totals, club, accent, display 
     { key: 'regular', label: 'Players' },
     ...(counts.special ? [{ key: 'special', label: 'Specials', n: counts.special }] : []),
     ...CATEGORIES.filter((c) => counts[c.key]).map((c) => ({ key: c.key, label: c.label, n: counts[c.key] })),
-    ...(browse ? [] : [{ key: 'doubles', label: 'Doubles', n: counts.doubles }, { key: 'wanted', label: 'Wanted', n: counts.wanted }]),
+    // Someone else's cards: Doubles only when it would tell the cards apart (some have a spare, some do not).
+    ...(browse ? (counts.doubles > 0 && counts.noSpare > 0 ? [{ key: 'doubles', label: 'Doubles', n: counts.doubles }] : []) : [{ key: 'doubles', label: 'Doubles', n: counts.doubles }, { key: 'wanted', label: 'Wanted', n: counts.wanted }]),
   ], [counts, browse, remote])
   // Role chips come from the club's own player records. With none recorded there is nothing to filter on, so no row is drawn.
   const roleChips = useMemo(() => {
