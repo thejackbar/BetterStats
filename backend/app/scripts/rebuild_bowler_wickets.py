@@ -40,6 +40,7 @@ import uuid
 from sqlalchemy import select, text as sql_text
 
 from app.models.db import Player, async_session_maker
+from app.services import merge_redirects, participant_names
 from app.services.sync import extract_bowler_wickets
 from app.services.grassroots_scores_client import _scorecard_looks_incomplete, get_match_scorecard
 
@@ -91,24 +92,80 @@ _ALL_GAMES_SQL = (
 )
 
 
+def _parse_guid(value):
+    try:
+        return uuid.UUID(str(value))
+    except (ValueError, TypeError):
+        return None
+
+
+def club_roster(scorecard: dict, org_id_lower: str, pid_by_guid: dict, merged_away: dict,
+                unique_names: dict) -> tuple[set, dict]:
+    """The club's players in this game and the participant-id map to resolve them, as sync reads them.
+
+    Returns ``(our_team_pids, pid_by_guid_for_this_game)``. The same four rules sync applies
+    when it first stores a game, so a rebuild never sees FEWER of the club's players than the
+    sync did (which made it write fewer rows, and the loop leave the game alone):
+      * every team the club owns in the fixture, not just the first (a club playing itself
+        has two sides);
+      * CA's placeholder participant ids belong to nobody;
+      * a participant id followed through a merge redirect, as `sync._team_pid` does;
+      * a rostered player whose id was never stored, whose full name matches exactly one of
+        the club's players, is attached to that player (CA issues a new participant id per
+        registration for some players): `participant_names.resolve_roster_by_name`.
+    """
+    def team_pid(g):
+        if g is None or participant_names.is_placeholder_id(str(g)):
+            return None
+        p = pid_by_guid.get(g)
+        if p is None:
+            p = merged_away.get(g)
+            if p is None:
+                return None
+        return merged_away.get(p, p)
+
+    our_teams = [t for t in (scorecard.get("teams") or [])
+                 if ((t.get("owningOrganisation") or {}).get("id") or "").lower() == org_id_lower]
+    sheet = [rp for t in our_teams for rp in (t.get("players") or [])]
+    known: dict = {}
+    for rp in sheet:
+        raw = rp.get("participantId") or ""
+        kp = team_pid(_parse_guid(raw)) if raw else None
+        if kp is not None:
+            known[raw] = kp
+    pids = set(known.values())
+    game_map = dict(pid_by_guid)
+    for raw, kp in participant_names.resolve_roster_by_name(sheet, known, unique_names).items():
+        g = _parse_guid(raw)
+        if g is not None:
+            game_map[g] = kp
+            pids.add(kp)
+    return pids, game_map
+
+
 async def rebuild_for_org(org_id_str: str, mode: str = "default") -> None:
     org_id = uuid.UUID(org_id_str)
 
     async with async_session_maker() as session:
         players = await session.execute(
-            select(Player.id, Player.grassroots_id).where(Player.organisation_id == org_id)
+            select(Player.id, Player.grassroots_id, Player.name, Player.display_name_override, Player.is_player)
+            .where(Player.organisation_id == org_id)
         )
         known_player_ids = set()
         pid_by_guid: dict = {}  # raw CA participant GUID -> this org's player id (identity for legacy)
-        for _pid, _gid in players.all():
+        name_pairs: list = []
+        for _pid, _gid, _pname, _pover, _is_player in players.all():
             known_player_ids.add(_pid)
-            if _gid:
-                try:
-                    pid_by_guid[uuid.UUID(str(_gid))] = _pid
-                except (ValueError, TypeError):
-                    pass
+            g = _parse_guid(_gid) if _gid else None
+            if g is not None and not participant_names.is_placeholder_id(str(g)):
+                pid_by_guid[g] = _pid
+            if _is_player is not False:
+                name_pairs.append((_pid, _pover or _pname))
+        unique_names = participant_names.unique_by_full_name(name_pairs)
 
         merged_away = await _build_merge_map(session, org_id)
+        # A redirect to a player who no longer exists reads as an unknown id, as in sync.
+        merged_away, _dangling = await merge_redirects.drop_dangling(session, merged_away)
 
         # Resume-friendly + crash-safe: only games not yet rebuilt with the
         # caught_behind flag (legacy rows are all-NULL; a rebuilt game has ≥1
@@ -156,35 +213,14 @@ async def rebuild_for_org(org_id_str: str, mode: str = "default") -> None:
             # already stored for the game and write none. Leave the game as it is.
             if _scorecard_looks_incomplete(scorecard):
                 skipped_incomplete += 1
+                print(f"  left alone {gid}: CA returned an incomplete card")
                 continue
-            # Restrict to bowlers on OUR team in this specific game.
-            # A current club player who bowled AGAINST us in this game would
-            # otherwise have their dismissals credited to our team.
-            our_team = next(
-                (t for t in (scorecard.get("teams") or [])
-                 if ((t.get("owningOrganisation") or {}).get("id") or "").lower() == org_id_str_lower),
-                None,
-            )
-            our_team_pids: set = set()
-            if our_team:
-                for roster_p in (our_team.get("players") or []):
-                    rpid_str = roster_p.get("participantId")
-                    if not rpid_str:
-                        continue
-                    try:
-                        g = uuid.UUID(rpid_str)
-                    except ValueError:
-                        continue
-                    # raw participant GUID -> this org's player id (identity for legacy)
-                    p = pid_by_guid.get(g)
-                    if p is None:
-                        p = merged_away.get(g)
-                        if p is None:
-                            continue
-                    else:
-                        p = merged_away.get(p, p)
-                    our_team_pids.add(p)
-            rows = extract_bowler_wickets(scorecard, gid, our_team_pids, pid_by_guid, merged_away)
+            # Restrict to bowlers and fielders on OUR side in this specific game, resolved the way
+            # sync resolves them (club_roster). A current club player who bowled AGAINST us in this
+            # game would otherwise have their dismissals credited to our team.
+            our_team_pids, game_pid_by_guid = club_roster(
+                scorecard, org_id_str_lower, pid_by_guid, merged_away, unique_names)
+            rows = extract_bowler_wickets(scorecard, gid, our_team_pids, game_pid_by_guid, merged_away)
             # Per-game wipe + reinsert in ONE transaction, only now that the
             # fetch above succeeded — a failed fetch `continue`d and left the
             # game's existing rows intact. An empty `rows` correctly clears a
@@ -192,12 +228,18 @@ async def rebuild_for_org(org_id_str: str, mode: str = "default") -> None:
             async with async_session_maker() as session:
                 if mode != "default":
                     # A targeted rebuild exists to ADD links, so it never replaces a game with
-                    # fewer rows than it holds: that is a degraded card, not a correction.
-                    held = (await session.execute(
-                        sql_text("SELECT COUNT(*) FROM bowler_wickets WHERE game_id = :gid"),
-                        {"gid": gid})).scalar() or 0
-                    if len(rows) < held:
+                    # fewer rows, or with fewer rows that name a fielder, than it holds: that is a
+                    # card (or a club roster) that reads worse than the sync did, not a correction.
+                    # Counting rows alone is not enough: a fielder the rebuild cannot place leaves
+                    # the row, and loses the link.
+                    held, held_fielder = (await session.execute(
+                        sql_text("SELECT COUNT(*), COUNT(fielder_id) FROM bowler_wickets WHERE game_id = :gid"),
+                        {"gid": gid})).one()
+                    new_fielder = sum(1 for r in rows if r.fielder_id is not None)
+                    if len(rows) < held or new_fielder < held_fielder:
                         skipped_fewer += 1
+                        print(f"  left alone {gid}: the card gives {len(rows)} rows ({new_fielder} with a fielder), "
+                              f"{held} are stored ({held_fielder} with a fielder)")
                         continue
                 await session.execute(
                     sql_text("DELETE FROM bowler_wickets WHERE game_id = :gid"),
@@ -219,7 +261,7 @@ async def rebuild_for_org(org_id_str: str, mode: str = "default") -> None:
         f"Done. Inserted {inserted_total} bowler_wickets across "
         f"{len(game_ids)} games ({errors} errors). "
         f"Left alone: {skipped_incomplete} games whose card CA returned incomplete, "
-        f"{skipped_fewer} games where the card gave fewer rows than are stored."
+        f"{skipped_fewer} games where the card gave fewer rows, or fewer fielder links, than are stored."
     )
 
 

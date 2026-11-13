@@ -2837,3 +2837,19 @@ Found when the v9.143.8.3 `--short` run on Applecross printed "GR scores: /match
 Fix: the loop skips any card `_scorecard_looks_incomplete` flags and counts it; in `--short` and `--force` it also skips a game whose card yields fewer rows than are stored (a targeted rebuild exists to add links, never to remove them). The closing line reports both counts. Proof: `verify_rebuild_bowler_wickets_guards.py` (5, the shipped `rebuild_for_org` over Postgres with only the CA fetch stubbed; the control on the v9.143.8.3 script fails 4: an incomplete game 2 rows to 0, a fewer-rows game 3 to 1, in both modes).
 
 Restoring games already cleared: from a database backup of `bowler_wickets` for those game ids (the warned match ids in the run's output are the list), or by re-running once CA serves a complete card. A game whose card CA no longer serves in full cannot be rebuilt from CA.
+
+## rebuild_bowler_wickets: read the club the way sync does, and guard fielder links (v9.143.8.5)
+
+The v9.143.8.4 `--short` run on Applecross closed with "264 games where the card gave fewer rows than are stored" left alone, on top of 1,401 incomplete cards. Asked to find out why. Without database access the cause of the 264 could not be pinned from outside, but the script read the club differently from `sync`, in ways that make a rebuild see FEWER of the club's players than the sync stored:
+
+- `sync` gates a game on every team the club owns (`our_teams`; a club playing itself has two); the script took `next(...)`, the first.
+- `sync` attaches a rostered player whose card id was never stored to the club's one player with that full name (`participant_names.resolve_roster_by_name`, CA issues a new participant id per registration for some players, e.g. Carmody's `8b6cbaaa-…` on 000fb6b7); the script knew only stored ids and merge redirects.
+- `sync` drops CA's placeholder participant ids and merge redirects that lead nowhere; the script did neither.
+
+And a second hazard in the guard I shipped: it compared ROW COUNTS only. A fielder the rebuild cannot place leaves the row (the bowler resolves) and drops the link, so the game was rewritten with the same count and no fielder. Reproduced on the v9.143.8.4 script: stored (1 row, fielder set) came back (1 row, no fielder).
+
+Fix: `club_roster()` in `scripts/rebuild_bowler_wickets.py` applies the four sync rules and returns the per-game participant map handed to `extract_bowler_wickets`; the unique-name map is built once per club as sync does. In `--short` and `--force` the guard also refuses a card that would leave fewer rows WITH A FIELDER than are stored. Each game left alone now prints a line saying why (`left alone <id>: the card gives N rows (M with a fielder), P are stored (Q with a fielder)`), so the next run's skip list can be read, not just counted.
+
+Not known: whether the 264 were this (roster gate), the guard working as intended on cards that read worse than they once did, or something else. The closing line and the per-game lines of the next run answer it: a falling "fewer" count means the roster gate was the cause.
+
+Proof: `verify_rebuild_bowler_wickets_guards.py` (8; N1 unstored keeper id attached by full name, N2 keeper that cannot be placed keeps the stored fielder, T1 a club playing itself read on both sides). Control on the v9.143.8.4 script fails 3: N1 and N2 come back `(1 row, 0 fielder)`, T1 is left alone.
