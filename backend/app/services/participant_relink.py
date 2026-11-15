@@ -285,6 +285,32 @@ def is_club_innings_of(inn: dict, team: dict, resolve, our_pids: set) -> bool:
     return total_n > 0 and club_n * 2 > total_n
 
 
+def _stand_batters(p: dict, resolve, our_pids: set, roster_guids: set) -> tuple:
+    """(batter1_id, batter2_id, batter1_name, batter2_name) of one derived stand, as sync stores them.
+
+    A batter the club holds gets their id. One on the club's roster that it does not hold (a fill-in
+    or a redacted junior) keeps the card's name. An opposition batter gets neither, so a stand with
+    nobody of ours in it comes back all None and the caller skips it.
+    """
+    b1_id = b2_id = b1_name = b2_name = None
+    for src_key, name_key, dst in (("batter1_id", "batter1_name", 1), ("batter2_id", "batter2_name", 2)):
+        v = p.get(src_key)
+        if not v:
+            continue
+        cand = resolve(v)
+        if cand is not None and cand in our_pids:
+            if dst == 1:
+                b1_id = cand
+            else:
+                b2_id = cand
+        elif v in roster_guids:
+            if dst == 1:
+                b1_name = p.get(name_key)
+            else:
+                b2_name = p.get(name_key)
+    return b1_id, b2_id, b1_name, b2_name
+
+
 async def attach_innings_detail(db: AsyncSession, org_id, game_id, scorecard: dict, resolve,
                                 replace_innings: frozenset = frozenset()) -> dict:
     """Add the fall of wickets and partnerships a stored game lacks, one innings at a time.
@@ -348,23 +374,7 @@ async def attach_innings_detail(db: AsyncSession, org_id, game_id, scorecard: di
         is_club_innings = is_club_innings_of(inn, team, resolve, our_pids)
 
         for p in _derive_partnerships_grassroots(batting_rows, fow_rows):
-            b1_id = b2_id = b1_name = b2_name = None
-            for src_key, name_key, dst in (("batter1_id", "batter1_name", 1), ("batter2_id", "batter2_name", 2)):
-                v = p.get(src_key)
-                if not v:
-                    continue
-                cand = resolve(v)
-                if cand is not None and cand in our_pids:
-                    if dst == 1:
-                        b1_id = cand
-                    else:
-                        b2_id = cand
-                elif v in roster_guids:
-                    # On our roster but not a player we hold: a fill-in or a redacted junior.
-                    if dst == 1:
-                        b1_name = p.get(name_key)
-                    else:
-                        b2_name = p.get(name_key)
+            b1_id, b2_id, b1_name, b2_name = _stand_batters(p, resolve, our_pids, roster_guids)
             if not b1_id and not b2_id and not b1_name and not b2_name:
                 continue
             db.add(Partnership(
@@ -373,6 +383,106 @@ async def attach_innings_detail(db: AsyncSession, org_id, game_id, scorecard: di
                 runs=p.get("runs") or 0, batter1_runs=p.get("batter1_runs"),
                 batter2_runs=p.get("batter2_runs"), is_club_innings=is_club_innings))
             n["partnerships"] += 1
+    await db.flush()
+    return n
+
+
+async def complete_innings_detail(db: AsyncSession, org_id, game_id, scorecard: dict, resolve) -> dict:
+    """Bring a stored game's fall of wickets and stands up to what a COMPLETED card holds.
+
+    `attach_innings_detail` writes an innings only where the game has NONE, so a game stored with a
+    short fall of wickets (the scorer had entered wicket 1 of 4, or sync read the card in play) kept
+    that one row and the stand worked out from it for ever: the 208-run second-wicket stand of
+    Applecross 10th v CVPCC was on Cricket Australia's card and in no record here.
+
+    Per innings, only for a card CA calls COMPLETED:
+      * a wicket the card has and the game lacks is added (same resolution as sync);
+      * a stand the card's full fall of wickets gives, with one of the club's own players in it, at a
+        wicket the game holds no stand for, is added;
+      * a stand already held for the same two batters has its runs and the batters' scores put right
+        (they were worked out while the card was short, or while a batter was still in).
+    Nothing is deleted, no row of another pair is touched, and an innings the club typed its own fall
+    of wickets for (`fow_overrides`) is left to that. A second call changes nothing.
+    Returns the counts; does not commit.
+    """
+    n = {"fow": 0, "partnerships": 0, "partnership_figures": 0}
+    if str(scorecard.get("status") or "").strip().upper() != "COMPLETED":
+        return n
+    team = _our_team(scorecard, org_id)
+    if not team:
+        return n
+    gid = game_id if isinstance(game_id, uuid.UUID) else uuid.UUID(str(game_id))
+    from app.services import fow_overrides   # imports this module, so not at the top
+    typed = set(await fow_overrides.load(db, org_id, gid))
+
+    our_pids: set = set()
+    roster_guids: set = set()
+    for p in team.get("players") or []:
+        guid = p.get("participantId") or ""
+        if not guid:
+            continue
+        roster_guids.add(guid)
+        pid = resolve(guid)
+        if pid is not None:
+            our_pids.add(pid)
+
+    stored_fow: dict = {}
+    for inn_no, wkt in (await db.execute(text(
+            "SELECT innings_number, wicket_number FROM fall_of_wickets WHERE game_id = :g"), {"g": gid})).all():
+        stored_fow.setdefault(inn_no, set()).add(wkt)
+    stored_stands: dict = {}
+    for r in (await db.execute(text(
+            "SELECT id, innings_number, wicket_number, batter1_id, batter2_id, runs, batter1_runs, batter2_runs "
+            "FROM partnerships WHERE game_id = :g ORDER BY id"), {"g": gid})).mappings().all():
+        stored_stands.setdefault((r["innings_number"], r["wicket_number"]), []).append(r)
+
+    for inn in scorecard.get("innings") or []:
+        inn_num = inn.get("inningsOrder") or inn.get("inningsNumber") or 1
+        if inn_num in typed:
+            continue
+        fow_rows = inn.get("fallOfWickets") or []
+        have = stored_fow.get(inn_num, set())
+        added: set = set()
+        for row in sorted(fow_rows, key=lambda f: f.get("order") or 99):
+            wkt = row.get("order")
+            if wkt is None or wkt in have or wkt in added:
+                continue
+            pid = resolve(row.get("participantId") or "") if row.get("participantId") else None
+            if pid is not None and pid not in our_pids:
+                pid = None  # an opposition batter who is also in our players table
+            db.add(FallOfWicket(
+                game_id=gid, innings_number=inn_num, wicket_number=wkt,
+                score_at_fall=row.get("runs"), player_id=pid, batter_name=row.get("playerShortName")))
+            added.add(wkt)
+            n["fow"] += 1
+
+        is_club_innings = is_club_innings_of(inn, team, resolve, our_pids)
+        for p in _derive_partnerships_grassroots(inn.get("batting") or [], fow_rows):
+            b1_id, b2_id, b1_name, b2_name = _stand_batters(p, resolve, our_pids, roster_guids)
+            if not b1_id and not b2_id and not b1_name and not b2_name:
+                continue
+            held = stored_stands.get((inn_num, p["wicket_number"]))
+            if not held:
+                db.add(Partnership(
+                    game_id=gid, innings_number=inn_num, wicket_number=p["wicket_number"],
+                    batter1_id=b1_id, batter2_id=b2_id, batter1_name=b1_name, batter2_name=b2_name,
+                    runs=p.get("runs") or 0, batter1_runs=p.get("batter1_runs"),
+                    batter2_runs=p.get("batter2_runs"), is_club_innings=is_club_innings))
+                n["partnerships"] += 1
+                continue
+            new = {"runs": p.get("runs") or 0, "batter1_runs": p.get("batter1_runs"),
+                   "batter2_runs": p.get("batter2_runs")}
+            for r in held:
+                # Only the same two batters, in the same seats, and only when both are players we hold:
+                # a stand of another pair (or a fill-in held by name) is not ours to restate.
+                if not (b1_id and b2_id and r["batter1_id"] == b1_id and r["batter2_id"] == b2_id):
+                    continue
+                if all(r[k] == v for k, v in new.items()):
+                    continue
+                await db.execute(text(
+                    "UPDATE partnerships SET runs = :runs, batter1_runs = :batter1_runs, "
+                    "batter2_runs = :batter2_runs WHERE id = :id"), {**new, "id": r["id"]})
+                n["partnership_figures"] += 1
     await db.flush()
     return n
 
@@ -469,6 +579,9 @@ async def reread_stored_game(db: AsyncSession, org_id, game_id, scorecard: dict,
         return None
     n = await attach(db, org_id, gid, scorecard, wanted)
     n.update(await attach_innings_detail(db, org_id, gid, scorecard, resolve))
+    # A game whose fall of wickets was short when stored is completed from the finished card.
+    for k, v in (await complete_innings_detail(db, org_id, gid, scorecard, resolve)).items():
+        n[k] = n.get(k, 0) + v
     if not sum(n.values()):
         await db.rollback()
         return None
@@ -538,6 +651,43 @@ async def recent_unfinished_games(db: AsyncSession, org_id, days: int = REREAD_D
            AND UPPER(g.status) NOT IN ('COMPLETED', 'ABANDONED', 'CANCELLED')
            AND EXISTS (SELECT 1 FROM game_appearances ga JOIN players p ON p.id = ga.player_id
                         WHERE ga.game_id = g.id AND p.organisation_id = CAST(:org AS UUID))
+         ORDER BY g.played_at DESC
+         LIMIT :cap
+    """), {"org": str(org_id), "days": days, "cap": MAX_REREAD})
+    return {r[0] for r in res.all()}
+
+
+async def recent_games_short_fow(db: AsyncSession, org_id, days: int = REREAD_DAYS) -> set:
+    """Match ids of recent COMPLETED games whose stored fall of wickets is shorter than the wickets the
+    card said fell in an innings, which the run reads again so `complete_innings_detail` can fill it in.
+
+    `recent_games_without_detail` only sees a game with NO fall of wickets or stands. A game stored with
+    wicket 1 of 4 (the scorer had not finished, or the card was read in play) has rows, so no run ever
+    asked for it again and its later wickets and stands never arrived. The wickets the card held when the
+    game was stored sit in `games.innings_totals`. A game whose scorers never enter more than part of the
+    list is read again each run for the fortnight and no longer: same fortnight and same cap as the other
+    selectors. A game the club typed its own fall of wickets for is left out (the typed rows win).
+    """
+    res = await db.execute(text("""
+        SELECT g.id::text
+          FROM games g
+          LEFT JOIN grades gr ON gr.id = g.grade_id
+          LEFT JOIN seasons s ON s.id = gr.season_id
+         WHERE g.played_at >= CURRENT_DATE - CAST(:days AS INTEGER)
+           AND g.played_at <= CURRENT_DATE
+           AND (g.home_org_id = CAST(:org AS UUID) OR g.away_org_id = CAST(:org AS UUID)
+                OR s.organisation_id = CAST(:org AS UUID))
+           AND UPPER(COALESCE(g.status, '')) = 'COMPLETED'
+           AND g.innings_totals IS NOT NULL
+           AND jsonb_typeof(g.innings_totals) = 'array'
+           AND EXISTS (
+                SELECT 1 FROM jsonb_array_elements(g.innings_totals) t
+                 WHERE (t->>'wickets') ~ '^[0-9]+$' AND (t->>'innings_number') ~ '^[0-9]+$'
+                   AND (t->>'wickets')::int > (
+                        SELECT COUNT(DISTINCT f.wicket_number) FROM fall_of_wickets f
+                         WHERE f.game_id = g.id AND f.innings_number = (t->>'innings_number')::int))
+           AND NOT EXISTS (SELECT 1 FROM fow_overrides o
+                            WHERE o.game_id = g.id AND o.organisation_id = CAST(:org AS UUID))
          ORDER BY g.played_at DESC
          LIMIT :cap
     """), {"org": str(org_id), "days": days, "cap": MAX_REREAD})

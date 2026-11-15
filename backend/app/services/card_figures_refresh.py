@@ -23,8 +23,9 @@ disagrees with, in place. Rules:
   one for the game, because a second innings fielded is its own row (see `fantasy_engine`).
 * A figure that already matches is not written, so a second run changes nothing.
 
-Not rebuilt: fall of wickets, partnerships, `bowler_wickets` and `games.innings_totals`, which are
-written once. A Full Rebuild still rewrites those.
+Not rebuilt here: fall of wickets, partnerships, `bowler_wickets` and `games.innings_totals`, which are
+written once. A short fall of wickets and its stands are completed from the same COMPLETED card by
+`participant_relink.complete_innings_detail`; a Full Rebuild still rewrites the rest.
 """
 from __future__ import annotations
 

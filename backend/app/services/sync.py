@@ -2215,6 +2215,13 @@ async def sync_grassroots_game_level_data(
                 reread_ids = await participant_relink.recent_games_without_detail(_s, org_uuid)
                 # A game stored while CA still had it in play: read again to put its figures right.
                 reread_ids |= await participant_relink.recent_unfinished_games(_s, org_uuid)
+                # A finished game stored with only part of its fall of wickets: read again so the
+                # wickets and stands the finished card holds are filled in.
+                try:
+                    reread_ids |= await participant_relink.recent_games_short_fow(_s, org_uuid)
+                except Exception as _e:
+                    await _s.rollback()
+                    logger.warning(f"GR-sync: short fall of wickets check failed: {_e}")
                 # A finished game that holds a WIN or LOSS and no winner reads backwards to the
                 # other club (services/game_winner). Any age: the backfill below fills it in.
                 try:
@@ -2223,7 +2230,7 @@ async def sync_grassroots_game_level_data(
                     await _s.rollback()
                     logger.warning(f"GR-sync: missing-winner check failed: {_e}")
             if reread_ids:
-                logger.info(f"GR-sync: {len(reread_ids)} game(s) will be re-read (no player detail, unfinished, or no winner)")
+                logger.info(f"GR-sync: {len(reread_ids)} game(s) will be re-read (no player detail, unfinished, short fall of wickets, or no winner)")
         except Exception as _e:
             logger.warning(f"GR-sync: recent-game check failed: {_e}")
             reread_ids = set()
