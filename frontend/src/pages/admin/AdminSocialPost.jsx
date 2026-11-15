@@ -1820,7 +1820,9 @@ export default function AdminSocialPost() {
   // Shade the row of the player who is in the photo, so the post says whose
   // picture it is. Off until asked for: a post made before this existed, or one
   // whose photo is not of anyone on the list, must not suddenly mark a row.
-  const [markHero, setMarkHero] = useState(false)
+  // null = automatic: on when the Milestone watch picked the hero player, off otherwise.
+  // true/false is the club's own choice and is never overridden.
+  const [markHero, setMarkHero] = useState(null)
   // The split poster's pale panel. '' = derive it from the club accent.
   const [splitPanel, setSplitPanel] = useState('')
   // The Match Day Card's look: background photo, wash, corner and panel colours,
@@ -3645,12 +3647,7 @@ export default function AdminSocialPost() {
   if (HERO_FOCUS_TEMPLATES.includes(templateId)) {
     extraProps.heroFocus = heroFocus
   }
-  if (HERO_PLAYER_TEMPLATES.includes(templateId) && heroPlayerId) {
-    extraProps.featuredId = heroPlayerId
-  }
-  if (HERO_MARK_TEMPLATES.includes(templateId)) {
-    extraProps.markHero = markHero
-  }
+  // featuredId and markHero are set below, once the Milestone watch answer is known.
   if (templateId === 'T11') {
     extraProps.panelColor = splitPanel || undefined
     extraProps.background = bgActive ? bgStyle : null
@@ -3711,6 +3708,33 @@ export default function AdminSocialPost() {
     : null
   // Absent when there is nothing to say, so a lineup without milestones is as it was.
   if (watchItems.length) extraProps.watch = watchItems
+
+  // Whose photo fills the hero slot. Left on Auto, a player the Milestone watch has badged takes it
+  // (certain first, then closest to landing, the strip's own ranking) so the post leads with the
+  // milestone. Only a badged player with a photo is used, and never over an uploaded hero image or a
+  // Hero Player the club picked. Otherwise the layout's own default (captain, else first) stands.
+  const milestoneHero = (() => {
+    if (heroPlayerId || heroImage.blobUrl || !watchLive || !HERO_PLAYER_TEMPLATES.includes(templateId)) return null
+    const rank = (b) => [b.certain ? 0 : 1, (b.needed || 0) / Math.max(1, b.window || 1), b.needed || 0]
+    let best = null
+    for (const tp of templatePlayers) {
+      if (!tp.milestone || !heroSrcOf(tp)) continue
+      const r = rank(tp.milestone)
+      if (!best || r[0] < best.r[0] || (r[0] === best.r[0] && (r[1] < best.r[1] || (r[1] === best.r[1] && r[2] < best.r[2])))) best = { tp, r }
+    }
+    return best ? { id: best.tp._id, name: best.tp._name } : null
+  })()
+  const heroIdEff = heroPlayerId || milestoneHero?.id || ''
+  const markHeroOn = markHero ?? !!milestoneHero
+  // A badged player exists but none of them has a photo to lead with: say so on screen.
+  const milestoneHeroMissing = !!watchLive && !heroPlayerId && !heroImage.blobUrl && !milestoneHero
+    && HERO_PLAYER_TEMPLATES.includes(templateId) && templatePlayers.some((tp) => tp.milestone)
+  if (HERO_PLAYER_TEMPLATES.includes(templateId) && heroIdEff) {
+    extraProps.featuredId = heroIdEff
+  }
+  if (HERO_MARK_TEMPLATES.includes(templateId)) {
+    extraProps.markHero = markHeroOn
+  }
 
   const matchData = {
     competition: match.competition || 'COMPETITION',
@@ -3788,7 +3812,7 @@ export default function AdminSocialPost() {
     post: postBundle,
     // The photo a template's featured-photo area shows: the Hero Image panel's upload, else the chosen
     // (or captain's) headshot. '' once players are held but none has a photo; null before any.
-    featuredPhoto: templatePlayers.length ? (heroImage.blobUrl || featuredOf(templatePlayers, heroPlayerId)?.headshot || '') : (heroImage.blobUrl || null),
+    featuredPhoto: templatePlayers.length ? (heroImage.blobUrl || featuredOf(templatePlayers, heroIdEff)?.headshot || '') : (heroImage.blobUrl || null),
     marksOn: templateMarks,
     // Crests a template's logo areas show: the club's own, and the opposition's when the fixture gave one.
     teamLogo: team.logo || '', opponentLogo: opponent.logo || null,
@@ -3957,7 +3981,7 @@ export default function AdminSocialPost() {
     setHeroMode('player')
     setHeroPlayerId('')
     setShotChoice('')
-    setMarkHero(false)
+    setMarkHero(null)
     setSplitPanel('')
     setMilestone({ value: '', unit: 'GAMES', reason: '', detail: '', playerIdx: 0 })
     setAnnouncement({ kind: 'APPOINTMENT', headline: 'NAMED CAPTAIN', subheadline: 'FOR THE 2025-26 SEASON', playerIdx: 0 })
@@ -6033,7 +6057,7 @@ export default function AdminSocialPost() {
                       onChange={e => setHeroPlayerId(e.target.value)}
                       className="w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-sm text-pb-text"
                     >
-                      <option value="">Auto — captain, else 1st in order</option>
+                      <option value="">{milestoneHero ? `Auto: ${milestoneHero.name}, closest to a milestone` : 'Auto — captain, else 1st in order'}</option>
                       {selectedPlayers.map(sp => (
                         <option key={sp.player.id} value={sp.player.id}>
                           {(sp.player.display_name || sp.player.name)}{sp.player.photo_url ? '' : ' · no photo'}
@@ -6043,9 +6067,14 @@ export default function AdminSocialPost() {
                     <p className="text-[11px] text-pb-faintest mt-1">
                       {heroImage.blobUrl ? 'Uploaded Hero Image below overrides this.' : 'Pick whose photo fills the hero slot. Upload below to override.'}
                     </p>
+                    {milestoneHeroMissing && (
+                      <p className="text-[11px] text-pb-faintest mt-1" data-testid="milestone-hero-nophoto">
+                        Someone in this XI has a milestone coming, but none of them has a photo, so the hero is the captain. Pick a player or upload a photo to lead with it.
+                      </p>
+                    )}
                     {HERO_MARK_TEMPLATES.includes(templateId) && (
                       <label className="flex items-start gap-2 mt-2 cursor-pointer" data-testid="mark-hero">
-                        <input type="checkbox" checked={markHero} onChange={e => setMarkHero(e.target.checked)} className="mt-0.5" />
+                        <input type="checkbox" checked={markHeroOn} onChange={e => setMarkHero(e.target.checked)} className="mt-0.5" />
                         <span className="text-[11px] text-pb-dim leading-relaxed">
                           Mark the player in the photo
                           <span className="block text-pb-faintest">Shades their row in the list, so the post shows whose picture it is.</span>
@@ -6106,7 +6135,7 @@ export default function AdminSocialPost() {
                         there is no upload to override it. */}
                     {HERO_FOCUS_TEMPLATES.includes(templateId) && (
                       <HeroFocusControl
-                        src={heroImage.blobUrl || heroSrcOf(featuredOf(templatePlayers, heroPlayerId)) || null}
+                        src={heroImage.blobUrl || heroSrcOf(featuredOf(templatePlayers, heroIdEff)) || null}
                         value={heroFocus}
                         onChange={setHeroFocus}
                         defaults={DEFAULT_HERO_FOCUS}
