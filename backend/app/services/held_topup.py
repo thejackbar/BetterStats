@@ -40,7 +40,7 @@ from app.services.club_grades import club_game_sql
 _NOT_AN_INNINGS = "LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')"
 
 BAT_FIELDS = ("innings", "runs", "not_outs", "fifties", "hundreds", "ducks", "fours", "sixes")
-BOWL_FIELDS = ("innings", "wickets", "runs", "maidens", "balls", "five_fors")
+BOWL_FIELDS = ("innings", "wickets", "runs", "maidens", "balls", "five_fors", "wides", "no_balls")
 FIELD_FIELDS = ("catches", "catches_wk", "run_outs", "stumpings")
 
 
@@ -104,7 +104,8 @@ async def _season_topups(
                COALESCE(SUM(pss.bowling_innings), 0) AS innings, COALESCE(SUM(pss.wickets), 0) AS wickets,
                COALESCE(SUM(pss.runs_conceded), 0) AS runs, COALESCE(SUM(pss.maidens), 0) AS maidens,
                COALESCE(SUM(pss.bowling_balls), 0) AS balls,
-               COALESCE(SUM(pss.five_wicket_innings), 0) AS five_fors
+               COALESCE(SUM(pss.five_wicket_innings), 0) AS five_fors,
+               COALESCE(SUM(pss.wides), 0) AS wides, COALESCE(SUM(pss.no_balls), 0) AS no_balls
         FROM v_effective_player_season_stats pss
         LEFT JOIN season_fold sf ON sf.raw_id = pss.season_id
         WHERE pss.player_id = CAST(:pid AS UUID) AND pss.season_id IS NOT NULL
@@ -142,7 +143,8 @@ async def _season_topups(
                COALESCE(SUM(bs.runs), 0) AS runs, COALESCE(SUM(bs.maidens), 0) AS maidens,
                COALESCE(SUM(FLOOR(bs.overs)::integer * 6
                             + ROUND((bs.overs - FLOOR(bs.overs)) * 10)::integer), 0) AS balls,
-               COUNT(*) FILTER (WHERE bs.wickets >= 5) AS five_fors
+               COUNT(*) FILTER (WHERE bs.wickets >= 5) AS five_fors,
+               COALESCE(SUM(bs.wides), 0) AS wides, COALESCE(SUM(bs.no_balls), 0) AS no_balls
         FROM v_effective_bowling_spells bs
         JOIN v_effective_games g ON g.id = bs.game_id
         LEFT JOIN season_fold sf ON sf.raw_id = g.season_id
@@ -288,6 +290,9 @@ def add_to_bowling(career: dict, topups: dict) -> Optional[dict]:
     career["total_maidens"] = _i(career.get("total_maidens")) + total["maidens"]
     career["five_fors"] = _i(career.get("five_fors")) + total["five_fors"]
     career["bowling_innings"] = _i(career.get("bowling_innings")) + total["innings"]
+    career["total_wides"] = _i(career.get("total_wides")) + total["wides"]
+    career["total_no_balls"] = _i(career.get("total_no_balls")) + total["no_balls"]
+    career["total_balls"] = _i(career.get("total_balls")) + total["balls"]
     balls = _balls_of(career.get("total_overs")) + total["balls"]
     career["total_overs"] = _overs_of(balls)
     wk = career["total_wickets"]

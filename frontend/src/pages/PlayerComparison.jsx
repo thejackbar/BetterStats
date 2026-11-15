@@ -8,7 +8,7 @@ import ClubPinGate from './ClubPinGate'
 import { PageHeader, PbSpinner } from '../lib/presskit'
 import { useNameFormat, nameMatchesSearch } from '../lib/nameFormat'
 import Dropdown from '../components/Dropdown'
-import { fmt2, fmtCount } from '../lib/cricketFormat'
+import { fmt2, fmtCount, fmtOvers, ballsToOvers } from '../lib/cricketFormat'
 import { useSectionNames } from '../lib/sectionNames'
 
 // Rate metrics → always 2 decimals; every other (integer count) metric →
@@ -16,8 +16,48 @@ import { useSectionNames } from '../lib/sectionNames'
 const RATE_KEYS = new Set(['average', 'strike_rate', 'economy', 'bowling_strike_rate'])
 function formatMetric(metric, v) {
   if (v == null) return '—'
+  if (metric.fmt) return metric.fmt(v)
   if (RATE_KEYS.has(metric.key)) return fmt2(v)
   return fmtCount(v)
+}
+
+// A metric may carry its own reader (`get`), a number to colour by (`sort`) and
+// a formatter (`fmt`); without them it is a plain number under `key`.
+// `higher: null` means neither end is better (overs bowled), so no colouring.
+function readMetric(metric, obj) {
+  if (!obj) return null
+  const v = metric.get ? metric.get(obj) : obj[metric.key]
+  return v ?? null
+}
+
+// Overs from balls bowled when the API gives them, because career overs added
+// as decimals drift (10.4 + 10.4 is 21.2 overs, not 20.8). Older payloads and
+// the legacy season sum fall back to the stored overs figure.
+function oversOf(o) {
+  if (o.total_balls != null && (Number(o.total_balls) > 0 || Number(o.total_overs || 0) === 0)) {
+    return ballsToOvers(o.total_balls)
+  }
+  return o.total_overs != null ? fmtOvers(o.total_overs) : null
+}
+
+// Best figures as the actual spell, "5/28". Wickets decide, fewest runs breaks a
+// tie. A career that only knows a wicket count (a typed adjustment) reads
+// "N wkts" and ranks below real figures with the same wickets.
+function figuresOf(o) {
+  const m = typeof o.best_bowling_figures === 'string' && o.best_bowling_figures.match(/^(\d+)[-/](\d+)$/)
+  if (m) return { w: Number(m[1]), r: Number(m[2]), text: `${m[1]}/${m[2]}` }
+  if (o.best_figures_wickets != null) {
+    return { w: Number(o.best_figures_wickets), r: null, text: `${fmtCount(o.best_figures_wickets)} wkts` }
+  }
+  return null
+}
+const figuresRank = (f) => f.w * 100000 - (f.r ?? 99999)
+
+// Wides plus no-balls. Null when the scorer recorded neither, so a card that
+// does not track extras shows a dash, not a flattering zero.
+function extrasOf(o) {
+  if (o.total_wides == null && o.total_no_balls == null) return null
+  return Number(o.total_wides || 0) + Number(o.total_no_balls || 0)
 }
 
 const MAX_PLAYERS = 5
@@ -37,13 +77,18 @@ const BATTING_METRICS = [
 ]
 
 const BOWLING_METRICS = [
-  { key: 'total_wickets',       label: 'WICKETS',      higher: true  },
-  { key: 'average',             label: 'BOWLING AVG',  higher: false },
-  { key: 'economy',             label: 'ECONOMY',      higher: false },
-  { key: 'best_figures_wickets',label: 'BEST FIGURES', higher: true  },
-  { key: 'five_fors',           label: 'FIVE-FORS',    higher: true  },
-  { key: 'total_maidens',       label: 'MAIDENS',      higher: true  },
-  { key: 'bowling_strike_rate', label: 'BOWL S/R',     higher: false },
+  { key: 'overs',               label: 'OVERS',         higher: null,  get: oversOf, fmt: String },
+  { key: 'total_wickets',       label: 'WICKETS',       higher: true  },
+  { key: 'total_runs',          label: 'RUNS CONCEDED', higher: null  },
+  { key: 'average',             label: 'BOWLING AVG',   higher: false },
+  { key: 'economy',             label: 'ECONOMY',       higher: false },
+  { key: 'bowling_strike_rate', label: 'BOWL S/R',      higher: false },
+  { key: 'best_figures',        label: 'BEST FIGURES',  higher: true,  get: figuresOf, sort: figuresRank, fmt: f => f.text },
+  { key: 'five_fors',           label: 'FIVE-FORS',     higher: true  },
+  { key: 'total_maidens',       label: 'MAIDENS',       higher: true  },
+  { key: 'total_wides',         label: 'WIDES',         higher: false },
+  { key: 'total_no_balls',      label: 'NO BALLS',      higher: false },
+  { key: 'extras',              label: 'EXTRAS',        higher: false, get: extrasOf },
 ]
 
 const FIELDING_METRICS = [
@@ -211,6 +256,7 @@ function filterCaption(filterMode, seasons, appliedStart, appliedEnd) {
 // Returns 'best' | 'worst' | null for each value in the array.
 // Only marks unique best/worst (ties get null).
 function getRowHighlights(values, higher) {
+  if (higher == null) return values.map(() => null)
   const nums = values.map(v => {
     const n = parseFloat(v)
     return isNaN(n) ? null : n
@@ -545,9 +591,12 @@ export default function PlayerComparison() {
                         const s = statsMap[p.id]
                         if (!s) return null
                         const obj = metric.src === 'bat' ? s.bat : metric.src === 'bowl' ? s.bowl : s.field
-                        return obj?.[metric.key] ?? null
+                        return readMetric(metric, obj)
                       })
-                      const highlights = getRowHighlights(rawValues, metric.higher)
+                      const highlights = getRowHighlights(
+                        metric.sort ? rawValues.map(v => (v == null ? null : metric.sort(v))) : rawValues,
+                        metric.higher,
+                      )
 
                       return (
                         <tr
@@ -601,6 +650,11 @@ export default function PlayerComparison() {
         {hasEnough && customReady && !anyLoading && (
           <p className="text-center text-pb-faintest font-mono text-[10px] mt-3 tracking-wide2">
             GREEN = BEST · RED = WORST · {filterCaption(filterMode, seasons, appliedStart, appliedEnd)}
+          </p>
+        )}
+        {hasEnough && customReady && !anyLoading && activeTab === 'bowling' && (
+          <p className="text-center text-pb-faintest text-[11px] mt-1">
+            Wides and no balls only count where the scorer recorded them. Overs and runs conceded are not coloured.
           </p>
         )}
       </main>

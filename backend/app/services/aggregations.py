@@ -224,6 +224,8 @@ async def _career_residuals(
                 COALESCE(SUM(pss.bowling_balls), 0) AS bowling_balls,
                 COALESCE(SUM(pss.maidens), 0) AS total_maidens,
                 COALESCE(SUM(pss.five_wicket_innings), 0) AS five_fors,
+                COALESCE(SUM(pss.wides), 0) AS bowling_wides,
+                COALESCE(SUM(pss.no_balls), 0) AS bowling_no_balls,
                 MAX(pss.best_bowling_wickets) AS best_bowling_wickets,
                 COALESCE(SUM(pss.catches), 0) AS total_catches,
                 COALESCE(SUM(pss.catches_wk), 0) AS total_catches_wk,
@@ -242,6 +244,18 @@ async def _career_residuals(
 
 def _n(value) -> int:
     return int(value or 0)
+
+
+def _extras_sum(*parts) -> Optional[int]:
+    """Sum wides or no-balls from several sources, or None when none recorded any.
+
+    A manual spell with a NULL count means the scorer did not track it, which is
+    different from a tracked zero. An aggregate source can only say 0, so a 0
+    there is passed in as None by the caller and cannot turn "not tracked" into
+    a figure.
+    """
+    seen = [int(p) for p in parts if p is not None]
+    return sum(seen) if seen else None
 
 
 def _ratio(numerator, denominator, places: int = 2):
@@ -725,6 +739,11 @@ async def get_career_bowling(
             "total_runs": conceded,
             "five_fors": _n(pg.get("five_fors")) + _n(r.get("five_fors")),
             "bowling_strike_rate": _ratio(cov_balls, cov_wkts),
+            # Balls bowled, so a screen can add overs in cricket notation
+            # without summing 10.4 + 10.4 as decimals.
+            "total_balls": balls,
+            "total_wides": _extras_sum(pg.get("total_wides"), r.get("bowling_wides") or None),
+            "total_no_balls": _extras_sum(pg.get("total_no_balls"), r.get("bowling_no_balls") or None),
             "games": matches + _n(r.get("games")),
         }
     season_ids = await resolve_season_filter_no_org(session, season_id)
@@ -759,6 +778,11 @@ async def get_career_bowling(
                 COALESCE(SUM(pss.runs_conceded), 0) AS total_runs,
                 COALESCE(SUM(pss.five_wicket_innings), 0) AS five_fors,
                 COALESCE(SUM(pss.bowling_innings), 0) AS bowling_innings,
+                COALESCE(SUM(pss.wides), 0) AS total_wides,
+                COALESCE(SUM(pss.no_balls), 0) AS total_no_balls,
+                -- Each season's overs are cricket notation, so convert row by row
+                -- before adding (rule 7); SUM(overs) above is the legacy figure.
+                COALESCE(SUM(FLOOR(pss.overs) * 6 + ROUND((pss.overs - FLOOR(pss.overs)) * 10)), 0)::bigint AS total_balls,
                 ROUND(SUM(pss.bowling_balls)::numeric / NULLIF(SUM(pss.wickets), 0), 2) AS bowling_strike_rate
             FROM players p
             LEFT JOIN v_effective_player_season_stats pss ON pss.player_id = p.id{season_clause}
@@ -1024,7 +1048,7 @@ async def get_career_bowling_from_spells(
         game_filter = "AND bs.game_id IN (SELECT game_id FROM date_filtered_games)"
 
     ctes.append(f"""qualifying AS (
-        SELECT bs.wickets, bs.runs, bs.maidens, bs.overs, bs.game_id
+        SELECT bs.wickets, bs.runs, bs.maidens, bs.overs, bs.game_id, bs.wides, bs.no_balls
         FROM v_effective_bowling_spells bs
         JOIN v_effective_games g ON g.id = bs.game_id
         WHERE bs.player_id = CAST(:pid AS UUID)
@@ -1046,6 +1070,10 @@ async def get_career_bowling_from_spells(
             -- too; a caller switching between the two must not have to rename it.
             COALESCE(SUM(runs), 0) AS total_runs,
             COALESCE(SUM(CASE WHEN wickets >= 5 THEN 1 ELSE 0 END), 0) AS five_fors,
+            -- NULL (not 0) when no spell in the window recorded the count: a
+            -- manual spell's NULL means the scorer did not track it.
+            SUM(wides) AS total_wides,
+            SUM(no_balls) AS total_no_balls,
             COUNT(DISTINCT game_id) AS games,
             COUNT(*) AS spells,
             {rc.bowling_strike_rate_sql('q')} AS bowling_strike_rate,
