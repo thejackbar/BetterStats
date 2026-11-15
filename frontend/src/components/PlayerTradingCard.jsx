@@ -114,20 +114,26 @@ const PANEL_W = CARD_W - FRAME * 2
 const PANEL_H = CARD_H - FRAME * 2
 const BAND_H = 92
 
-// Longer figures get smaller type so six of them always fit along the band, in the club's font or a fallback.
-const figureSize = (v) => { const n = String(v).length; return n <= 2 ? 27 : n === 3 ? 24 : n === 4 ? 21 : n === 5 ? 18 : 15 }
+// The six figures share ONE size so the band reads as a row, not a ladder. The size follows the longest figure on
+// the card (a 6-character career total needs less room than "217"), so six of them always fit, in the club's font
+// or a fallback.
+const figureSize = (items) => {
+  const n = Math.max(...items.map(i => String(i.value).length))
+  return n <= 3 ? 26 : n === 4 ? 23 : n === 5 ? 21 : n === 6 ? 18 : 15
+}
 
 function Band({ items, accent }) {
   const ink = onColor(accent)
+  const size = figureSize(items)
   return (
     <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: BAND_H }}>
       <div style={{ position: 'absolute', inset: 0, background: `linear-gradient(180deg, ${accent}, color-mix(in srgb, ${accent} 78%, #000))`, clipPath: 'polygon(0 22%, 100% 0, 100% 100%, 0 100%)' }} />
-      <div style={{ position: 'absolute', left: 8, right: 8, bottom: 12, display: 'flex' }}>
+      <div style={{ position: 'absolute', left: 4, right: 4, bottom: 12, display: 'flex' }}>
         {items.map((it, i) => (
-          <div key={it.label} style={{ flex: 1, minWidth: 0, overflow: 'hidden', textAlign: 'center', color: ink, borderLeft: i ? `1px solid ${ink === '#fff' ? 'rgba(255,255,255,.35)' : 'rgba(5,10,12,.3)'}` : undefined }}>
-            <div style={{ font: `800 ${figureSize(it.value)}px/1 ${it.display}`, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{it.value}</div>
+          <div key={it.label} data-band-item style={{ flex: '1 1 auto', minWidth: 0, padding: '0 3px', textAlign: 'center', color: ink, borderLeft: i ? `1px solid ${ink === '#fff' ? 'rgba(255,255,255,.35)' : 'rgba(5,10,12,.3)'}` : undefined }}>
+            <div data-band-figure style={{ font: `800 ${size}px/1 ${it.display}`, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{it.value}</div>
             <div style={{ height: 2, width: 22, background: ink, opacity: 0.8, margin: '5px auto 4px', borderRadius: 1 }} />
-            <div style={{ font: `700 9px ${SANS}`, letterSpacing: 0.6, textTransform: 'uppercase', opacity: 0.85 }}>{it.label}</div>
+            <div style={{ font: `700 8px ${SANS}`, letterSpacing: 0.3, textTransform: 'uppercase', opacity: 0.85, whiteSpace: 'nowrap' }}>{it.label}</div>
           </div>
         ))}
       </div>
@@ -135,17 +141,21 @@ function Band({ items, accent }) {
   )
 }
 
-// Up to six headline figures: the ones this player has.
-function bandItems({ cb, cbw, cf }, display) {
-  const catches = cf ? (cf.total_catches_non_wk ?? cf.total_catches ?? 0) + (cf.total_catches_wk ?? 0) : 0
-  return [
-    cb?.games != null && { label: 'Matches', value: String(cb.games) },
-    cb?.total_runs != null && { label: 'Runs', value: fmtCount(cb.total_runs) },
-    cb?.high_score != null && { label: 'HS', value: String(cb.high_score) },
-    cb?.average != null && { label: 'Average', value: fmt2(cb.average) },
-    cbw?.total_wickets > 0 && { label: 'Wickets', value: fmtCount(cbw.total_wickets) },
-    catches > 0 && { label: 'Catches', value: fmtCount(catches) },
-  ].filter(Boolean).slice(0, 6).map(i => ({ ...i, display }))
+// The six headline figures, always the same six in the same order. One this player has no figure for reads "-"
+// (a batter's bowling average), and a card with nothing at all gets no band.
+export function bandItems({ cb, cbw, cf }, display) {
+  const dismissals = cf
+    ? (cf.total_dismissals ?? ((cf.total_catches_non_wk ?? cf.total_catches ?? 0) + (cf.total_catches_wk ?? 0) + (cf.total_run_outs ?? 0) + (cf.total_stumpings ?? 0)))
+    : null
+  const items = [
+    { label: 'Matches', value: cb?.games != null ? fmtCount(cb.games) : '-' },
+    { label: 'Runs', value: cb?.total_runs != null ? fmtCount(cb.total_runs) : '-' },
+    { label: 'Batting Av', value: cb?.average != null ? fmt2(cb.average) : '-' },
+    { label: 'Wickets', value: cbw?.total_wickets != null ? fmtCount(cbw.total_wickets) : '-' },
+    { label: 'Bowling Av', value: cbw?.average != null && cbw.total_wickets > 0 ? fmt2(cbw.average) : '-' },
+    { label: 'Dismissals', value: dismissals != null ? fmtCount(dismissals) : '-' },
+  ]
+  return items.every(i => i.value === '-') ? [] : items.map(i => ({ ...i, display }))
 }
 
 export function PlayerCardFront({ player, org, accent, display, sponsor, rankings, photoUrl, heroUrl, seasonLabel, cb, cbw, cf }) {
@@ -207,7 +217,7 @@ export function PlayerCardFront({ player, org, accent, display, sponsor, ranking
 // A pill-outlined row of the details sheet: a muted label on the left, the figure on the right.
 function Row({ label, value, accent, strong }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, height: 24, padding: '0 9px', borderRadius: 8, border: `1px solid ${strong ? hexWithAlpha(accent, 0.7) : 'rgba(255,255,255,.28)'}`, background: strong ? hexWithAlpha(accent, 0.16) : 'rgba(5,10,12,.35)' }}>
+    <div data-card-row style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, height: 22, padding: '0 9px', borderRadius: 8, border: `1px solid ${strong ? hexWithAlpha(accent, 0.7) : 'rgba(255,255,255,.28)'}`, background: strong ? hexWithAlpha(accent, 0.16) : 'rgba(5,10,12,.35)' }}>
       <span style={{ font: `600 9px ${SANS}`, letterSpacing: 0.8, textTransform: 'uppercase', color: 'rgba(255,255,255,.7)', whiteSpace: 'nowrap' }}>{label}</span>
       <span style={{ font: `700 13px ${MONO}`, color: strong ? '#fff' : 'rgba(255,255,255,.95)', whiteSpace: 'nowrap' }}>{value ?? '-'}</span>
     </div>
@@ -216,12 +226,12 @@ function Row({ label, value, accent, strong }) {
 
 function Section({ title, rows, accent, display }) {
   return (
-    <div style={{ marginTop: 10 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+    <div style={{ marginTop: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
         <span style={{ font: `700 11px ${display}`, letterSpacing: 2.5, textTransform: 'uppercase', color: accent }}>{title}</span>
         <span style={{ flex: 1, height: 1, background: hexWithAlpha(accent, 0.35) }} />
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
         {rows.map(r => <Row key={r.label} {...r} accent={accent} />)}
       </div>
     </div>
@@ -234,7 +244,13 @@ export function PlayerCardBack({ player, org, accent, display, rankings, photoUr
   const hasBowling = cbw && cbw.total_wickets > 0
   const catches = cf ? (cf.total_catches_non_wk ?? cf.total_catches ?? 0) : 0
   const fieldingHasData = cf && (catches > 0 || (cf.total_catches_wk ?? 0) > 0 || (cf.total_run_outs ?? 0) > 0 || (cf.total_stumpings ?? 0) > 0)
-  const ranks = [['Runs', rankings?.runs_rank], ['Wickets', rankings?.wickets_rank], ['Catches', rankings?.catches_rank]].filter(([, r]) => Number.isInteger(r) && r >= 1)
+  // Every statistic the player is in the club's top 100 for. The server leaves out a rank past 100, a figure of zero
+  // and an average short of the minimum; the check here keeps a stale or odd payload from printing one anyway.
+  const ranks = [
+    ['Matches', rankings?.matches_rank], ['Runs', rankings?.runs_rank], ['Bat avg', rankings?.bat_avg_rank],
+    ['Wickets', rankings?.wickets_rank], ['Bowl avg', rankings?.bowl_avg_rank],
+    ['Dismissals', rankings?.dismissals_rank], ['Catches', rankings?.catches_rank],
+  ].filter(([, r]) => Number.isInteger(r) && r >= 1 && r <= 100)
   const batting = cb && [
     { label: 'Matches', value: cb.games }, { label: 'Innings', value: cb.innings },
     { label: 'Runs', value: cb.total_runs != null ? fmtCount(cb.total_runs) : null, strong: true }, { label: 'High score', value: cb.high_score },
@@ -259,7 +275,7 @@ export function PlayerCardBack({ player, org, accent, display, rankings, photoUr
           <span style={{ flex: 1 }} />
           {org?.logo_url && <img src={org.logo_url} alt="" style={{ width: 26, height: 26, objectFit: 'contain', borderRadius: 4 }} />}
         </div>
-        <div style={{ height: 2, background: `linear-gradient(90deg, ${accent}, transparent)`, margin: '7px 0 10px' }} />
+        <div style={{ height: 2, background: `linear-gradient(90deg, ${accent}, transparent)`, margin: '6px 0 8px' }} />
 
         <div style={{ width: '100%', boxSizing: 'border-box', padding: '6px 12px', borderRadius: 8, border: `1px solid ${hexWithAlpha(accent, 0.7)}`, background: 'rgba(5,10,12,.55)' }}>
           {first && <div style={{ font: `500 italic 11px ${SANS}`, letterSpacing: 1.2, textTransform: 'uppercase', color: 'rgba(255,255,255,.85)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{first}</div>}
@@ -267,8 +283,9 @@ export function PlayerCardBack({ player, org, accent, display, rankings, photoUr
           <div style={{ font: `500 9px ${MONO}`, letterSpacing: 1, textTransform: 'uppercase', color: 'rgba(255,255,255,.6)', marginTop: 3, whiteSpace: 'nowrap' }}>{seasonLabel}</div>
         </div>
         {ranks.length > 0 && (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 8 }}>
-            {ranks.map(([l, r]) => <span key={l} style={{ background: hexWithAlpha(accent, 0.18), border: `1px solid ${hexWithAlpha(accent, 0.5)}`, borderRadius: 5, padding: '1px 7px', font: `600 9.5px ${MONO}`, color: '#fff' }}>{ordinal(r)} {l.toLowerCase()}</span>)}
+          <div data-club-ranks style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 6 }}>
+            <span style={{ flexBasis: '100%', font: `600 8px/10px ${MONO}`, letterSpacing: 1.2, textTransform: 'uppercase', color: 'rgba(255,255,255,.6)' }}>Club top 100</span>
+            {ranks.map(([l, r]) => <span key={l} style={{ background: hexWithAlpha(accent, 0.18), border: `1px solid ${hexWithAlpha(accent, 0.5)}`, borderRadius: 5, padding: '0 5px', font: `600 8.5px/15px ${MONO}`, color: '#fff' }}>{ordinal(r)} {l.toLowerCase()}</span>)}
           </div>
         )}
 

@@ -220,3 +220,4 @@
 | &nbsp;&nbsp;Hamilton's second ask was unmet (v9.64.2) | rules extracted | Rule 6; Verify |
 | &nbsp;&nbsp;The order of the competition pills (v9.65.0) | rules extracted | Rule 32; Verify |
 - A fixture CA marks ABANDONED counts as a match for a named player once play started (a scored innings, a real batting line or a bowling spell); a washout and CANCELLED never do. One predicate: `game_status.abandoned_without_play_sql`, injected into the `superseded_ddl` views as `__OFF_*__` placeholders. `ca_called_off` (COMPLETED, both teams ABANDONED) is deliberately unchanged. Fees follow it (v9.134.5).
+- The share card's band is always Matches, Runs, Batting Av, Wickets, Bowling Av, Dismissals in one font size, and its back lists every club rank within the top 100 (`get_player_rankings`: seven keys, zero never ranked, averages only past 10 innings or 10 wickets). A new figure on the card goes through `bandItems` and the rankings query together (v9.143.12).

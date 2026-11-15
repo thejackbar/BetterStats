@@ -39,7 +39,7 @@ const STATS = (player) => ({
 
 const browser = await chromium.launch(existsSync(EXECUTABLE) ? { executablePath: EXECUTABLE } : {})
 
-async function open({ width = 1000, player = PLAYER, photo = true, hero = false, sponsors = true, ranks = { runs_rank: 1, wickets_rank: 7, catches_rank: 12 } } = {}) {
+async function open({ width = 1000, player = PLAYER, photo = true, hero = false, sponsors = true, ranks = { matches_rank: 3, runs_rank: 1, bat_avg_rank: 44, wickets_rank: 7, bowl_avg_rank: 100, dismissals_rank: 9, catches_rank: 12 } } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: 1000 }, acceptDownloads: true })
   const page = await ctx.newPage()
   const errors = [], reqs = []
@@ -80,7 +80,18 @@ const visibleText = (page) => page.locator('[role="button"][aria-pressed] > div[
   ck('the big number is the best club ranking, labelled', /#1/.test(front) && /CLUB RUNS/.test(front), front)
   ck('the sponsor is named and drawn', /Sponsored by/.test(front) && (await p.page.locator('[role="button"][aria-pressed] img[src="/api/sponsor.svg"]').count()) >= 1)
   ck('the player\'s photo is the card background', (await p.page.locator('[role="button"][aria-pressed] img[src="/api/players/p1/photo"]').count()) >= 1)
-  ck('the front carries a band of headline figures, not the full sheet', /MATCHES/.test(front) && /RUNS/.test(front) && /1,234/.test(front) && /WICKETS/.test(front) && !/BATTING/.test(front) && !/HIGH SCORE/.test(front), front)
+  // The band is six figures in a fixed order, all one size, none clipped.
+  const band = await p.page.locator('[role="button"][aria-pressed] > div[aria-hidden="false"] [data-band-item]').evaluateAll(els => els.map(e => {
+    const f = e.querySelector('[data-band-figure]')
+    const bandBox = e.parentElement.getBoundingClientRect()
+    const r = e.getBoundingClientRect()
+    return { figure: f.textContent, label: e.lastElementChild.textContent, size: getComputedStyle(f).fontSize, fits: e.scrollWidth <= e.clientWidth + 0.5 && f.scrollWidth <= e.clientWidth + 0.5 && r.left >= bandBox.left - 0.5 && r.right <= bandBox.right + 0.5 }
+  }))
+  ck('the band is Matches, Runs, Batting Av, Wickets, Bowling Av, Dismissals', JSON.stringify(band.map(b => b.label)) === JSON.stringify(['Matches', 'Runs', 'Batting Av', 'Wickets', 'Bowling Av', 'Dismissals']), JSON.stringify(band))
+  ck('with the figures behind them (dismissals = catches + run outs + stumpings)', JSON.stringify(band.map(b => b.figure)) === JSON.stringify(['42', '1,234', '34.50', '20', '25.10', '13']), JSON.stringify(band.map(b => b.figure)))
+  ck('every figure is the same size', new Set(band.map(b => b.size)).size === 1, JSON.stringify(band.map(b => b.size)))
+  ck('and none is clipped or outside the band', band.length === 6 && band.every(b => b.fits), JSON.stringify(band))
+  ck('the old HS and Catches figures are gone from the band', !/\bHS\b/.test(front) && !/CATCHES/.test(front) && !/BATTING\n/.test(front.replace(/BATTING AV/g, '')), front)
   const img = await p.page.locator('[role="button"][aria-pressed] > div[aria-hidden="false"] img[src="/api/players/p1/photo"]').boundingBox()
   const cardBox = await p.page.locator('[role="button"][aria-pressed]').boundingBox()
   ck('a headshot is a smaller picture, not the whole card', img && img.width < cardBox.width * 0.6 && img.height < cardBox.height * 0.45, JSON.stringify({ img, w: cardBox.width }))
@@ -117,6 +128,22 @@ const visibleText = (page) => page.locator('[role="button"][aria-pressed] > div[
   await p.ctx.close()
 }
 
+// ── 2b. The back names no ranking the player does not hold ─────────────────────
+{
+  const p = await open({ ranks: { matches_rank: null, runs_rank: 150, bat_avg_rank: null, wickets_rank: 12, bowl_avg_rank: null, dismissals_rank: null, catches_rank: null } })
+  await p.page.locator('[role="button"][aria-pressed]').click()
+  await p.page.waitForTimeout(900)
+  const back = await visibleText(p.page)
+  ck('only the held ranking shows (12th wickets)', /12th wickets/.test(back) && /CLUB TOP 100/.test(back), back)
+  ck('and not a rank past 100, a missing one or a figure the player lacks', !/150th/.test(back) && !/runs\b.*top/.test(back) && !/th matches|th dismissals|th catches|bat avg|bowl avg/.test(back) , back)
+  await p.ctx.close()
+  const q = await open({ ranks: { matches_rank: null, runs_rank: null, bat_avg_rank: null, wickets_rank: null, bowl_avg_rank: null, dismissals_rank: null, catches_rank: null } })
+  await q.page.locator('[role="button"][aria-pressed]').click()
+  await q.page.waitForTimeout(900)
+  ck('no rankings at all means no Club top 100 line', !/CLUB TOP 100/.test(await visibleText(q.page)))
+  await q.ctx.close()
+}
+
 // ── 3. Turning it over ────────────────────────────────────────────────────────
 {
   const p = await open()
@@ -126,7 +153,16 @@ const visibleText = (page) => page.locator('[role="button"][aria-pressed] > div[
   ck('a tap turns it over', (await flipState(p.page)) === 'true' && /matrix3d\(-1|matrix\(-1/.test(await turned(p.page)), await turned(p.page))
   ck('the back is the details sheet with every figure', /PLAYER DETAILS/.test(back) && /BATTING/.test(back) && /1,?234/.test(back) && /BOWLING/.test(back) && /FIELDING/.test(back) && /101\*/.test(back) && /HIGH SCORE/.test(back), back)
   ck('its name box reads first name then SURNAME and the club is not cut off', /GEORGE\s+PULLINGER/i.test(back) && /APPLECROSS CC/.test(back) && !/…|\.\.\./.test(back), back)
-  ck('and the rankings as badges', /1st runs/.test(back) && /7th wickets/.test(back), back)
+  ck('and every top-100 ranking as a badge', ['3rd matches', '1st runs', '44th bat avg', '7th wickets', '100th bowl avg', '9th dismissals', '12th catches'].every(t => back.includes(t)) && /CLUB TOP 100/.test(back), back)
+  // With every badge showing, every row of the sheet still sits above the footer and inside the card.
+  const fit = await p.page.locator('[role="button"][aria-pressed] > div[aria-hidden="false"]').evaluate(el => {
+    const rows = [...el.querySelectorAll('[data-card-row]')].map(r => r.getBoundingClientRect())
+    const col = el.querySelector('[data-club-ranks]').parentElement
+    const footer = col.lastElementChild.getBoundingClientRect()
+    const card = el.getBoundingClientRect()
+    return { rows: rows.length, lowest: Math.max(...rows.map(r => r.bottom)), footerTop: footer.top, footerBottom: footer.bottom, cardBottom: card.bottom }
+  })
+  ck('the badges leave every row of the sheet above the footer, inside the card', fit.rows >= 12 && fit.lowest <= fit.footerTop + 0.5 && fit.footerBottom <= fit.cardBottom, JSON.stringify(fit))
   if (SHOTS) await p.page.screenshot({ path: `${SHOTS}/share_back_1000.png` })
   await p.page.getByRole('button', { name: 'SHOW CARD' }).click(); await p.page.waitForTimeout(900)
   ck('the button turns it back', (await flipState(p.page)) === 'false')

@@ -5528,76 +5528,81 @@ async def get_game_partnerships(session: AsyncSession, game_id: str, org_id: str
     return [dict(r) for r in result.mappings()]
 
 
+# A batting or bowling average is only ranked among players with enough innings or wickets behind it,
+# the same bar the collectable cards use for their rarity, so one good afternoon cannot top a board.
+RANK_MIN_BAT_INNINGS = 10
+RANK_MIN_BOWL_WICKETS = 10
+RANK_KEYS = ("matches_rank", "runs_rank", "bat_avg_rank", "wickets_rank", "bowl_avg_rank", "dismissals_rank", "catches_rank")
+
+
 async def get_player_rankings(
     session: AsyncSession,
     player_id: str,
     org_id: str,
     season_id: Optional[str] = None,
 ) -> dict:
-    """Return the player's rank for runs, wickets, and catches within their org.
-    Returns None for each category if the player is outside the top 100."""
+    """The player's club rank for matches, runs, batting average, wickets, bowling average, dismissals and
+    catches. A key is None when the player is outside the top 100, has none of that figure, or (an average)
+    has not reached the minimum innings or wickets."""
     season_ids = await resolve_season_filter(session, org_id, season_id)
     season_clause = " AND pss.season_id = ANY(:season_ids)" if season_ids else ""
-    params: dict = {"org_id": org_id, "player_id": player_id}
+    params: dict = {"org_id": org_id, "player_id": player_id,
+                    "min_inn": RANK_MIN_BAT_INNINGS, "min_wk": RANK_MIN_BOWL_WICKETS}
     if season_ids:
         params["season_ids"] = season_ids
 
     result = await session.execute(
         text(f"""
-            WITH batting_agg AS (
-                SELECT pss.player_id, SUM(pss.runs) AS total_runs
+            WITH agg AS (
+                SELECT pss.player_id,
+                       COALESCE(SUM(pss.matches), 0) AS m,
+                       COALESCE(SUM(pss.runs), 0) AS runs,
+                       COALESCE(SUM(pss.batting_innings), 0) AS inn,
+                       COALESCE(SUM(pss.not_outs), 0) AS nos,
+                       COALESCE(SUM(pss.wickets), 0) AS wk,
+                       COALESCE(SUM(pss.runs_conceded), 0) AS conceded,
+                       COALESCE(SUM(pss.catches), 0) AS catches,
+                       COALESCE(SUM(pss.catches + pss.run_outs + pss.stumpings), 0) AS dism
                 FROM v_effective_player_season_stats pss
                 JOIN players p ON p.id = pss.player_id
                 WHERE p.organisation_id = :org_id{season_clause}
                 GROUP BY pss.player_id
             ),
-            batting_ranked AS (
+            flagged AS (
+                SELECT *,
+                       (inn >= :min_inn AND inn - nos > 0 AND runs > 0) AS bat_ok,
+                       (wk >= :min_wk) AS bowl_ok
+                FROM agg
+            ),
+            ranked AS (
                 SELECT player_id,
-                       RANK() OVER (ORDER BY total_runs DESC NULLS LAST) AS runs_rank
-                FROM batting_agg
-            ),
-            bowling_agg AS (
-                SELECT pss.player_id, SUM(pss.wickets) AS total_wickets
-                FROM v_effective_player_season_stats pss
-                JOIN players p ON p.id = pss.player_id
-                WHERE p.organisation_id = :org_id{season_clause}
-                GROUP BY pss.player_id
-            ),
-            bowling_ranked AS (
-                SELECT player_id,
-                       RANK() OVER (ORDER BY total_wickets DESC NULLS LAST) AS wickets_rank
-                FROM bowling_agg
-            ),
-            fielding_agg AS (
-                SELECT pss.player_id, SUM(pss.catches) AS total_catches
-                FROM v_effective_player_season_stats pss
-                JOIN players p ON p.id = pss.player_id
-                WHERE p.organisation_id = :org_id{season_clause}
-                GROUP BY pss.player_id
-            ),
-            fielding_ranked AS (
-                SELECT player_id,
-                       RANK() OVER (ORDER BY total_catches DESC NULLS LAST) AS catches_rank
-                FROM fielding_agg
+                       m, runs, wk, catches, dism,
+                       RANK() OVER (ORDER BY m DESC) AS matches_rank,
+                       RANK() OVER (ORDER BY runs DESC) AS runs_rank,
+                       RANK() OVER (ORDER BY wk DESC) AS wickets_rank,
+                       RANK() OVER (ORDER BY catches DESC) AS catches_rank,
+                       RANK() OVER (ORDER BY dism DESC) AS dismissals_rank,
+                       bat_ok, bowl_ok,
+                       RANK() OVER (PARTITION BY bat_ok
+                                    ORDER BY runs::numeric / NULLIF(inn - nos, 0) DESC NULLS LAST) AS bat_avg_rank,
+                       RANK() OVER (PARTITION BY bowl_ok
+                                    ORDER BY conceded::numeric / NULLIF(wk, 0) ASC NULLS LAST) AS bowl_avg_rank
+                FROM flagged
             )
             SELECT
-                (SELECT CASE WHEN runs_rank <= 100 THEN runs_rank ELSE NULL END
-                 FROM batting_ranked WHERE player_id = :player_id) AS runs_rank,
-                (SELECT CASE WHEN wickets_rank <= 100 THEN wickets_rank ELSE NULL END
-                 FROM bowling_ranked WHERE player_id = :player_id) AS wickets_rank,
-                (SELECT CASE WHEN catches_rank <= 100 THEN catches_rank ELSE NULL END
-                 FROM fielding_ranked WHERE player_id = :player_id) AS catches_rank
+                CASE WHEN m > 0 AND matches_rank <= 100 THEN matches_rank END AS matches_rank,
+                CASE WHEN runs > 0 AND runs_rank <= 100 THEN runs_rank END AS runs_rank,
+                CASE WHEN bat_ok AND bat_avg_rank <= 100 THEN bat_avg_rank END AS bat_avg_rank,
+                CASE WHEN wk > 0 AND wickets_rank <= 100 THEN wickets_rank END AS wickets_rank,
+                CASE WHEN bowl_ok AND bowl_avg_rank <= 100 THEN bowl_avg_rank END AS bowl_avg_rank,
+                CASE WHEN dism > 0 AND dismissals_rank <= 100 THEN dismissals_rank END AS dismissals_rank,
+                CASE WHEN catches > 0 AND catches_rank <= 100 THEN catches_rank END AS catches_rank
+            FROM ranked WHERE player_id = :player_id
         """),
         params,
     )
     row = result.mappings().first()
-    if not row:
-        return {"runs_rank": None, "wickets_rank": None, "catches_rank": None}
-    return {
-        "runs_rank": row["runs_rank"],
-        "wickets_rank": row["wickets_rank"],
-        "catches_rank": row["catches_rank"],
-    }
+    return {k: (row[k] if row else None) for k in RANK_KEYS}
 
 
 async def _sirs_base_clauses(session, org_id, season_id, grade_name, finals_only, params, captain_only=False, stat_alias='bi', scope=None):
