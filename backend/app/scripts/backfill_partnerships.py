@@ -54,6 +54,24 @@ wrote, and wickets a person typed in the editor (those are written again under n
 never touched. Rows already gone are skipped. A second undo finds nothing. Runs made BEFORE
 this log existed were not recorded and cannot be undone this way.
 
+SHORT GAMES (`--short`)
+-----------------------
+The default walk only offers a game that has no stand of the club's own. A game stored with PART of
+its fall of wickets (wicket 1 of 4) has a stand, so the walk never offers it, and the sync's own
+fix (`participant_relink.complete_innings_detail`, v9.143.10) only reaches games from the last 14
+days. `--short` walks the older ones: synced COMPLETED games where an innings holds fewer distinct
+wickets than the card said fell (`games.innings_totals`), or fewer than the club's own batting rows
+show out, and which the club did not type wickets for (`fow_overrides`). Any age, narrowed by
+`--from` / `--to`. Same pacing, `--limit`, `--resume`, audit entry and `--undo` as above (pass
+`--short` again when you pass `--resume`: the token does not carry the mode).
+
+It reads the finished card and ADDS the wickets the game lacks (both innings) and the stands that
+hold one of the club's players at a wicket with no stand. It never changes a stand or wicket
+already stored (the sync's re-read also restates the runs of a held stand; the script does not, so
+`--undo` removes exactly what it wrote). A game whose card CA has not finished, or whose scorers
+never entered more, stays a candidate for a fresh walk and writes nothing: the cursor stops one
+walk asking twice.
+
 ALL CLUBS
 ---------
 `all` walks every active club that has a candidate game, in club-id order, newest game
@@ -64,7 +82,7 @@ ONE OF ITS OWN players exists on it, so the second club's innings is not lost to
 club's stands.
 
     python -m app.scripts.backfill_partnerships <org-id-or-slug|all> [--from 2017-07-01] [--to 2018-06-30]
-                                                [--limit 100] [--pause 0.4] [--explain] [--resume TOKEN] [--apply]
+                                                [--limit 100] [--pause 0.4] [--explain] [--resume TOKEN] [--short] [--apply]
 
 DRY RUN BY DEFAULT. Without `--apply` it reads, derives, reports and rolls back.
 """
@@ -159,12 +177,57 @@ _CANDIDATE = """
           AND EXISTS (SELECT 1 FROM fall_of_wickets f WHERE f.game_id = g.id)"""
 
 
+# `--short`: a COMPLETED synced game with a short fall of wickets. Two signals, either is enough: the
+# wickets the card said fell when the game was stored (`innings_totals`), and, for a game stored
+# before that column or without it, the club's own batting rows showing more batters out than the
+# innings holds wickets. A game the club typed its own wickets for is the club's, so it is left out.
+_SHORT_CANDIDATE = """
+          g.source = 'api'
+          AND g.played_at <= CURRENT_DATE
+          AND (CAST(:d_from AS date) IS NULL OR g.played_at::date >= CAST(:d_from AS date))
+          AND (CAST(:d_to AS date) IS NULL OR g.played_at::date <= CAST(:d_to AS date))
+          AND UPPER(COALESCE(g.status, '')) = 'COMPLETED'
+          AND NOT EXISTS (SELECT 1 FROM fow_overrides o
+                           WHERE o.game_id = g.id AND o.organisation_id = CAST(:org AS UUID))
+          AND (
+            (gm.innings_totals IS NOT NULL AND jsonb_typeof(gm.innings_totals) = 'array' AND EXISTS (
+                SELECT 1 FROM jsonb_array_elements(gm.innings_totals) t
+                 WHERE (t->>'wickets') ~ '^[0-9]+$' AND (t->>'innings_number') ~ '^[0-9]+$'
+                   AND (t->>'wickets')::int > (
+                        SELECT COUNT(DISTINCT f.wicket_number) FROM fall_of_wickets f
+                         WHERE f.game_id = g.id AND f.innings_number = (t->>'innings_number')::int)))
+            OR EXISTS (
+                SELECT 1 FROM (
+                    SELECT bi.innings_number, COUNT(*) AS out_n
+                      FROM batting_innings bi JOIN players bp ON bp.id = bi.player_id
+                     WHERE bi.game_id = g.id AND bp.organisation_id = CAST(:org AS UUID)
+                       AND NOT COALESCE(bi.did_not_bat, FALSE) AND NOT COALESCE(bi.not_out, FALSE)
+                     GROUP BY bi.innings_number) b
+                 WHERE b.out_n > (SELECT COUNT(DISTINCT f.wicket_number) FROM fall_of_wickets f
+                                   WHERE f.game_id = g.id AND f.innings_number = b.innings_number))
+          )"""
+
+
 async def select_games(db, org_id, d_from: Optional[date], d_to: Optional[date], limit: int,
-                       after: Optional[tuple] = None) -> list:
+                       after: Optional[tuple] = None, short: bool = False) -> list:
     """The club's synced games that hold fall of wickets and no stand with one of the club's own
     players, newest first. `after` is (date, game id): only games older than that, which is how
-    a walk avoids asking again for a game it has already tried."""
+    a walk avoids asking again for a game it has already tried. With `short`, instead the COMPLETED
+    games whose fall of wickets is shorter than the card's (see `_SHORT_CANDIDATE`)."""
     c_date, c_id = after if after else (None, None)
+    if short:
+        return (await db.execute(text(f"""
+            SELECT g.id, g.played_at::date AS played, gr.name AS grade
+            FROM v_effective_games g
+            JOIN games gm ON gm.id = g.id
+            LEFT JOIN grades gr ON gr.id = g.grade_id
+            WHERE {club_game_sql('g', 'org')}
+              AND {_SHORT_CANDIDATE}
+              AND (CAST(:c_date AS date) IS NULL
+                   OR (g.played_at::date, g.id) < (CAST(:c_date AS date), CAST(:c_id AS uuid)))
+            ORDER BY g.played_at::date DESC, g.id DESC
+            LIMIT :lim"""), {"org": str(org_id), "d_from": d_from, "d_to": d_to, "lim": limit,
+                             "c_date": c_date, "c_id": str(c_id) if c_id else None})).mappings().all()
     return (await db.execute(text(f"""
         SELECT g.id, g.played_at::date AS played, gr.name AS grade
         FROM v_effective_games g
@@ -181,11 +244,27 @@ async def select_games(db, org_id, d_from: Optional[date], d_to: Optional[date],
                          "c_date": c_date, "c_id": str(c_id) if c_id else None})).mappings().all()
 
 
-async def list_clubs(db, d_from: Optional[date], d_to: Optional[date]) -> list:
+async def list_clubs(db, d_from: Optional[date], d_to: Optional[date], short: bool = False) -> list:
     """Active clubs with at least one candidate game, in club-id order (the order `--resume` relies on).
 
     Over-inclusive on purpose: a club whose only candidates already hold stands of its own is
     listed and then selects nothing, which costs one query."""
+    if short:
+        # `--short` tests each club's own batting rows and overrides, so every club with a COMPLETED
+        # synced game in range is offered and `select_games` decides.
+        return (await db.execute(text("""
+            SELECT o.id, o.name FROM organisations o
+            WHERE COALESCE(o.is_active, TRUE)
+              AND o.id IN (
+                  SELECT g.home_org_id FROM v_effective_games g
+                   WHERE g.source = 'api' AND UPPER(COALESCE(g.status, '')) = 'COMPLETED'
+                     AND (CAST(:d_from AS date) IS NULL OR g.played_at::date >= CAST(:d_from AS date))
+                     AND (CAST(:d_to AS date) IS NULL OR g.played_at::date <= CAST(:d_to AS date))
+                  UNION SELECT g.away_org_id FROM v_effective_games g
+                   WHERE g.source = 'api' AND UPPER(COALESCE(g.status, '')) = 'COMPLETED'
+                     AND (CAST(:d_from AS date) IS NULL OR g.played_at::date >= CAST(:d_from AS date))
+                     AND (CAST(:d_to AS date) IS NULL OR g.played_at::date <= CAST(:d_to AS date)))
+            ORDER BY o.id"""), {"d_from": d_from, "d_to": d_to})).all()
     return (await db.execute(text(f"""
         SELECT o.id, o.name FROM organisations o
         WHERE COALESCE(o.is_active, TRUE)
@@ -245,7 +324,7 @@ async def _audit(club_id, action: str, summary: str, detail: dict) -> None:
 
 
 async def backfill_club(club_id, name, *, d_from, d_to, budget: int, pause: float, apply: bool,
-                        explain: bool, fetch, after, tally: dict, run_id=None) -> dict:
+                        explain: bool, fetch, after, tally: dict, run_id=None, short: bool = False) -> dict:
     """Walk one club's candidate games, newest first, asking Cricket Australia for at most `budget`.
 
     Returns {"used": games asked, "last": (date, game id) of the last one tried, "done": True when
@@ -266,12 +345,13 @@ async def backfill_club(club_id, name, *, d_from, d_to, budget: int, pause: floa
     used, last, announced = 0, after, False
     while used < budget:
         async with async_session_maker() as db:
-            batch = await select_games(db, club_id, d_from, d_to, min(budget - used, BATCH), last)
+            batch = await select_games(db, club_id, d_from, d_to, min(budget - used, BATCH), last, short=short)
             await db.rollback()
         if not batch:
             return {"used": used, "last": last, "done": True}
         if not announced:
-            print(f"\n{name}: games with fall of wickets and no stand of the club's own players")
+            print(f"\n{name}: " + ("finished games with a short fall of wickets" if short else
+                  "games with fall of wickets and no stand of the club's own players"))
             announced = True
         for g in batch:
             last = (g["played"], g["id"])
@@ -291,7 +371,11 @@ async def backfill_club(club_id, name, *, d_from, d_to, budget: int, pause: floa
                 try:
                     before_p = await _game_ids(db, "partnerships", g["id"])
                     before_f = await _game_ids(db, "fall_of_wickets", g["id"])
-                    n = await relink.attach_innings_detail(db, club_id, g["id"], card, resolve)
+                    if short:
+                        # Insert only (restate=False): the undo log holds inserted ids, not old values.
+                        n = await relink.complete_innings_detail(db, club_id, g["id"], card, resolve, restate=False)
+                    else:
+                        n = await relink.attach_innings_detail(db, club_id, g["id"], card, resolve)
                     if apply and (n["partnerships"] or n["fow"]):
                         new_p = (await _game_ids(db, "partnerships", g["id"])) - before_p
                         new_f = (await _game_ids(db, "fall_of_wickets", g["id"])) - before_f
@@ -309,7 +393,17 @@ async def backfill_club(club_id, name, *, d_from, d_to, budget: int, pause: floa
             tally["fow_added"] += n["fow"]
             if n["partnerships"]:
                 verb = "added" if apply else "would add"
-                print(f"  ok  {g['played']}  {g['grade']}  {g['id']}: {verb} {n['partnerships']} stand(s)")
+                extra = f" and {n['fow']} wicket(s)" if short and n["fow"] else ""
+                print(f"  ok  {g['played']}  {g['grade']}  {g['id']}: {verb} {n['partnerships']} stand(s){extra}")
+            elif short and n["fow"]:
+                verb = "added" if apply else "would add"
+                print(f"  ok  {g['played']}  {g['grade']}  {g['id']}: {verb} {n['fow']} wicket(s), no stand")
+            elif short:
+                tally["refused"] += 1
+                print(f"  --  {g['played']}  {g['grade']}  {g['id']}: nothing to add: Cricket Australia's card "
+                      "holds no more wickets than we do, or does not call the game finished")
+                if explain:
+                    dump_card(card)
             else:
                 tally["refused"] += 1
                 print(f"  --  {g['played']}  {g['grade']}  {g['id']}: no stand written: {explain_game(card, club_id)}")
@@ -320,7 +414,8 @@ async def backfill_club(club_id, name, *, d_from, d_to, budget: int, pause: floa
 
 async def run(org: str, *, d_from: Optional[date] = None, d_to: Optional[date] = None,
               limit: int = DEFAULT_LIMIT, pause: float = DEFAULT_PAUSE, apply: bool = False,
-              explain: bool = False, fetch: Optional[Fetch] = None, resume: Optional[str] = None) -> dict:
+              explain: bool = False, fetch: Optional[Fetch] = None, resume: Optional[str] = None,
+              short: bool = False) -> dict:
     """One club, or `all`. Returns the counts (and a `resume` token when the limit stopped the walk),
     so a verification can read them without parsing output."""
     tally = {"asked": 0, "games": 0, "stands_added": 0, "fow_added": 0, "refused": 0, "no_data": 0,
@@ -328,7 +423,7 @@ async def run(org: str, *, d_from: Optional[date] = None, d_to: Optional[date] =
     cursor = parse_resume(resume)
     async with async_session_maker() as db:
         if org == "all":
-            clubs = [(r[0], r[1]) for r in await list_clubs(db, d_from, d_to)]
+            clubs = [(r[0], r[1]) for r in await list_clubs(db, d_from, d_to, short=short)]
         else:
             row = (await db.execute(text(
                 "SELECT id, name FROM organisations WHERE id::text = :o OR slug = :o"), {"o": org})).first()
@@ -344,6 +439,8 @@ async def run(org: str, *, d_from: Optional[date] = None, d_to: Optional[date] =
     print(f"{len(clubs)} club(s) to walk, at most {limit} game(s) asked of Cricket Australia in this run.")
     if not apply:
         print("DRY RUN: nothing will be written. Add --apply to write the stands.")
+    if short:
+        print("SHORT GAMES: finished games whose stored fall of wickets is shorter than the card's; rows are only added.")
 
     remaining = limit
     run_id = uuid.uuid4()
@@ -351,16 +448,19 @@ async def run(org: str, *, d_from: Optional[date] = None, d_to: Optional[date] =
         if remaining <= 0:
             break
         after = (cursor[1], cursor[2]) if cursor and cursor[0] == club_id else None
-        stands_before, games_before = tally["stands_added"], tally["games"]
+        stands_before, games_before, fow_before = tally["stands_added"], tally["games"], tally["fow_added"]
         res = await backfill_club(club_id, name, d_from=d_from, d_to=d_to, budget=remaining, pause=pause,
                                   apply=apply, explain=explain, fetch=fetch, after=after, tally=tally,
-                                  run_id=run_id)
-        if apply and tally["stands_added"] > stands_before:
+                                  run_id=run_id, short=short)
+        if apply and (tally["stands_added"] > stands_before or tally["fow_added"] > fow_before):
             added = tally["stands_added"] - stands_before
+            wickets = tally["fow_added"] - fow_before
             await _audit(club_id, "backfill_partnerships",
-                         f"Partnership backfill: {added} stand(s) added from {tally['games'] - games_before} game(s). "
-                         "Undo with the script's --undo.",
-                         {"run_id": str(run_id), "stands": added, "games_read": tally["games"] - games_before})
+                         f"Partnership backfill{' (short fall of wickets)' if short else ''}: {added} stand(s)"
+                         + (f" and {wickets} wicket(s)" if short else "")
+                         + f" added from {tally['games'] - games_before} game(s). Undo with the script's --undo.",
+                         {"run_id": str(run_id), "stands": added, "games_read": tally["games"] - games_before,
+                          **({"mode": "short", "wickets": wickets} if short else {})})
         if res["used"]:
             tally["clubs"] += 1
         remaining -= res["used"]
@@ -464,6 +564,9 @@ def main() -> None:
                     help="take back what this club's earlier --apply runs wrote (dry run unless --apply)")
     ap.add_argument("--since", dest="since", type=date.fromisoformat, default=None,
                     help="with --undo: only runs made on or after this date")
+    ap.add_argument("--short", action="store_true",
+                    help="walk finished games stored with a SHORT fall of wickets (any age) and add the wickets and "
+                         "stands the finished card holds; pass it again with --resume")
     ap.add_argument("--apply", action="store_true", help="write the stands (default is a dry run)")
     a = ap.parse_args()
     if a.undo:
@@ -472,7 +575,7 @@ def main() -> None:
         asyncio.run(undo_club(a.org, since=a.since, apply=a.apply))
         return
     asyncio.run(run(a.org, d_from=a.d_from, d_to=a.d_to, limit=a.limit, pause=a.pause, apply=a.apply,
-                    explain=a.explain, resume=a.resume))
+                    explain=a.explain, resume=a.resume, short=a.short))
 
 
 if __name__ == "__main__":

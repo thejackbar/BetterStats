@@ -387,7 +387,8 @@ async def attach_innings_detail(db: AsyncSession, org_id, game_id, scorecard: di
     return n
 
 
-async def complete_innings_detail(db: AsyncSession, org_id, game_id, scorecard: dict, resolve) -> dict:
+async def complete_innings_detail(db: AsyncSession, org_id, game_id, scorecard: dict, resolve,
+                                  restate: bool = True) -> dict:
     """Bring a stored game's fall of wickets and stands up to what a COMPLETED card holds.
 
     `attach_innings_detail` writes an innings only where the game has NONE, so a game stored with a
@@ -469,6 +470,8 @@ async def complete_innings_detail(db: AsyncSession, org_id, game_id, scorecard: 
                     runs=p.get("runs") or 0, batter1_runs=p.get("batter1_runs"),
                     batter2_runs=p.get("batter2_runs"), is_club_innings=is_club_innings))
                 n["partnerships"] += 1
+                continue
+            if not restate:
                 continue
             new = {"runs": p.get("runs") or 0, "batter1_runs": p.get("batter1_runs"),
                    "batter2_runs": p.get("batter2_runs")}
