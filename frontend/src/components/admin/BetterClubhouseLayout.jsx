@@ -45,6 +45,7 @@ function buildNav({ modules, counts, storefront }) {
     { to: '/admin/fees/schedule', label: 'Membership tiers', icon: 'sheet', cap: CAP.MANAGE_FEES, module: 'fees' },
 
     { heading: 'Stock' },
+    { to: '/admin/merch/dashboard', label: 'Stock dashboard', icon: 'ladders', cap: CAP.MANAGE_MERCH, module: 'merch' },
     { to: '/admin/merch/stock', label: 'Inventory', icon: 'list', cap: CAP.MANAGE_MERCH, module: 'merch', badge: counts.reorder },
     ...(storefront ? [{ to: '/admin/merch/orders', label: 'Online store', icon: 'sheet', cap: CAP.MANAGE_MERCH, module: 'merch' }] : []),
 

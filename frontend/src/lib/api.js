@@ -1386,6 +1386,9 @@ export const api = {
   merchPlayer: (playerId) => request(`/club-admin/merch/players/${playerId}/merch`),
   merchReportSummary: () => request('/club-admin/merch/reports/summary'),
   merchExportUrl: () => `${BASE}/club-admin/merch/reports/export`,
+  merchDashboard: (days = 90) => request(`/club-admin/merch/dashboard?days=${days}`),
+  merchExportWorkbookUrl: (days = 90) => `${BASE}/club-admin/merch/reports/export-workbook?days=${days}`,
+  merchExportMovementsUrl: (days = 0) => `${BASE}/club-admin/merch/reports/export-movements?days=${days}`,
   // BetterMerch — Square POS integration
   merchSquareStatus: () => request('/club-admin/merch/square/status'),
   merchSquareConnectUrl: () => request('/club-admin/merch/square/connect-url'),

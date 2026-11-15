@@ -157,6 +157,7 @@ const AdminMemberPortal = lazy(() => import('./pages/admin/AdminMemberPortal'))
 const AdminClubDiary = lazy(() => import('./pages/admin/AdminClubDiary'))
 const BetterMerchHome = lazy(() => import('./pages/admin/bettermerch/BetterMerchHome'))
 const MerchStock = lazy(() => import('./pages/admin/bettermerch/MerchStock'))
+const MerchDashboard = lazy(() => import('./pages/admin/bettermerch/MerchDashboard'))
 const MerchActivity = lazy(() => import('./pages/admin/bettermerch/MerchActivity'))
 const MerchReports = lazy(() => import('./pages/admin/bettermerch/MerchReports'))
 const MerchSquare = lazy(() => import('./pages/admin/bettermerch/MerchSquare'))
@@ -540,6 +541,7 @@ export default function App() {
           <Route path="/admin/fees/member/:memberId" element={<ProtectedRoute requireModule="fees"><AdminFeeMemberDetail /></ProtectedRoute>} />
           <Route path="/admin/merch" element={<ProtectedRoute requireModule="merch"><BetterMerchHome /></ProtectedRoute>} />
           <Route path="/admin/merch/stock" element={<ProtectedRoute requireModule="merch"><MerchStock /></ProtectedRoute>} />
+          <Route path="/admin/merch/dashboard" element={<ProtectedRoute requireModule="merch"><MerchDashboard /></ProtectedRoute>} />
           {/* Equipment is an asset, not stock (migration 279). The register is
               one thing now and lives in core Facilities & Assets, so the old
               Stock URL redirects rather than 404ing on a bookmark. */}

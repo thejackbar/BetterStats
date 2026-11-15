@@ -1,9 +1,12 @@
 import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../../../lib/api'
 import { useToast } from '../../../contexts/ToastContext'
 import BetterMerchLayout from '../../../components/admin/BetterMerchLayout'
 import { PbSpinner } from '../../../lib/presskit'
 import { money, categoryLabel, Kpi, Btn, Icon } from './ui'
+
+const actionCls = 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] border border-pb-hairline2 hover:bg-pb-surface2'
 
 export default function MerchReports() {
   const toast = useToast()
@@ -21,7 +24,13 @@ export default function MerchReports() {
 
   return (
     <BetterMerchLayout title="Reports"
-      actions={<a href={api.merchExportUrl()} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] border border-pb-hairline2 hover:bg-pb-surface2"><Icon name="arrow" size={14} /> Export CSV</a>}>
+      actions={(
+        <div className="flex flex-wrap items-center gap-2">
+          <Link to="/admin/merch/dashboard" className={actionCls}><Icon name="ladders" size={14} /> Dashboard</Link>
+          <a href={api.merchExportWorkbookUrl(90)} className={actionCls} download><Icon name="arrow" size={14} /> Excel workbook</a>
+          <a href={api.merchExportUrl()} className={actionCls} download><Icon name="arrow" size={14} /> Export CSV</a>
+        </div>
+      )}>
       {loading ? <PbSpinner message="Loading reports…" /> : !data ? null : (
         <div className="space-y-6">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">

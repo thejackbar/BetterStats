@@ -85,6 +85,9 @@ export default function BetterMerchHome() {
             <Link to="/admin/merch/stock" className="pb-card px-4 py-3 hover:border-pb-accent/40 transition flex items-center gap-2 text-sm">
               <Icon name="plus" size={16} /> Add stock
             </Link>
+            <Link to="/admin/merch/dashboard" className="pb-card px-4 py-3 hover:border-pb-accent/40 transition flex items-center gap-2 text-sm">
+              <Icon name="ladders" size={16} /> Stock dashboard
+            </Link>
             <Link to="/admin/merch/reports" className="pb-card px-4 py-3 hover:border-pb-accent/40 transition flex items-center gap-2 text-sm">
               <Icon name="ladders" size={16} /> Reports
             </Link>

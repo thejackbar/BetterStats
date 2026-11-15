@@ -38,6 +38,7 @@ from app.models.db import (
 from app.routers.auth import get_current_user, get_current_club
 from app.auth.capabilities import require_cap, MANAGE_MERCH
 from app.services import merch as merch_service
+from app.services import merch_insights
 from app.services import merch_store as merch_store_service
 from app.services import square_client, square_sync
 
@@ -1137,6 +1138,73 @@ async def export_stock(
         content=csv_text,
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=merch-stock.csv"},
+    )
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Stock dashboard + exports (all read-only; see services/merch_insights.py)
+# ───────────────────────────────────────────────────────────────────────────
+
+@router.get("/dashboard", dependencies=[_require])
+async def stock_dashboard(
+    days: int = 90,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Everything the stock dashboard draws: headline figures, stock and sales
+    over time, what is selling and what is not, by type, size and colour."""
+    return await merch_insights.stock_dashboard(db, club.id, days=days)
+
+
+def _export_name(club: Organisation, stem: str, ext: str) -> str:
+    slug = "".join(ch if ch.isalnum() else "-" for ch in (club.slug or club.name or "club")).strip("-").lower() or "club"
+    return f"{slug}-{stem}-{date.today().isoformat()}.{ext}"
+
+
+@router.get("/reports/export-workbook", dependencies=[_require])
+async def export_workbook(
+    days: int = 90,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """One Excel workbook: summary, stock by line, sales by item, size and colour
+    breakdowns, stock over time, and every movement in the window."""
+    dash = await merch_insights.stock_dashboard(db, club.id, days=days)
+    movements = await merch_insights.movement_export_rows(db, club.id, days=dash["window_days"])
+    content = merch_insights.build_workbook(club.name or "Club", dash, movements)
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{_export_name(club, "merch-stock", "xlsx")}"'},
+    )
+
+
+@router.get("/reports/export-movements", dependencies=[_require])
+async def export_movements(
+    days: int = 0,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """CSV of every stock movement (sales, receipts, stocktakes, write-offs).
+    `days=0` is all of it."""
+    rows = await merch_insights.movement_export_rows(db, club.id, days=merch_insights.clamp_days(days) if days else None)
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["Date", "Type", "Product", "Variant", "Size", "Colour", "SKU", "Movement", "Change",
+                "Balance after", "Unit price", "Amount", "Paid", "Payment method", "Player", "Source", "Note"])
+    t = merch_insights.csv_text
+    for m in rows:
+        w.writerow([
+            m["date"], m["category"], t(m["product"]), t(m["variant"]), t(m["size"]), t(m["colour"]), t(m["sku"]),
+            m["kind"], m["change"], m["balance_after"] if m["balance_after"] is not None else "",
+            f"{m['unit_price']:.2f}" if m["unit_price"] is not None else "",
+            f"{m['amount']:.2f}" if m["amount"] is not None else "",
+            "yes" if m["paid"] else "no", t(m["payment_method"]), t(m["player"]), m["source"], t(m["note"]),
+        ])
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{_export_name(club, "merch-movements", "csv")}"'},
     )
 
 
