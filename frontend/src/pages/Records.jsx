@@ -360,8 +360,11 @@ function PartnershipTable({ rows, headers, fmt }) {
   )
 }
 
-function PartnershipsTab({ data, fmt = n => n }) {
+function PartnershipsTab({ data, latestSeason, fmt = n => n }) {
   if (!data) return <PbSpinner />
+
+  // The same test the batting and bowling boards use: a stand made in the club's latest season.
+  const isNew = (seasonName) => latestSeason && seasonName && formatSeason(seasonName) === formatSeason(latestSeason)
 
   const allTimeRecords = ORDINALS.map((ord, wi) => {
     const rec = (data[`wicket_${wi + 1}`] || [])[0]
@@ -407,7 +410,7 @@ function PartnershipsTab({ data, fmt = n => n }) {
                       <PlayerLink id={r.player2_id} name={r.player2_name} fmt={fmt} />
                     </td>
                     <td className="py-2.5 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{r.runs}</td>
-                    <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{r.grade_name}</td>
+                    <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{r.grade_name}{isNew(r.season_name) && <NewBadge />}</td>
                   </GameRow>
                 ))}
               </tbody>
@@ -447,7 +450,7 @@ function PartnershipsTab({ data, fmt = n => n }) {
                     <td className="py-2.5 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{r.runs}</td>
                     <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{r.wicket_number ? ORDINALS[r.wicket_number - 1] : '—'}</td>
                     <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{r.grade_name || '—'}</td>
-                    <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{formatSeason(r.season_name) || '—'}</td>
+                    <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{formatSeason(r.season_name) || '—'}{isNew(r.season_name) && <NewBadge />}</td>
                   </GameRow>
                 ))}
               </tbody>
@@ -488,7 +491,7 @@ function PartnershipsTab({ data, fmt = n => n }) {
                           <PlayerLink id={r.player2_id} name={r.player2_name} fmt={fmt} />
                         </td>
                         <td className="py-2 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{r.runs}</td>
-                        <td className="py-2 px-3 font-mono text-pb-faintest text-[11px] text-right">{formatSeason(r.season_name) || '—'}</td>
+                        <td className="py-2 px-3 font-mono text-pb-faintest text-[11px] text-right">{formatSeason(r.season_name) || '—'}{isNew(r.season_name) && <NewBadge />}</td>
                       </GameRow>
                     ))}
                   </tbody>
@@ -533,7 +536,7 @@ function PartnershipsTab({ data, fmt = n => n }) {
                         </td>
                         <td className="py-2.5 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{r.runs}</td>
                         <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{r.grade_name || '—'}</td>
-                        <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{formatSeason(r.season_name) || '—'}</td>
+                        <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{formatSeason(r.season_name) || '—'}{isNew(r.season_name) && <NewBadge />}</td>
                       </GameRow>
                     ))}
                   </tbody>
@@ -1256,7 +1259,7 @@ export default function Records() {
           <>
             {tab === 'batting'      && <BattingTab      data={records.batting}       latestSeason={latestSeason} fmt={fmt} slug={clubSlug} />}
             {tab === 'bowling'      && <BowlingTab      data={records.bowling}       latestSeason={latestSeason} fmt={fmt} slug={clubSlug} />}
-            {tab === 'partnerships' && <PartnershipsTab data={records.partnerships}  fmt={fmt} />}
+            {tab === 'partnerships' && <PartnershipsTab data={records.partnerships}  latestSeason={latestSeason} fmt={fmt} />}
             {tab === 'allrounders'  && <AllRoundersTab  data={records.allrounders}  fmt={fmt} />}
             {tab === 'milestones'   && <MilestonesTab   data={milestones} loading={milestonesLoading} gradeName={selectedGradeName} fmt={fmt} />}
             {tab === 'team'         && <TeamTab         data={records.team}          fmt={fmt} />}
