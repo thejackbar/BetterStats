@@ -435,6 +435,40 @@ const COLUMN_SETS = {
   partnership_list: ['runs','balls','wicket_number','batter1_runs','batter2_runs'],
 }
 
+// The career, season, grade and family tables lead with batting. A report
+// ranked on a bowling or fielding figure ("Top wicket takers") swaps to the
+// matching set so the columns describe what is being ranked, not 100s and
+// ducks. The backend already returns every key below for each of these targets.
+const BOWLING_KEYS = new Set([
+  'bowling_innings','wickets','overs','maidens','runs_conceded','bowling_average',
+  'bowling_economy','bowling_strike_rate','five_wicket_innings','best_bowling_wickets',
+])
+const FIELDING_KEYS = new Set(['catches','catches_wk','catches_non_wk','run_outs','stumpings'])
+const BOWLING_COLUMN_SETS = {
+  player_career: ['matches','bowling_innings','wickets','overs','maidens','runs_conceded','bowling_average','bowling_economy','bowling_strike_rate','five_wicket_innings'],
+  player_season: ['matches','bowling_innings','wickets','overs','maidens','runs_conceded','bowling_average','bowling_economy','bowling_strike_rate','five_wicket_innings'],
+  player_grade:  ['matches','bowling_innings','wickets','overs','maidens','runs_conceded','bowling_average','bowling_economy','bowling_strike_rate','five_wicket_innings'],
+  family_career: ['member_count','matches','bowling_innings','wickets','overs','maidens','runs_conceded','bowling_average','bowling_economy','bowling_strike_rate','five_wicket_innings'],
+  family_season: ['member_count','matches','bowling_innings','wickets','overs','maidens','runs_conceded','bowling_average','bowling_economy','bowling_strike_rate','five_wicket_innings'],
+  family_grade:  ['member_count','matches','bowling_innings','wickets','overs','maidens','runs_conceded','bowling_average','bowling_economy','bowling_strike_rate','five_wicket_innings'],
+}
+const FIELDING_COLUMN_SETS = {
+  player_career: ['matches','catches','catches_wk','catches_non_wk','run_outs','stumpings'],
+  player_season: ['matches','catches','catches_wk','catches_non_wk','run_outs','stumpings'],
+  player_grade:  ['matches','catches','catches_wk','catches_non_wk','run_outs','stumpings'],
+  family_career: ['member_count','matches','catches','catches_wk','catches_non_wk','run_outs','stumpings'],
+  family_season: ['member_count','matches','catches','catches_wk','catches_non_wk','run_outs','stumpings'],
+  family_grade:  ['member_count','matches','catches','catches_wk','catches_non_wk','run_outs','stumpings'],
+}
+
+// Column keys for a target, led by the discipline the report is sorted on.
+// Anything else (batting, matches, no sort) keeps the original batting-first set.
+function columnSetFor(target, sortBy) {
+  if (BOWLING_KEYS.has(sortBy) && BOWLING_COLUMN_SETS[target]) return BOWLING_COLUMN_SETS[target]
+  if (FIELDING_KEYS.has(sortBy) && FIELDING_COLUMN_SETS[target]) return FIELDING_COLUMN_SETS[target]
+  return COLUMN_SETS[target] || []
+}
+
 const CONTEXT_KEYS = [
   'season_id','season_ids','grade_id','grade_name','grade_names','opposition','date_from','date_to',
   'min_year','max_year','finals_only','captain_only','keeper_only','result','results',
@@ -1811,7 +1845,7 @@ export default function StatLab() {
       const dimKeys = new Set(['player_id', 'player_name', 'player_a_id', 'player_a_name', 'player_b_id', 'player_b_name', 'pair'])
       return schema.derived[activeDerived].columns.filter(c => !dimKeys.has(c.key))
     }
-    const set = COLUMN_SETS[query.target] || []
+    const set = columnSetFor(query.target, query.sortBy)
     // Promote filtered fields and the active sort to the front
     const filteredKeys = treeFields(query.filterTree)
     const order = []
