@@ -52,6 +52,9 @@ const ICON_PATHS = {
   sound: <><path d="M4 9v6h4l5 4V5L8 9z" /><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12" /></>,
   mute: <><path d="M4 9v6h4l5 4V5L8 9z" /><path d="M22 9l-6 6M16 9l6 6" /></>,
   trash: <><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" /></>,
+  // A pencil, the same drawing BetterIQ uses. Edit buttons take this, never
+  // `settings`, whose ray-and-circle glyph reads as a sun.
+  edit: <><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></>,
   settings: <><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M22 12h-3M5 12H2M19.1 4.9l-2.1 2.1M7 17l-2.1 2.1M19.1 19.1L17 17M7 7L4.9 4.9" /></>,
   next: <><path d="M5 5l9 7-9 7zM18 5v14" /></>,
   cols: <><rect x="3.5" y="4" width="7" height="16" rx="1.6" /><rect x="13.5" y="4" width="7" height="16" rx="1.6" /></>,
