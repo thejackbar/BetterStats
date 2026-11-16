@@ -7,15 +7,29 @@ from pathlib import Path
 
 HERE = Path(__file__).parent
 W, H, DUR = 1080, 1350, 25.0
-FOIL = "conic-gradient(from 0deg,#ff6ec7,#ffd86e,#6effc1,#6ec8ff,#b06eff,#ff6ec7)"
+FOIL = "conic-gradient(from 0deg,#16c784,#a7f3d0,#3ee6a4,#7dd3fc,#3b82f6,#16c784)"
 
 # ---- season tile wall (hook) ---------------------------------------------------------------------
 grades = ["1st XI", "2nd XI", "3rd XI", "4th XI", "T20", "Women's", "Under 16"]
-tiles = []
-for i in range(35):
-    y = 2025 - i
-    tiles.append(f'<div class="st"><div class="st-in"><b>{y}/{str(y + 1)[-2:]}</b>'
-                 f'<span>{grades[i % len(grades)]} · {10 + (i * 7) % 9} games</span></div></div>')
+SHOTS = ["leaderboard", "hero-career-card", "feature-milestones", "premierships", "feature-honours", "yearbook",
+         "club-dashboard-hero", "statlab-team-records", "stats-by-competition", "front-page-profile",
+         "showcase-scorecard", "feature-leaderboard"]
+CRESTS = ["applecross-cc", "gosnells-cc", "kalamunda-cc", "leeming-spartan-cc"]
+# 7 rows x 5: a repeating pattern so no two neighbours are the same kind
+PATTERN = "SPCPS" "PSPSC" "CPSPP" "PSCSP" "SPPCS" "PCSPS" "SPSPC"
+tiles, si, pi, ci = [], 0, 0, 0
+for kind in PATTERN:
+    if kind == "S":
+        y = 2025 - si * 3
+        tiles.append(f'<div class="st"><div class="st-in"><b>{y}/{str(y + 1)[-2:]}</b>'
+                     f'<span>{grades[si % len(grades)]} · {10 + (si * 7) % 9} games</span></div></div>')
+        si += 1
+    elif kind == "P":
+        tiles.append(f'<div class="st sh"><img src="assets/img/wall/{SHOTS[pi % len(SHOTS)]}.jpg" alt=""></div>')
+        pi += 1
+    else:
+        tiles.append(f'<div class="st cr"><div class="cr-in"><img src="assets/img/wall/{CRESTS[ci % len(CRESTS)]}.png" alt=""></div></div>')
+        ci += 1
 wall_html = "".join(tiles)
 
 sheet_rows = [("J. Mercer", "1998/99", "412"), ("T. Okafor", "1998/99", "388"), ("R. Singh", "1999/00", "361"),
@@ -38,19 +52,19 @@ more = [("#1", "Leaderboards"), ("164", "Club records"), ("★", "Player pages")
 more_html = "".join(f'<div class="mo" id="mo{i}"><div class="mo-in"><b>{a}</b><span>{b}</span></div></div>' for i, (a, b) in enumerate(more))
 
 CSS = f"""@font-face{{font-family:'AC';src:url('assets/fonts/applecross-display.ttf') format('truetype');font-weight:100 900;font-style:normal}}
-:root{{--green:#34d399;--foil:{FOIL}}}
+:root{{--green:#16c784;--green2:#34d399;--hi:#3ee6a4;--blue:#3b82f6;--foil:{FOIL}}}
 *{{margin:0;padding:0;box-sizing:border-box}}
-html,body{{width:{W}px;height:{H}px;overflow:hidden;background:#04070b;font-family:'Inter',sans-serif;color:#fff}}
+html,body{{width:{W}px;height:{H}px;overflow:hidden;background:#05080e;font-family:'Inter',sans-serif;color:#fff}}
 #root{{position:absolute;left:0;top:0;width:{W}px;height:{H}px;overflow:hidden}}
-#bg{{position:absolute;inset:0;background:radial-gradient(circle at 50% 42%,color-mix(in srgb,#ff0000 28%,#0b1018),#04070b 80%)}}
-#glow{{position:absolute;left:40px;top:180px;width:1000px;height:1000px;border-radius:50%;background:radial-gradient(circle,rgba(255,50,50,.42),transparent 66%);opacity:.45}}
+#bg{{position:absolute;inset:0;background:radial-gradient(circle at 30% 28%,rgba(22,199,132,.30),transparent 55%),radial-gradient(circle at 78% 72%,rgba(59,130,246,.22),transparent 55%),#0a0d14}}
+#glow{{position:absolute;left:40px;top:180px;width:1000px;height:1000px;border-radius:50%;background:radial-gradient(circle,rgba(22,199,132,.32),transparent 66%);opacity:.45}}
 .scene{{position:absolute;left:0;top:0;width:{W}px;height:{H}px;overflow:hidden}}
-.kick{{font:700 26px 'JetBrains Mono',monospace;letter-spacing:6px;text-transform:uppercase;color:#ff6b6b}}
+.kick{{font:700 26px 'JetBrains Mono',monospace;letter-spacing:6px;text-transform:uppercase;color:#6ee7b7}}
 .t{{font:800 italic 90px/1.0 'AC','Montserrat',sans-serif;text-transform:uppercase;letter-spacing:-.5px;padding-right:.16em}}
-.t em{{font-style:italic;color:#ff4b4b}}
+.t em{{font-style:italic;color:var(--hi)}}
 .ttl{{position:absolute;left:60px;right:60px;top:110px;text-align:center}}
 .ttl .kick{{margin-bottom:18px}}
-.foil{{position:absolute;padding:5px;border-radius:30px;background:var(--foil);box-shadow:0 30px 80px rgba(0,0,0,.6),0 0 40px rgba(192,132,252,.25)}}
+.foil{{position:absolute;padding:5px;border-radius:30px;background:var(--foil);box-shadow:0 30px 80px rgba(0,0,0,.6),0 0 40px rgba(22,199,132,.25)}}
 .pnl{{border-radius:25px;background:linear-gradient(170deg,#141c28,#0a0f17);padding:36px 40px;position:relative;overflow:hidden}}
 .ex{{position:absolute;right:26px;top:22px;font:700 18px 'JetBrains Mono',monospace;letter-spacing:2px;text-transform:uppercase;color:#94a3b8}}
 .sheen{{position:absolute;top:-10%;bottom:-10%;width:30%;left:0;opacity:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.22),transparent);pointer-events:none}}
@@ -60,15 +74,18 @@ html,body{{width:{W}px;height:{H}px;overflow:hidden;background:#04070b;font-fami
 #wallrot{{position:absolute;left:50%;top:50%;width:1400px;height:1900px;margin-left:-700px;margin-top:-950px;transform:rotate(-8deg)}}
 #wall{{display:grid;grid-template-columns:repeat(5,250px);grid-auto-rows:160px;gap:22px;justify-content:center}}
 .st{{padding:4px;border-radius:20px;background:var(--foil)}}
-.st:nth-child(3n+1){{background:linear-gradient(145deg,#ff6b6b,#7f1d1d)}}
+.st:nth-child(3n+1){{background:linear-gradient(145deg,#6ee7b7,#065f46)}}
 .st:nth-child(3n+2){{background:linear-gradient(145deg,#e5e7eb,#475569)}}
-.st-in{{height:100%;border-radius:16px;background:linear-gradient(170deg,color-mix(in srgb,#ff0000 60%,#000),#0b1018);display:flex;flex-direction:column;justify-content:center;padding:0 24px}}
+.st-in{{height:100%;border-radius:16px;background:linear-gradient(170deg,color-mix(in srgb,#16c784 55%,#000),#0b1018);display:flex;flex-direction:column;justify-content:center;padding:0 24px}}
 .st-in b{{font:800 italic 54px/1 'AC','Montserrat',sans-serif;padding-right:.1em}}
-.st-in span{{margin-top:10px;font:700 18px 'JetBrains Mono',monospace;letter-spacing:1px;text-transform:uppercase;color:#fecaca}}
-#s1-scrim{{position:absolute;inset:0;background:radial-gradient(ellipse at 50% 48%,rgba(4,7,11,.93) 0%,rgba(4,7,11,.8) 42%,rgba(4,7,11,.35) 100%)}}
+.st-in span{{margin-top:10px;font:700 18px 'JetBrains Mono',monospace;letter-spacing:1px;text-transform:uppercase;color:#d1fae5}}
+.st.sh img{{width:100%;height:100%;object-fit:cover;object-position:50% 20%;border-radius:16px;display:block}}
+.cr-in{{height:100%;border-radius:16px;background:#fff;display:grid;place-items:center}}
+.cr-in img{{height:118px;width:200px;object-fit:contain}}
+#s1-scrim{{position:absolute;inset:0;background:radial-gradient(ellipse at 50% 48%,rgba(6,10,18,.88) 0%,rgba(6,10,18,.66) 40%,rgba(6,10,18,.12) 100%)}}
 #s1-head{{position:absolute;left:40px;right:40px;top:400px;text-align:center}}
 .h1{{display:block;font:800 italic 156px/0.95 'AC','Montserrat',sans-serif;text-transform:uppercase;letter-spacing:-2px;padding-right:.16em}}
-.h1.r{{color:#ff4b4b}}
+.h1.r{{color:var(--hi)}}
 #s1-sub{{position:absolute;left:0;right:0;top:1090px;text-align:center;font:700 30px 'JetBrains Mono',monospace;letter-spacing:4px;text-transform:uppercase;color:#e5e7eb}}
 /* s2 sync */
 #syncw{{left:90px;top:440px;width:900px}}
@@ -119,11 +136,11 @@ html,body{{width:{W}px;height:{H}px;overflow:hidden;background:#04070b;font-fami
 /* s6 and more */
 #mgrid{{position:absolute;left:0;right:0;top:430px;display:grid;grid-template-columns:repeat(2,420px);grid-auto-rows:200px;gap:28px;justify-content:center}}
 .mo{{padding:5px;border-radius:26px;background:var(--foil);opacity:0}}
-.mo:nth-child(2){{background:linear-gradient(145deg,#fde68a,#b45309)}}
-.mo:nth-child(3){{background:linear-gradient(145deg,#ff6b6b,#7f1d1d)}}
+.mo:nth-child(2){{background:linear-gradient(145deg,#7dd3fc,#0e7490)}}
+.mo:nth-child(3){{background:linear-gradient(145deg,#6ee7b7,#065f46)}}
 .mo:nth-child(4){{background:linear-gradient(145deg,#7dd3fc,#1d4ed8)}}
 .mo:nth-child(5){{background:linear-gradient(145deg,#e5e7eb,#475569)}}
-.mo:nth-child(6){{background:linear-gradient(145deg,#c4b5fd,#6d28d9)}}
+.mo:nth-child(6){{background:linear-gradient(145deg,#a7f3d0,#047857)}}
 .mo-in{{height:100%;border-radius:21px;background:linear-gradient(170deg,#141c28,#0a0f17);display:flex;flex-direction:column;justify-content:center;padding:0 34px}}
 .mo-in b{{font:800 italic 70px/1 'AC','Montserrat',sans-serif;padding-right:.12em}}
 .mo-in span{{margin-top:12px;font:700 26px 'JetBrains Mono',monospace;letter-spacing:2px;text-transform:uppercase;color:#e5e7eb}}
@@ -135,7 +152,7 @@ html,body{{width:{W}px;height:{H}px;overflow:hidden;background:#04070b;font-fami
 #e-word em{{font-style:italic;color:var(--green)}}
 #e-head{{position:absolute;left:50px;right:50px;top:330px;text-align:center}}
 .e1{{display:block;font:800 italic 150px/0.95 'AC','Montserrat',sans-serif;text-transform:uppercase;letter-spacing:-2px;padding-right:.16em;opacity:0}}
-.e1.r{{color:#ff4b4b}}
+.e1.r{{color:var(--hi)}}
 #e-sub{{position:absolute;left:80px;right:80px;top:660px;text-align:center;font:600 40px/1.3 'Inter',sans-serif;color:#e5e7eb;opacity:0}}
 #e-btn{{position:absolute;left:170px;right:170px;top:830px;padding:36px 20px;border-radius:999px;background:var(--green);color:#052e16;text-align:center;font:800 48px 'Inter',sans-serif;opacity:0;box-shadow:0 0 60px rgba(52,211,153,.45)}}
 #e-url{{position:absolute;left:0;right:0;top:980px;text-align:center;font:700 36px 'JetBrains Mono',monospace;letter-spacing:2px;color:#fff;opacity:0}}
