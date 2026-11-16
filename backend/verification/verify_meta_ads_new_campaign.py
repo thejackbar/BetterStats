@@ -86,6 +86,18 @@ using(NEW)
 mine = m._current_campaign_utm_contents()
 ck("the new campaign's own utm_contents include the live ad's", LIVE_CONTENT in mine, str(mine))
 
+# The history video, live 16 Nov 2026 (tags read from its creative's url_tags that day).
+VIDEO_AD, VIDEO_CONTENT = "120252402536450121", "history_video_4x5"
+ventry = m.AD_DESTINATIONS.get(VIDEO_AD) or {}
+ck("the history video ad is mapped to the new campaign", ventry.get("campaign_id") == NEW, str(ventry))
+ck("with the exact utm_content its creative carries", ventry.get("utm_content") == VIDEO_CONTENT, str(ventry.get("utm_content")))
+ck("and it sells the trial", m.stream_for_ad(VIDEO_AD, "Ad_Video_History_4x5_Nov2026") == m.STREAM_TRIAL)
+ck("its tag is one of the new campaign's own", VIDEO_CONTENT in m._current_campaign_utm_contents())
+ck("a signup through the video counts for the new campaign", m._attribution_matches_campaign(signup(VIDEO_CONTENT)))
+using(OLD)
+ck("and not for the old one", not m._attribution_matches_campaign(signup(VIDEO_CONTENT)))
+using(NEW)
+
 mapped = {k: v for k, v in m.AD_DESTINATIONS.items() if v.get("campaign_id") == NEW}
 contents = [v.get("utm_content") for v in mapped.values() if v.get("utm_content")]
 ck("every new-campaign ad that is mapped carries a utm_content", bool(mapped) and len(contents) == len(mapped), str(mapped.keys()))
