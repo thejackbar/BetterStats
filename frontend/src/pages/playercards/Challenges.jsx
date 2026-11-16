@@ -32,23 +32,31 @@ function Bar({ percent, accent }) {
   return <div style={{ height: 6, borderRadius: 3, background: 'rgba(148,163,184,.25)', margin: '10px 0 6px', overflow: 'hidden' }}><div style={{ width: `${percent}%`, height: '100%', background: accent }} /></div>
 }
 
-// Who is in a collection or a private set, with a tick for the ones the player holds.
+// Who is in a collection or a private set. A card the player holds is a shaded tile in the club colour; one they still need is a faint
+// outline. The shade sits behind the name itself, so there is no separate tick to match up with a name in the next column.
 function Members({ members }) {
+  const { accent } = usePC()
   const [open, setOpen] = useState(false)
   if (!members?.length) return null
   return (
     <div className="mt-2">
       <button type="button" className="text-[12px] underline text-pb-dim" onClick={() => setOpen((v) => !v)} aria-expanded={open} data-members-toggle>{open ? 'Hide the cards' : 'Show the cards'}</button>
       {open && (
-        <ul className="mt-2 grid gap-1 text-[13px]" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))' }} data-members>
-          {members.map((m) => (
-            <li key={m.key} data-member={m.key} data-held={m.held ? 'yes' : 'no'} className="flex items-center gap-2" style={{ opacity: m.held ? 1 : 0.6 }}>
-              <span aria-hidden style={{ width: 8, height: 8, borderRadius: 4, background: TIER_DOT[m.tier] || '#94a3b8', flex: 'none' }} />
-              <span className="min-w-0 truncate">{m.name}</span>
-              <span aria-label={m.held ? 'Held' : 'Not held'} className="ml-auto">{m.held ? '✓' : ''}</span>
-            </li>
-          ))}
-        </ul>
+        <>
+          <div className="mt-2 text-[12px] text-pb-dim" data-members-legend>Shaded cards are the ones you hold.</div>
+          <ul className="mt-2 grid gap-1.5 text-[13px]" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))' }} data-members>
+            {members.map((m) => (
+              <li key={m.key} data-member={m.key} data-held={m.held ? 'yes' : 'no'} className="flex items-center gap-2 rounded-lg px-2.5 py-1.5"
+                style={m.held
+                  ? { background: `color-mix(in srgb, ${accent} 30%, transparent)`, border: `1px solid ${accent}`, fontWeight: 600 }
+                  : { background: 'transparent', border: '1px dashed rgba(148,163,184,.35)', opacity: 0.55 }}>
+                <span aria-hidden style={{ width: 8, height: 8, borderRadius: 4, background: TIER_DOT[m.tier] || '#94a3b8', flex: 'none' }} />
+                <span className="min-w-0 truncate">{m.name}</span>
+                <span className="sr-only">{m.held ? ' (held)' : ' (not held)'}</span>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
     </div>
   )

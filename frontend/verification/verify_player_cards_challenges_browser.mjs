@@ -88,7 +88,15 @@ const run = async () => {
     check('an exchange shows its rules and reward, with a way in', (await page.locator('[data-challenge="c1"] [data-requirements] li').count()) === 3 && /2 packs/.test(await page.locator('[data-challenge="c1"] [data-reward]').innerText()) && (await page.locator('[data-challenge="c1"] [data-challenge-go]').count()) === 1)
     check('a collection shows progress and no way to hand in', /1 of 3/i.test(await page.locator('[data-challenge="c2"] [data-challenge-progress]').innerText()) && (await page.locator('[data-challenge="c2"] [data-challenge-go]').count()) === 0)
     await page.locator('[data-challenge="c2"] [data-members-toggle]').click()
-    check('the collection lists its cards with the held one ticked', (await page.locator('[data-challenge="c2"] [data-member]').count()) === 3 && (await page.locator('[data-member="p:p2"]').getAttribute('data-held')) === 'yes' && (await page.locator('[data-member="p:p3"]').getAttribute('data-held')) === 'no')
+    check('the collection lists its cards with the held one marked', (await page.locator('[data-challenge="c2"] [data-member]').count()) === 3 && (await page.locator('[data-member="p:p2"]').getAttribute('data-held')) === 'yes' && (await page.locator('[data-member="p:p3"]').getAttribute('data-held')) === 'no')
+    {
+      // The held card is shaded behind its own name (no tick in another column); the one still needed is a faint dashed outline.
+      const bg = (key) => page.locator(`[data-member="${key}"]`).evaluate((el) => getComputedStyle(el).backgroundColor)
+      const held = await bg('p:p2'), need = await bg('p:p3')
+      check('a held card is shaded and a needed one is not', held !== need && /0\)$|transparent/.test(need) && !/0\)$/.test(held), `held=${held} need=${need}`)
+      check('no tick sits in a separate column', !/✓/.test(await page.locator('[data-challenge="c2"] [data-members]').innerText()))
+      check('the list says what shading means', /Shaded cards are the ones you hold/.test(await page.locator('[data-challenge="c2"] [data-members-legend]').innerText()))
+    }
     check('the private set is there and says it pays nothing', (await page.locator('[data-my-set="s1"]').count()) === 1 && /pay nothing/.test(await page.locator('[data-section="my-sets"]').innerText()))
 
     // Make a set.
