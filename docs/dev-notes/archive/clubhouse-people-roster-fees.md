@@ -1370,3 +1370,9 @@ Definitions. Selling is `kind='sold'` only (hand-entered, Square, paid online-st
 Exports. openpyxl turns a string starting with `=` into a formula, so every text cell that starts with `=` is forced to a string cell; the CSV prefixes `=`, `+`, `-`, `@` with a quote (`csv_text`). Movement exports are capped at 50,000 rows.
 
 Checked. `backend/verification/verify_merch_dashboard.py` (51 checks, real Postgres; `--control` makes every movement fall outside the window and fails the 22 movement-driven checks while the stock-now checks still pass; `DUMP_DASHBOARD=<file>` writes the real payloads). `frontend/verification/verify_merch_dashboard_browser.mjs` (34 checks on the production build, serving that real payload as the stub: nav, KPIs, every chart draws marks, toggles, window change on the wire, status filter, search keeps focus, row expand, export hrefs, empty club, no overflow at 390px). Colour meanings are fixed: theme accent is stock, green sold, blue issued, amber warning, red gone.
+
+## v9.144.0.2: Merch stock edit buttons show a pencil
+
+The Stock page's edit product, edit line and rename category buttons used `<Icon name="settings">` from `pages/admin/betterselect/ui.jsx`. That glyph is a small circle with eight rays, nearly the same drawing as the set's own `sun` (the theme toggle), so a club read it as a sun, and no other screen used it for editing. Added an `edit` pencil to the shared set (the same paths BetterIQ's `edit` uses) and pointed the three merch buttons at it; nothing else in the app used `settings`.
+
+Checked on the production build in Chromium with the API stubbed: every `button[title^="Edit"]` on the Stock page now draws the two-path pencil and no circle.

@@ -23,6 +23,13 @@ const card = (pid, name, tier, rarity, x = {}) => ({
   wickets: 20, bowl_avg: 31.2, dismissals: 30, rarity, tier, copies: 1, obtained_at: '2026-10-20T01:00:00Z', mine: false, ...x,
 })
 const SPEND = [{ ...card('p2', 'Zed, Alan', 'common', 18), copies: 2 }, { ...card('p3', 'Adams, Brian', 'epic', 81), copies: 1 }, { ...card('p4', 'Hill, Tom', 'rare', 55), copies: 1 }]
+// A batters' challenge with roles, ratings across the range and special cards, for the filters.
+const special = (id, pid, name, kind, title, x = {}) => ({ kind: 'special', key: `s:${id}`, special_id: id, special_kind: kind, player_id: pid, name, photo_url: null, hero_photo_url: null, title, occurred_on: '2024-01-01', detail: { season: '2023/24', grade: 'A Grade' }, tier: 'special', copies: 1, ...x })
+const FILTER_CARDS = [
+  card('b1', 'Brown, Sam', 'legendary', 95, { role: 'BAT' }), card('b2', 'Cole, Ned', 'rare', 52, { role: 'BAT' }), card('b3', 'Dunn, Kai', 'common', 12, { role: 'BAT' }),
+  card('w1', 'Ford, Lee', 'epic', 78, { role: 'BOWL' }), card('k1', 'Gray, Max', 'rare', 60, { role: 'WK' }), card('n1', 'Hart, Joe', 'common', 30),
+  special('x1', 'b1', 'Brown, Sam', 'century', '112 v Rovers', { role: 'BAT' }), special('x2', 'w1', 'Ford, Lee', 'award', 'Bowler of the Year', { role: 'BOWL' }),
+]
 const reward = { quality: 'special', quality_label: 'Special', qty: 2, size: 5, title: 'Squad reward' }
 const EXCHANGE = { id: 'c1', kind: 'exchange', title: 'Rare squad', blurb: 'Two rares and a common.', reward, starts_on: null, ends_on: null, status: 'open', completions: 0, max_completions: 2, finished: false, requirements: ['3 cards', 'At least 1 Rare', 'At least 1 Common'], count: 3 }
 const COLLECTION = {
@@ -69,6 +76,8 @@ const run = async () => {
         state.submitted = true
         return json({ ok: true, used: 3, packs: 2, reward })
       }
+      if (/^\/challenges\/c3\/check$/.test(path)) return json({ ok: false, checks: [{ id: 'count', label: '3 cards', ok: false, have: body.cards.length, need: 3 }], rating: null })
+      if (/^\/challenges\/c3$/.test(path)) return json({ id: 'c3', title: 'Top order', blurb: null, rules: { count: 3, kinds: 'any', roles: ['BAT'] }, requirements: ['3 cards', 'Only batters'], reward, status: 'open', completions: 0, max_completions: 1, cards: FILTER_CARDS })
       if (/^\/challenges\/c1$/.test(path)) return json({ id: 'c1', title: EXCHANGE.title, blurb: EXCHANGE.blurb, rules: {}, requirements: EXCHANGE.requirements, reward, status: 'open', completions: state.submitted ? 1 : 0, max_completions: 2, cards: SPEND })
       if (/\/me\/cards$/.test(url)) return json({ club: CLUB, week_resets_at: '2026-10-26T16:00:00+00:00', packs: [], pack_size: 5, season: 'Summer', cards: [], totals: {} })
       if (/\/me\/profile/.test(url)) return json({ club: CLUB, player: { id: ME, display_name: 'Barendse, Jack' }, modules: ['cards'], cards: { ready: 0, swaps_waiting: 0 }, has_availability: false, squads: [], selected: [], training: { upcoming: [] }, can_update_details: false })
@@ -88,7 +97,15 @@ const run = async () => {
     check('an exchange shows its rules and reward, with a way in', (await page.locator('[data-challenge="c1"] [data-requirements] li').count()) === 3 && /2 packs/.test(await page.locator('[data-challenge="c1"] [data-reward]').innerText()) && (await page.locator('[data-challenge="c1"] [data-challenge-go]').count()) === 1)
     check('a collection shows progress and no way to hand in', /1 of 3/i.test(await page.locator('[data-challenge="c2"] [data-challenge-progress]').innerText()) && (await page.locator('[data-challenge="c2"] [data-challenge-go]').count()) === 0)
     await page.locator('[data-challenge="c2"] [data-members-toggle]').click()
-    check('the collection lists its cards with the held one ticked', (await page.locator('[data-challenge="c2"] [data-member]').count()) === 3 && (await page.locator('[data-member="p:p2"]').getAttribute('data-held')) === 'yes' && (await page.locator('[data-member="p:p3"]').getAttribute('data-held')) === 'no')
+    check('the collection lists its cards with the held one marked', (await page.locator('[data-challenge="c2"] [data-member]').count()) === 3 && (await page.locator('[data-member="p:p2"]').getAttribute('data-held')) === 'yes' && (await page.locator('[data-member="p:p3"]').getAttribute('data-held')) === 'no')
+    {
+      // The held card is shaded behind its own name (no tick in another column); the one still needed is a faint dashed outline.
+      const bg = (key) => page.locator(`[data-member="${key}"]`).evaluate((el) => getComputedStyle(el).backgroundColor)
+      const held = await bg('p:p2'), need = await bg('p:p3')
+      check('a held card is shaded and a needed one is not', held !== need && /0\)$|transparent/.test(need) && !/0\)$/.test(held), `held=${held} need=${need}`)
+      check('no tick sits in a separate column', !/✓/.test(await page.locator('[data-challenge="c2"] [data-members]').innerText()))
+      check('the list says what shading means', /Shaded cards are the ones you hold/.test(await page.locator('[data-challenge="c2"] [data-members-legend]').innerText()))
+    }
     check('the private set is there and says it pays nothing', (await page.locator('[data-my-set="s1"]').count()) === 1 && /pay nothing/.test(await page.locator('[data-section="my-sets"]').innerText()))
 
     // Make a set.
@@ -152,7 +169,53 @@ const run = async () => {
     await ctx.close()
   }
 
-  for (const route of ['/challenges', '/challenges/c1']) {
+  {
+    const { ctx, page } = await player(1280, '/challenges/c3', '[data-screen="challenge"]')
+    // Every step is presence-safe, so the screen before these filters reports each check as failed instead of stopping.
+    page.setDefaultTimeout(3000)
+    const act = (fn) => fn().catch(() => null)
+    const shown = () => page.locator('[data-challenge-card]').evaluateAll((els) => els.map((e) => e.getAttribute('data-challenge-card')))
+    const same = async (want) => JSON.stringify((await shown()).slice().sort()) === JSON.stringify(want.slice().sort())
+    check('a challenge with a role rule starts on the cards that fit it', (await act(() => page.locator('[data-filter-fits]').isChecked())) && await same(['p:b1', 'p:b2', 'p:b3', 's:x1']), JSON.stringify(await shown()))
+    check('the count says how many of the cards are shown', /Showing 4 of 8/.test(await act(() => page.locator('[data-filter-count]').innerText())))
+    await act(() => page.locator('[data-filter-fits]').uncheck())
+    check('unticking it shows every card', (await page.locator('[data-challenge-card]').count()) === 8)
+    check('role chips are drawn only for roles some card has, plus no role recorded', (await page.locator('[data-filter-row="role"] [role=tab]').count()) === 5 && (await page.locator('[data-filter="role:AR"]').count()) === 0 && (await page.locator('[data-filter="role:none"]').count()) === 1)
+    await act(() => page.click('[data-filter="role:BOWL"]'))
+    check('the role filter keeps bowlers, player and special cards', await same(['p:w1', 's:x2']), JSON.stringify(await shown()))
+    await act(() => page.click('[data-filter="role:none"]'))
+    check('no role recorded keeps the players without one', await same(['p:n1']), JSON.stringify(await shown()))
+    await act(() => page.click('[data-filter="role:any"]'))
+    await act(() => page.fill('[data-rating-lo]', '50')); await act(() => page.fill('[data-rating-hi]', '80'))
+    check('a rating range of 50 to 80 keeps only player cards in it', await same(['p:b2', 'p:w1', 'p:k1']), JSON.stringify(await shown()))
+    check('the screen says why special cards are hidden', (await page.locator('[data-rating-note]').count()) === 1)
+    await act(() => page.fill('[data-rating-lo]', '1')); await act(() => page.fill('[data-rating-hi]', '99'))
+    check('the full range of 1 to 99 brings the specials back', (await page.locator('[data-challenge-card]').count()) === 8 && (await page.locator('[data-rating-note]').count()) === 0)
+    await act(() => page.fill('[data-rating-lo]', '150')); await act(() => page.locator('[data-rating-lo]').blur())
+    check('a rating above 99 is held at 99', (await act(() => page.locator('[data-rating-lo]').inputValue())) === '99' && await same([]))
+    await act(() => page.fill('[data-rating-lo]', '0')); await act(() => page.locator('[data-rating-lo]').blur())
+    await act(() => page.fill('[data-rating-hi]', '20')); await act(() => page.locator('[data-rating-hi]').blur())
+    check('a rating below 1 is held at 1', (await act(() => page.locator('[data-rating-lo]').inputValue())) === '1' && await same(['p:b3']), JSON.stringify(await shown()))
+    await act(() => page.fill('[data-rating-lo]', '90')); await act(() => page.locator('[data-rating-lo]').blur())
+    check('a low end above the high end swaps them', (await act(() => page.locator('[data-rating-lo]').inputValue())) === '20' && (await act(() => page.locator('[data-rating-hi]').inputValue())) === '90')
+    await act(() => page.click('[data-filter-clear]'))
+    check('Clear filters puts everything back, with the rules filter on again', (await act(() => page.locator('[data-filter-fits]').isChecked())) && (await page.locator('[data-challenge-card]').count()) === 4 && (await act(() => page.locator('[data-rating-hi]').inputValue())) === '99')
+    await act(() => page.locator('[data-filter-fits]').uncheck())
+    await act(() => page.click('[data-filter="type:centuries"]'))
+    check('the type chips go down to a kind of special card', await same(['s:x1']))
+    await act(() => page.click('[data-filter="type:player"]'))
+    await act(() => page.selectOption('[data-filter-sort]', 'rating_asc'))
+    check('sorting by lowest rating orders the players by rating', JSON.stringify(await shown()) === JSON.stringify(['p:b3', 'p:n1', 'p:b2', 'p:k1', 'p:w1', 'p:b1']), JSON.stringify(await shown()))
+    await act(() => page.fill('[data-filter-search]', 'ford'))
+    check('search narrows within the other filters', await same(['p:w1']))
+    await act(() => page.locator('[data-challenge-card="p:w1"] button, [data-challenge-card="p:w1"] [role=button]').first().click())
+    await act(() => page.fill('[data-filter-search]', 'brown'))
+    check('a picked card stays picked when a filter hides it', (await page.locator('[data-picked-row="p:w1"]').count()) === 1 && (await page.locator('[data-challenge-card="p:w1"]').count()) === 0)
+    await page.screenshot({ path: process.env.SHOT_DIR ? `${process.env.SHOT_DIR}/challenge-filters-1280.png` : '/dev/null' }).catch(() => {})
+    await ctx.close()
+  }
+
+  for (const route of ['/challenges', '/challenges/c1', '/challenges/c3']) {
     const { ctx, page } = await player(390, route, route === '/challenges' ? '[data-screen="challenges"]' : '[data-screen="challenge"]')
     if (route === '/challenges') await page.locator('[data-challenge="c2"] [data-members-toggle]').click()
     check(`${route} has no sideways scroll at 390`, (await overflow(page)) <= 0, String(await overflow(page)))

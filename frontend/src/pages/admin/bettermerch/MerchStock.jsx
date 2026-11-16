@@ -366,7 +366,7 @@ function VariantRow({ variant, product, onMove, onEditVariant }) {
       <div className="flex items-center gap-2 shrink-0">
         <span className={`font-display font-bold text-sm ${low ? 'text-pb-amber' : 'text-pb-text'}`}>{variant.quantity}</span>
         {low && <Pill tone="amber">low</Pill>}
-        <button onClick={() => onEditVariant(variant, product)} title="Edit line" className="text-pb-faint hover:text-pb-accent p-1"><Icon name="settings" size={14} /></button>
+        <button onClick={() => onEditVariant(variant, product)} title="Edit line" className="text-pb-faint hover:text-pb-accent p-1"><Icon name="edit" size={14} /></button>
         <Btn sm icon="plus" onClick={() => onMove(variant, 'in')}>In</Btn>
         <Btn sm icon="minus" onClick={() => onMove(variant, 'out')}>Out</Btn>
       </div>
@@ -394,7 +394,7 @@ function ProductCard({ product, catPathById, onMove, onAddVariant, onEdit, onEdi
             {product.supplier && <> · {product.supplier}</>}
           </div>
         </div>
-        <button onClick={() => onEdit(product)} title="Edit product" className="text-pb-faint hover:text-pb-accent p-1 shrink-0"><Icon name="settings" size={15} /></button>
+        <button onClick={() => onEdit(product)} title="Edit product" className="text-pb-faint hover:text-pb-accent p-1 shrink-0"><Icon name="edit" size={15} /></button>
       </div>
       <div className="divide-y divide-pb-hairline/50">
         {(product.variants || []).map((v) => (
@@ -669,7 +669,7 @@ function CategoryManagerModal({ categories, onChanged, onClose }) {
                   <span className="flex-1 text-[13px]" style={{ paddingLeft: `${(c.depth - 1) * 14}px` }}>
                     {c.name}{c.depth > 1 && <span className="text-pb-faintest text-[11px]"> · {pathMap[c.id]}</span>}
                   </span>
-                  <button onClick={() => { setRenaming(c.id); setName(c.name) }} className="text-pb-faint hover:text-pb-accent p-1" title="Rename"><Icon name="settings" size={14} /></button>
+                  <button onClick={() => { setRenaming(c.id); setName(c.name) }} className="text-pb-faint hover:text-pb-accent p-1" title="Rename"><Icon name="edit" size={14} /></button>
                   <button onClick={() => del(c)} className="text-pb-faint hover:text-pb-red p-1" title="Delete"><Icon name="trash" size={14} /></button>
                 </>
               )}
