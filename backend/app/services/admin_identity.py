@@ -57,6 +57,7 @@ async def validate_admin_fields(
     email: str = "",
     mobile_number: str = "",
     require_mobile: bool = True,
+    require_full_profile: bool = True,
 ) -> dict:
     """Field-name → error message for the primary admin's details. An empty
     dict means every field passed.
@@ -73,13 +74,20 @@ async def validate_admin_fields(
 
     if not (first_name or "").strip():
         errors["first_name"] = "First name is required"
-    if not (last_name or "").strip():
+    # The public trial asks for first name and email only (the rest is filled
+    # by ``fill_identity_defaults`` or left blank), so it passes
+    # require_full_profile=False. Super Admin -> New Club still asks for all of it.
+    if require_full_profile and not (last_name or "").strip():
         errors["last_name"] = "Last name is required"
-    if not (display_name or "").strip():
+    if require_full_profile and not (display_name or "").strip():
         errors["display_name"] = "Preferred display name is required"
 
     uname = (username or "").strip().lower()
-    if not uname or len(uname) < 3 or len(uname) > 32:
+    mail_norm = (email or "").strip().lower()
+    # A username that IS the person's email may be longer than 32 characters:
+    # that is how the self-serve trial signs people in with their email.
+    max_len = 254 if uname and uname == mail_norm else 32
+    if not uname or len(uname) < 3 or len(uname) > max_len:
         errors["username"] = "Username must be 3-32 characters"
     else:
         existing = await db.execute(select(User).where(User.username == uname))
@@ -110,3 +118,34 @@ async def validate_admin_fields(
         )
 
     return errors
+
+
+def default_display_name(first_name: str = "", last_name: str = "") -> str:
+    """What a new admin is called when they were not asked: their name as typed."""
+    return " ".join(p for p in ((first_name or "").strip(), (last_name or "").strip()) if p)
+
+
+async def default_username(db: AsyncSession, email: str = "", first_name: str = "") -> str:
+    """A unique login for an admin who was not asked to pick one.
+
+    Login is by username only (routers/auth.login), so the email itself is the
+    first choice: the person signs in with the address they just verified. If
+    some account already uses that string as its username, fall back to the
+    email's local part (or the first name) with a number on the end."""
+    mail = (email or "").strip().lower()
+    if mail and EMAIL_RE.match(mail):
+        taken = (await db.execute(select(User.id).where(User.username == mail))).first()
+        if not taken:
+            return mail
+    local = mail.split("@", 1)[0] if mail else ""
+    base = re.sub(r"[^a-z0-9]", "", local)[:24] or re.sub(r"[^a-z0-9]", "", (first_name or "").lower())[:24]
+    if len(base) < 3:
+        base = (base + "admin")[:24]
+    rows = (await db.execute(select(User.username).where(User.username.like(f"{base}%")))).scalars().all()
+    used = {r for r in rows if r}
+    if base not in used:
+        return base
+    n = 2
+    while f"{base}{n}" in used:
+        n += 1
+    return f"{base}{n}"

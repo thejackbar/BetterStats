@@ -216,7 +216,7 @@ function ClubActionModal({ club, onSetUp, onClose }) {
                 className="w-full px-4 py-2.5 rounded-lg font-display font-semibold text-sm text-pb-bg transition hover:opacity-90"
                 style={{ background: 'var(--pb-accent)' }}
               >
-                Set up my club
+                Claim my club
               </button>
               <p className="text-center text-xs text-pb-dim">Free · about 3 minutes · no card</p>
               <button

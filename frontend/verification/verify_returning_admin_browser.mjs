@@ -63,22 +63,17 @@ async function open(email, { width = 1300, returning }) {
 
 async function walk(page, email) {
   await page.goto(`${BASE}/trial?teaser=TokenForLapsed00001`)
-  await page.getByRole('button', { name: 'CONTINUE' }).first().waitFor()        // club prepared
-  await page.getByRole('button', { name: 'CONTINUE' }).first().click()
-  await page.locator('input[type=email]').waitFor()                              // admin details
-  const text = page.locator('input[type=text]')
-  await text.nth(0).fill('Ann'); await text.nth(1).fill('Admin')
-  await text.nth(2).fill('Ann Admin'); await text.nth(3).fill('ann-admin')
+  await page.getByTestId('claim-club').waitFor()                                 // club prepared
+  await page.getByTestId('claim-club').click()
+  await page.locator('input[type=email]').waitFor()                              // admin details: first name + email
+  await page.getByLabel('First name').fill('Ann')
   await page.locator('input[type=email]').fill(email)
-  await page.locator('input[type=tel]').fill('0412345678')
   await page.getByText('All details valid').waitFor()
 }
 async function toSubmitStep(page, email) {
   await page.getByRole('button', { name: 'CONTINUE' }).first().click()
-  await page.getByRole('button', { name: 'SEND CODE' }).click()
-  await page.locator('input[inputmode=numeric]').fill('1234')
-  await page.getByRole('button', { name: 'VERIFY' }).click()
-  await page.getByRole('button', { name: 'CONTINUE' }).first().click()
+  await page.locator('input[inputmode=numeric]').fill('1234')                    // code auto-sent, auto-checked
+  await page.locator('input[type=checkbox]:not([disabled])').nth(0).waitFor()     // auto-advanced to terms
   await page.locator('input[type=checkbox]:not([disabled])').nth(0).check()
   await page.locator('input[type=checkbox]:not([disabled])').nth(1).check()
   await page.getByRole('button', { name: 'CONTINUE' }).first().click()
@@ -91,7 +86,7 @@ await section('returning admin', async () => {
   const last = seen.validate.at(-1) || {}
   ck('the details check carries the club on the wire', last.org_id === 'CA-LAPSED' && last.club_name === 'Lapsed Cricket Club', JSON.stringify(last))
   ck('welcome-back note is shown', await page.getByTestId('returning-admin-note').isVisible())
-  ck('the "password is set later" note is replaced, not shown beside it', !(await page.getByText("Password isn't set here").count()))
+  ck('the "password is set later" note is replaced, not shown beside it', !(await page.getByText("You'll sign in with this email").count()))
   await toSubmitStep(page, 'ann@returning.example')
   ck('no password boxes at the submit step', (await page.locator('input[type=password]').count()) === 0
     && (await page.getByTestId('returning-admin-no-password').isVisible()))
@@ -111,7 +106,7 @@ await section('new person', async () => {
   const { page, ctx, seen } = await open('nina@new.example', { returning: false })
   await walk(page, 'nina@new.example')
   ck('control: no welcome-back note for a new person', (await page.getByTestId('returning-admin-note').count()) === 0
-    && (await page.getByText("Password isn't set here").isVisible()))
+    && (await page.getByText("You'll sign in with this email").isVisible()))
   await toSubmitStep(page, 'nina@new.example')
   ck('control: both password boxes are there', (await page.locator('input[type=password]').count()) === 2)
   const btn = page.getByRole('button', { name: /START 14 DAY FREE TRIAL/ })

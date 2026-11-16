@@ -911,6 +911,10 @@ def ad_note(ad: dict, all_ads: list[dict]) -> str:
 REGISTRATION_STEP_ORDER = [
     ("club_searched", "Club searched"),
     ("club_prepared", "Club selected"),
+    # v9.144.2: the wizard's admin-details form was on screen. "Club selected" also
+    # counts clicks on already-registered clubs and season-page previews, so it
+    # is not the number of people who saw the form; this is.
+    ("signup_form_opened", "Sign-up form opened"),
     ("admin_details_completed", "Admin details completed"),
     ("email_code_sent", "Verification code sent"),
     ("email_verified", "Email verified"),

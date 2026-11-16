@@ -8,6 +8,7 @@ import { CAP } from '../../lib/capabilities'
 import AdminLayout from '../../components/admin/AdminLayout'
 import SyncRunCard from '../../components/admin/SyncRunCard'
 import AdminBroadcastBanner from '../../components/admin/AdminBroadcastBanner'
+import ProfileNudge from '../../components/admin/ProfileNudge'
 import LinkedClubSwitcher from '../../components/admin/LinkedClubSwitcher'
 import { formatSeason } from '../../lib/cricketFormat'
 
@@ -344,6 +345,8 @@ export default function AdminDashboard() {
       <div className="max-w-3xl">
         {/* Messages from BetterCricket's own staff, first thing on the page. */}
         <AdminBroadcastBanner />
+        {/* New self-serve admins: the details the trial form no longer asks for. */}
+        <ProfileNudge />
         <h1 className="font-display font-bold text-2xl text-pb-text mb-1">
           Welcome{user?.display_name ? `, ${user.display_name}` : ''}
         </h1>

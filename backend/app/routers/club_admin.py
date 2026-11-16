@@ -3753,6 +3753,78 @@ async def patch_ui_prefs(
     return {"prefs": current}
 
 
+# ─── Own profile (v9.144.2) ──────────────────────────────────────────────────
+# The public trial asks for first name and email only. Last name, display name
+# and mobile are offered afterwards on the dashboard as a prompt the new admin
+# can fill in or close (``ui_preferences.profile_nudge == "pending"``, set at
+# self-serve registration), never as a gate. Any logged-in user may read and
+# change their OWN details here; username (the login) is not editable.
+PROFILE_NUDGE_KEY = "profile_nudge"
+
+
+def _own_profile(user: User) -> dict:
+    return {
+        "username": user.username,
+        "email": user.email,
+        "first_name": user.first_name or "",
+        "last_name": user.last_name or "",
+        "display_name": user.display_name or "",
+        "mobile_number": user.mobile_number or "",
+        "nudge": (user.ui_preferences or {}).get(PROFILE_NUDGE_KEY) == "pending",
+    }
+
+
+class OwnProfilePatch(BaseModel):
+    first_name: str | None = None
+    last_name: str | None = None
+    display_name: str | None = None
+    mobile_number: str | None = None
+    # Close the dashboard prompt without changing anything.
+    dismiss_nudge: bool = False
+
+
+@router.get("/account/profile")
+async def get_own_profile(current_user: User = Depends(get_current_user)):
+    return _own_profile(current_user)
+
+
+@router.patch("/account/profile")
+async def patch_own_profile(
+    data: OwnProfilePatch,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services import admin_identity
+    sent = data.model_fields_set
+    errors: dict[str, str] = {}
+    if "first_name" in sent and not (data.first_name or "").strip():
+        errors["first_name"] = "First name can't be blank"
+    if "display_name" in sent and not (data.display_name or "").strip():
+        errors["display_name"] = "Display name can't be blank"
+    mobile = (data.mobile_number or "").strip()
+    if "mobile_number" in sent and mobile and not admin_identity.mobile_valid(mobile):
+        errors["mobile_number"] = (
+            "Enter a valid Australian mobile number, or an international number starting with +"
+        )
+    if errors:
+        raise HTTPException(status_code=422, detail={"errors": errors})
+    if "first_name" in sent:
+        current_user.first_name = data.first_name.strip()
+    if "last_name" in sent:
+        current_user.last_name = (data.last_name or "").strip() or None
+    if "display_name" in sent:
+        current_user.display_name = data.display_name.strip()
+    if "mobile_number" in sent:
+        current_user.mobile_number = mobile or None
+    # Saving or closing both retire the prompt; it never comes back by itself.
+    prefs = dict(current_user.ui_preferences or {})
+    if prefs.pop(PROFILE_NUDGE_KEY, None) is not None:
+        current_user.ui_preferences = prefs
+    await db.commit()
+    await db.refresh(current_user)
+    return _own_profile(current_user)
+
+
 @router.post("/modules/{module_key}/start-trial")
 async def start_own_module_trial(
     module_key: str,

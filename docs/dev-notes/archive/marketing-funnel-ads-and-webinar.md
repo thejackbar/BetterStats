@@ -1668,3 +1668,25 @@ Cause: `classify_origin` treated any `utm_id` as our per-club email code and che
 Fix: an explicit Meta source or `paid_social` medium is checked before email; email keeps `utm_id`, an email medium (now including `sales_email`), `edm` and email sources; click ids (`fbclid`, click source) stay below email because Facebook's in-app browser adds `fbclid` to any outbound link. It is classification on read, so no stored data needed repair.
 
 Proof: `verify_meta_ads_club_origin.py` 35 pass; control on the previous `meta_ads.py` fails 5 (the reported click, the teaser-ad-pack click, `paid_social` alone, `sales_email` alone, the stored-registration path). Campaign scope, snapshot fixes and new campaign suites unchanged (20 each).
+
+## v9.144.2: two-field trial sign-up, auto email code, Sign-up form opened step (2026-11-16)
+
+Brief: the 7-day wizard funnel showed 109 at Club selected and 10 at Admin details completed, read as a 91% drop on the details form (six fields: first, last, display name, username, email, mobile).
+
+What the code showed first: `club_prepared` ("Club selected") is fired by `Trial.jsx handleClubClick` for EVERY club clicked in the /trial search, including registered clubs (sent to their own page) and before the season-page preview, and again by the modal's prepare. So 109 is clicks on clubs, not people who saw the form. The real drop at the form is unknown from that funnel. Added `signup_form_opened` (fired once when the details step renders) to `FUNNEL_STEPS`, `REGISTRATION_STEP_ORDER` and `usage._REG_STEP_ORDER` so the next week's funnel answers it. Earlier stage values are unchanged; only Admin details' percent-of-previous now divides by the new row.
+
+Changes:
+- Details step: first name and email only. The other keys still go in the payload, blank. `admin_identity.validate_admin_fields(require_full_profile=False)` drops last name and display name as requirements; `require_mobile=False`. A username equal to the email may be up to 254 characters.
+- `sst._with_identity_defaults` runs in `validate_admin` and `submit`: display name = name as typed; username = email (login is by username only, `routers/auth.login`, so they sign in with the email they verified). Fallback when that string is already a username: email local part, alphanumerics, then a number. Submit returns `username`. Last name and mobile stored as NULL when blank (nothing invented).
+- New `GET/PATCH /club-admin/account/profile` (own user, PERSONAL on the route audit). `model_fields_set` so an absent key is left alone and an explicit blank clears; mobile checked with `admin_identity.mobile_valid`; username is not editable. `ui_preferences.profile_nudge = "pending"` is written on the new User at self-serve registration; any PATCH retires it. `ProfileNudge.jsx` draws it on `AdminDashboard` under the broadcast banner.
+- Verify step: code auto-sent on entering the step (once per email, `autoSentForRef`), box focused, `autocomplete=one-time-code`, `maxLength` removed so a pasted "Code: 1234" reaches the digit filter, four digits auto-check, success auto-advances to Terms after 700 ms. Every beacon kept.
+- Club step: one full-width "Claim <short name>" button with "About a minute · free · no card" (30 seconds was not honest once the code, terms and password are counted); the footer CONTINUE on that step is gone. Trial.jsx `ClubActionModal` button reads "Claim my club".
+
+Kept: honeypot, `form_started_at`, idempotency key, attribution, browser plus CAPI CompleteRegistration on one event id, returning-admin path (username errors are still filtered for them).
+
+Not done (left as options): magic-link verification or verify-to-retain. Both change what a 4-digit code may unlock, and the returning-admin rule already says that code is too weak to open an account; a decision for the owner, not a form tweak.
+
+Proof: `backend/verification/verify_trial_two_field_signup.py` 29 passed; control on the previous commit 8 passed, 15 failed, every failure the reported behaviour (six required fields, no profile routes, no new step), the 8 passes being the guards that must hold both ways. `frontend/verification/verify_trial_two_field_browser.mjs` 29 passed; control on the previous build fails at the missing Claim button and dashboard card. `verify_returning_admin_reregister.py` 27 passed (one check moved from "no mobile" to "bad mobile", since mobile is optional now). `verify_returning_admin_browser.mjs` 15 passed, `verify_club_cta_browser.mjs` 39 passed and 2 failed, the same 2 "no page errors" failures on the previous build (pre-existing). Route audit passes.
+
+Meta side at the time (7 days to 16 Nov): live ad Ad_CheckOutYourClub_v2_Relaunch, AUD 119.53, 77 link clicks, 71 landing page views, 23 Leads, 2 Meta-attributed registrations (AUD 59.77 each), frequency 2.4 on reach 4,405. Three video ads in the same ad set (V1 ClubRecords, V3 Availability, V5 MatchSocials) had zero delivery: "Ad Creative Is Incomplete: the reel you selected is not available".
+

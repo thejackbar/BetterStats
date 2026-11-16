@@ -378,16 +378,31 @@ async def _validate_admin_fields(db: AsyncSession, data: ValidateAdminRequest) -
     below and the final /submit revalidation (Phase 8) — one set of rules,
     not two copies that could drift. The rules live in
     services/admin_identity.py so Super Admin → New Club (which creates the
-    same kind of account) applies exactly the same ones; a mobile number is
-    mandatory on this flow, since the registrant is the club's own admin and
-    is being asked for their own number."""
+    same kind of account) applies exactly the same ones.
+
+    The form asks for first name and email only (v9.144.2: six fields lost 9 in
+    10 visitors at this step). Last name and mobile are optional and checked
+    only when sent; display name and username are filled by
+    ``_with_identity_defaults`` before this runs, then judged by the usual rules."""
     return await admin_identity.validate_admin_fields(
         db,
         first_name=data.first_name, last_name=data.last_name,
         display_name=data.display_name, username=data.username,
         email=data.email, mobile_number=data.mobile_number,
-        require_mobile=True,
+        require_mobile=False, require_full_profile=False,
     )
+
+
+async def _with_identity_defaults(db: AsyncSession, data):
+    """``data`` with a blank display name and username filled in. Display name is the name as
+    typed; username is the email (login is by username, so they sign in with their email), see
+    ``admin_identity.default_username``. A value the caller did send is kept as sent."""
+    updates = {}
+    if not (data.display_name or "").strip():
+        updates["display_name"] = admin_identity.default_display_name(data.first_name, data.last_name)
+    if not (data.username or "").strip():
+        updates["username"] = await admin_identity.default_username(db, data.email, data.first_name)
+    return data.model_copy(update=updates) if updates else data
 
 
 async def _returning_admin_user(db: AsyncSession, matched, email: str):
@@ -416,6 +431,7 @@ async def _returning_admin_user(db: AsyncSession, matched, email: str):
 @router.post("/validate-admin")
 async def validate_admin(data: ValidateAdminRequest, db: AsyncSession = Depends(get_db)):
     """Validate-as-you-type for the admin-details step."""
+    data = await _with_identity_defaults(db, data)
     errors = await _validate_admin_fields(db, data)
     returning = False
     if errors.get("email") == admin_identity.EMAIL_TAKEN_MESSAGE:
@@ -688,6 +704,7 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
     if not await playhq_client.get_organisation(str(org_id)):
         raise HTTPException(status_code=404, detail="Club not found in the Cricket Australia data source")
 
+    data = await _with_identity_defaults(db, data)
     admin_errors = await _validate_admin_fields(db, ValidateAdminRequest(
         first_name=data.first_name, last_name=data.last_name, display_name=data.display_name,
         username=data.username, email=data.email, mobile_number=data.mobile_number,
@@ -745,8 +762,11 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
             password_hash=bcrypt.hashpw(data.password.encode(), bcrypt.gensalt()).decode(),
             display_name=(data.display_name or "").strip(),
             first_name=(data.first_name or "").strip(),
-            last_name=(data.last_name or "").strip(),
-            mobile_number=(data.mobile_number or "").strip(),
+            last_name=(data.last_name or "").strip() or None,
+            mobile_number=(data.mobile_number or "").strip() or None,
+            # The dashboard offers the details this form no longer asks for (club_admin
+            # /account/profile). Cleared when they save or close it.
+            ui_preferences={"profile_nudge": "pending"},
         )
         db.add(user)
         try:
@@ -936,6 +956,8 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
         "returning_admin": returning_user is not None,
         "run_id": str(run_id),
         "name": name,
+        # What they sign in with next time (their email unless that was already someone's login).
+        "username": user.username,
         "modules": [MODULE_CORE, *requested_modules],
         "replayed": False,
     }

@@ -1586,6 +1586,7 @@ _SYNC_KIND_LABEL = {
 # services/meta_ads.REGISTRATION_STEP_ORDER — kept in the same order here).
 _REG_STEP_ORDER = [
     ("club_prepared", "Club selected"),
+    ("signup_form_opened", "Sign-up form opened"),
     ("admin_details_completed", "Admin details completed"),
     ("email_code_sent", "Verification code sent"),
     ("email_verified", "Email verified"),

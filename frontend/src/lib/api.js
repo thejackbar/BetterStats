@@ -2514,6 +2514,8 @@ export const api = {
   // to clear). Persists across sessions/devices, unlike localStorage.
   getUiPrefs: () => request('/club-admin/account/ui-prefs'),
   setUiPrefs: (prefs) => request('/club-admin/account/ui-prefs', { method: 'PATCH', body: JSON.stringify({ prefs }) }),
+  getOwnProfile: () => request('/club-admin/account/profile'),
+  patchOwnProfile: (body) => request('/club-admin/account/profile', { method: 'PATCH', body: JSON.stringify(body) }),
   // Self-service instant trial start / cancel (Dashboard "START TRIAL" and the
   // Account page's per-row actions) — bypass the module-requests queue entirely.
   startModuleTrial: (moduleKey) =>

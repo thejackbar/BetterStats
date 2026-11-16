@@ -45,6 +45,8 @@ OPEN_TO_ANY_CLUB_USER: dict[tuple[str, str], str] = {
     ("POST", "/auth/switch-club"): WHO_AM_I,
     ("GET", "/club-admin/account/ui-prefs"): PERSONAL,
     ("PATCH", "/club-admin/account/ui-prefs"): PERSONAL,
+    ("GET", "/club-admin/account/profile"): PERSONAL,
+    ("PATCH", "/club-admin/account/profile"): PERSONAL,
     ("PUT", "/club-admin/billing/billing-method"): PLAN_INLINE,
     ("POST", "/club-admin/billing/checkout-session"): PLAN_INLINE,
     ("POST", "/club-admin/billing/invoices/request"): PLAN_INLINE,

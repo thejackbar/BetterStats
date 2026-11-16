@@ -176,8 +176,10 @@ async def main() -> int:
           r.get("valid") is True and r.get("returning_admin") is True and not r.get("errors"), str(r))
     r = await validate(vreq("alpha", "bob@alpha.example"))
     check("a second earlier admin is accepted too", r.get("valid") is True and r.get("returning_admin") is True, str(r))
-    r = await validate(vreq("alpha", "ann@alpha.example", mobile=""))
-    check("other problems are still reported for a returning admin (no mobile)",
+    # Mobile is optional since v9.144.2 (the form asks first name + email), so a BAD mobile is the
+    # other problem here: one that is sent is still checked.
+    r = await validate(vreq("alpha", "ann@alpha.example", mobile="12"))
+    check("other problems are still reported for a returning admin (bad mobile)",
           r.get("valid") is False and "mobile_number" in (r.get("errors") or {}) and r.get("returning_admin") is True, str(r))
     bare = sst.ValidateAdminRequest(first_name="Ann", last_name="Admin", display_name="Ann A", username="x1",
                                     email="ann@alpha.example", mobile_number="0412345678")

@@ -88,7 +88,7 @@ MIN_FILL_MS = 4000
 # a visitor whose search returned results but who never clicked one (the
 # interest-without-commitment signal the Meta Ads page can now surface).
 FUNNEL_STEPS = {
-    "club_searched", "club_prepared", "admin_details_completed",
+    "club_searched", "club_prepared", "signup_form_opened", "admin_details_completed",
     "email_code_sent", "email_verified", "acknowledgements_accepted",
     "submit_attempted", "registration_completed",
 }

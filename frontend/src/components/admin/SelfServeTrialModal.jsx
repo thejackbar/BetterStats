@@ -18,7 +18,7 @@ const SELECTABLE_MODULES = MODULE_TOGGLES.filter((m) => m.key !== 'core')
 // stepper UI doesn't need reshaping when a step's content arrives.
 const STEPS = [
   { key: 'club', label: 'Club' },
-  { key: 'admin', label: 'Admin details' },
+  { key: 'admin', label: 'Your details' },
   { key: 'verify', label: 'Verify email' },
   { key: 'ack', label: 'Acknowledgements' },
   { key: 'submit', label: 'Submit' },
@@ -252,6 +252,12 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
   }, [])
 
   // ─── Step 2: Primary Club Admin details (Phase 4) ───────────────────────
+  // First name and email only (v9.144.2). The six-field version lost about 9
+  // in 10 people at this step. The server fills display name (the name as
+  // typed) and username (the email, so they sign in with it) when these are
+  // blank, and last name and mobile are offered later on the dashboard
+  // (club_admin /account/profile). The other keys stay in the payload, blank,
+  // so the internal caller and the /submit contract are unchanged.
   // Password isn't collected here — deliberately deferred to immediately
   // before final submission (a later phase), so a plaintext password spends
   // less time sitting in client state across email verification and
@@ -269,31 +275,21 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
 
   const setAdminField = (field, value) => setAdminForm((f) => ({ ...f, [field]: value }))
 
-  // Preferred display name and username are predicted from first/last name,
-  // but only until the person edits that field directly — after that, typing
-  // more of their name doesn't overwrite what they've already changed.
-  const [displayNameTouched, setDisplayNameTouched] = useState(false)
-  const [usernameTouched, setUsernameTouched] = useState(false)
+  // Shown under the two fields: any server error about a field this form no
+  // longer draws (rare: the server fills those itself), so it is never silent.
+  const ADMIN_FIELDS_SHOWN = ['first_name', 'email']
+  const otherAdminErrors = Object.entries(adminErrors)
+    .filter(([k]) => !ADMIN_FIELDS_SHOWN.includes(k)).map(([, v]) => v)
 
-  const editAdminField = (field, value) => {
-    if (field === 'display_name') setDisplayNameTouched(true)
-    if (field === 'username') setUsernameTouched(true)
-    setAdminField(field, value)
-  }
-
+  // Beacon: the form is on screen. "Club selected" also counts clicks on
+  // registered clubs and season-page previews, so it is not this number.
+  const formOpenedRef = useRef(false)
   useEffect(() => {
-    const first = adminForm.first_name.trim()
-    const last = adminForm.last_name.trim()
-    if (!displayNameTouched) {
-      const predicted = [first, last].filter(Boolean).join(' ')
-      setAdminForm((f) => (f.display_name === predicted ? f : { ...f, display_name: predicted }))
-    }
-    if (!usernameTouched) {
-      const predicted = (first + last).toLowerCase().replace(/[^a-z0-9]/g, '')
-      setAdminForm((f) => (f.username === predicted ? f : { ...f, username: predicted }))
-    }
+    if (step !== 'admin' || formOpenedRef.current) return
+    formOpenedRef.current = true
+    trackFunnelStep('signup_form_opened', preparedClub ? { name: preparedClub.name, org_id: preparedClub.org_id } : null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adminForm.first_name, adminForm.last_name, displayNameTouched, usernameTouched])
+  }, [step])
 
   useEffect(() => {
     if (step !== 'admin') return
@@ -323,8 +319,6 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
     return () => clearTimeout(adminDebounceRef.current)
   }, [adminForm, step, preparedClub?.org_id])
 
-  const canContinueFromClub = !!preparedClub && !preparing && !prepareError
-
   // ─── Step 3: email verification (Phase 6) ───────────────────────────────
   const [codeSent, setCodeSent] = useState(false)
   const [sending, setSending] = useState(false)
@@ -333,6 +327,11 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
   const [checking, setChecking] = useState(false)
   const [verifyError, setVerifyError] = useState('')
   const [verified, setVerified] = useState(false)
+
+  // The code goes out as soon as the step opens (no extra click), once per
+  // email address; "Resend code" is there if it does not arrive.
+  const autoSentForRef = useRef(null)
+  const codeInputRef = useRef(null)
 
   // Changing the email restarts verification from scratch.
   useEffect(() => {
@@ -344,6 +343,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
   }, [adminForm.email])
 
   const sendCode = async () => {
+    autoSentForRef.current = adminForm.email
     setSending(true)
     setSendError('')
     try {
@@ -364,12 +364,31 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
       await calls.checkCode(adminForm.email, verifyCode.trim())
       setVerified(true)
       trackFunnelStep('email_verified')
+      // Straight on to the next step: nothing left to do on this one.
+      setTimeout(() => setStep((s) => (s === 'verify' ? 'ack' : s)), 700)
     } catch (e) {
       setVerifyError(e?.message || 'Incorrect code.')
     } finally {
       setChecking(false)
     }
   }
+
+  useEffect(() => {
+    if (step !== 'verify' || verified || codeSent || sending) return
+    if (autoSentForRef.current === adminForm.email) return
+    sendCode()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, verified, codeSent, adminForm.email])
+
+  useEffect(() => {
+    if (step === 'verify' && codeSent && !verified) codeInputRef.current?.focus()
+  }, [step, codeSent, verified])
+
+  // Four digits typed or pasted is the whole answer, so check it then.
+  useEffect(() => {
+    if (step === 'verify' && codeSent && !verified && !checking && verifyCode.length === 4) checkCode()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [verifyCode])
 
   // ─── Step 4: acknowledgements (Phase 7) ─────────────────────────────────
   const [ackTerms, setAckTerms] = useState(false)
@@ -733,6 +752,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
                   )}
 
                   {!preparing && !prepareError && preparedClub && (
+                    <>
                     <dl className="space-y-2">
                       <div>
                         <dt className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase">Club name</dt>
@@ -749,6 +769,19 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
                         <dd className="text-pb-text text-sm">betterat.cricket/{preparedClub.slug}</dd>
                       </div>
                     </dl>
+                    <button
+                      type="button"
+                      data-testid="claim-club"
+                      onClick={() => setStep('admin')}
+                      className="w-full px-4 py-3 rounded-lg font-display font-semibold text-sm text-pb-bg transition hover:opacity-90"
+                      style={{ background: 'var(--pb-accent)', overflowWrap: 'anywhere' }}
+                    >
+                      Claim {preparedClub.short_name || preparedClub.name}
+                    </button>
+                    <p className="text-center font-mono text-[10px] text-pb-faint -mt-1">
+                      About a minute · free · no card
+                    </p>
+                    </>
                   )}
                 </div>
               )}
@@ -765,55 +798,35 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
 
           {step === 'admin' && (
             <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="font-mono text-[10px] text-pb-faint block mb-1">First name</label>
-                  <input type="text" value={adminForm.first_name}
-                    onChange={(e) => setAdminField('first_name', e.target.value)}
-                    className={FIELD_CLS} />
-                  {adminErrors.first_name && <p className="font-mono text-[10px] text-pb-red mt-1">{adminErrors.first_name}</p>}
-                </div>
-                <div>
-                  <label className="font-mono text-[10px] text-pb-faint block mb-1">Last name</label>
-                  <input type="text" value={adminForm.last_name}
-                    onChange={(e) => setAdminField('last_name', e.target.value)}
-                    className={FIELD_CLS} />
-                  {adminErrors.last_name && <p className="font-mono text-[10px] text-pb-red mt-1">{adminErrors.last_name}</p>}
-                </div>
-              </div>
-
+              <p className="text-sm text-pb-text">
+                Two quick details and {preparedClub?.short_name || preparedClub?.name || 'your club'} is yours.
+              </p>
               <div>
-                <label className="font-mono text-[10px] text-pb-faint block mb-1">Preferred display name</label>
-                <input type="text" value={adminForm.display_name}
-                  onChange={(e) => editAdminField('display_name', e.target.value)}
+                <label htmlFor="ss-first-name" className="font-mono text-[10px] text-pb-faint block mb-1">First name</label>
+                <input id="ss-first-name" type="text" value={adminForm.first_name}
+                  autoFocus autoComplete="given-name"
+                  onChange={(e) => setAdminField('first_name', e.target.value)}
                   className={FIELD_CLS} />
-                {adminErrors.display_name && <p className="font-mono text-[10px] text-pb-red mt-1">{adminErrors.display_name}</p>}
+                {adminErrors.first_name && <p className="font-mono text-[10px] text-pb-red mt-1">{adminErrors.first_name}</p>}
               </div>
 
               <div>
-                <label className="font-mono text-[10px] text-pb-faint block mb-1">Username</label>
-                <input type="text" value={adminForm.username}
-                  onChange={(e) => editAdminField('username', e.target.value)}
-                  className={FIELD_CLS} />
-                {adminErrors.username && <p className="font-mono text-[10px] text-pb-red mt-1">{adminErrors.username}</p>}
-              </div>
-
-              <div>
-                <label className="font-mono text-[10px] text-pb-faint block mb-1">Email address</label>
-                <input type="email" value={adminForm.email}
+                <label htmlFor="ss-email" className="font-mono text-[10px] text-pb-faint block mb-1">Email address</label>
+                <input id="ss-email" type="email" value={adminForm.email}
+                  autoComplete="email" inputMode="email"
                   onChange={(e) => setAdminField('email', e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && adminValid && !adminValidating) {
+                      trackFunnelStep('admin_details_completed'); setStep('verify')
+                    }
+                  }}
                   className={FIELD_CLS} />
                 {adminErrors.email && <p className="font-mono text-[10px] text-pb-red mt-1">{adminErrors.email}</p>}
               </div>
 
-              <div>
-                <label className="font-mono text-[10px] text-pb-faint block mb-1">Mobile number</label>
-                <input type="tel" value={adminForm.mobile_number}
-                  onChange={(e) => setAdminField('mobile_number', e.target.value)}
-                  placeholder="04XX XXX XXX"
-                  className={FIELD_CLS} />
-                {adminErrors.mobile_number && <p className="font-mono text-[10px] text-pb-red mt-1">{adminErrors.mobile_number}</p>}
-              </div>
+              {otherAdminErrors.map((msg) => (
+                <p key={msg} className="font-mono text-[10px] text-pb-red">{msg}</p>
+              ))}
 
               {adminValidating && (
                 <p className="font-mono text-[10px] text-pb-faintest">Checking…</p>
@@ -831,8 +844,8 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
                   </p>
                 ) : (
                   <p className="font-mono text-[11px] text-pb-faint">
-                    Password isn't set here. You'll set it once email verification and
-                    acknowledgements are confirmed.
+                    You'll sign in with this email. Next we send it a 4-digit code, then you
+                    set a password and you're in your club's dashboard.
                   </p>
                 )}
               </div>
@@ -842,8 +855,9 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
           {step === 'verify' && (
             <div className="space-y-3">
               <p className="font-mono text-[11px] text-pb-faint">
-                We'll send a 4-digit code to <span className="text-pb-text">{adminForm.email}</span>.
-                It's valid for 24 hours.
+                {codeSent
+                  ? <>We've sent a 4-digit code to <span className="text-pb-text">{adminForm.email}</span>. Type or paste it below. It's valid for 24 hours.</>
+                  : <>Sending a 4-digit code to <span className="text-pb-text">{adminForm.email}</span>…</>}
               </p>
 
               {verified ? (
@@ -867,9 +881,11 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
                       <div>
                         <label className="font-mono text-[10px] text-pb-faint block mb-1">4-digit code</label>
                         <input
+                          ref={codeInputRef}
                           type="text"
                           inputMode="numeric"
-                          maxLength={4}
+                          autoComplete="one-time-code"
+                          aria-label="4-digit code"
                           value={verifyCode}
                           onChange={(e) => setVerifyCode(e.target.value.replace(/\D/g, '').slice(0, 4))}
                           className={`${FIELD_CLS} tracking-[0.5em] text-center`}
@@ -1107,17 +1123,6 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
             >
               Cancel
             </button>
-            {step === 'club' && (
-              <button
-                onClick={() => setStep('admin')}
-                disabled={!canContinueFromClub}
-                title={canContinueFromClub ? '' : 'Select an unregistered club first'}
-                className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed text-pb-bg"
-                style={{ background: 'var(--pb-accent)' }}
-              >
-                CONTINUE
-              </button>
-            )}
             {step === 'admin' && (
               <button
                 onClick={() => { trackFunnelStep('admin_details_completed'); setStep('verify') }}
