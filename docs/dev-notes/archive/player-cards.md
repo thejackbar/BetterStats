@@ -358,3 +358,10 @@ Asked for: the challenge builder (`/playerdash/:token/cards/challenges/:id`) onl
 - Type and role chips are drawn only for values some card has. Picks are kept when a filter hides them.
 - All client side: `detail()` already returns every usable card with `role`, `rarity`, `tier`, `special_kind`, `player_id` and `rules`.
 - Verified: `verify_player_cards_challenges_browser.mjs` (58; the control on the previous `ChallengePage.jsx` fails 15 of the new checks without crashing). 390 checked for overflow, screenshot checked at 1280.
+
+## v9.144.3: Between you and them, in the swap builder
+
+- Once a player is picked, `Builder` (`components/cards/SwapsPanel.jsx`) draws `Between`: the cards of you they hold (their `tradeable_cards` filtered to `player_id === board.me`) and the cards of them you hold (`board.mine` filtered to their `player_id`), regular and special alike, each with its copy count. A tap adds the card to the want or give side through the same `toggle` as the galleries.
+- `GET /me/cards/swaps` now returns `me` (the PIN player's id). Nothing new is revealed: both lists are subsets of what the builder already loaded through `tradeable()`. Without `me` (an older backend) the panel is not drawn.
+- An empty row says so (`<name> has none of your cards.`, `You hold none of their cards.`). Names are "Surname, First", so the full name is used, never a first word.
+- Verified: `verify_player_cards_between_browser.mjs` (12; the control on the previous `SwapsPanel.jsx` fails 7 without crashing). `verify_player_cards_v2_browser.mjs` still 45/45. 390 checked for overflow and screenshotted.
