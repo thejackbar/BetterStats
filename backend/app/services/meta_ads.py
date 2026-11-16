@@ -331,6 +331,18 @@ CAMPAIGN_PLANS: dict[str, tuple[float, int]] = {
 CAMPAIGN_ANNOTATIONS: dict[str, list[dict]] = {
     "120251284365570121": [
         {
+            "date": "2026-11-16",
+            "label": "Sign-up form shortened",
+            # A landing-page change, not a campaign change: shown on the chart, but spend,
+            # pacing and "since the last change" keep measuring from the 10 Nov restart.
+            "resets": False,
+            "detail": (
+                "The /trial wizard now asks for first name and email only (was six fields), sends "
+                "the email code on its own and adds a Sign-up form opened funnel step (v9.144.2). "
+                "Registration rates either side of this line come from two different forms."
+            ),
+        },
+        {
             "date": "2026-11-10",
             "label": "Fresh start",
             "detail": (
@@ -423,8 +435,10 @@ def _provisional_from() -> date:
 
 def _last_change_date() -> date | None:
     """The most recent deliberate campaign change, or None. Anything before it
-    is not comparable with anything after it."""
-    dates = [_parse_insights_date(a["date"]) for a in campaign_annotations()]
+    is not comparable with anything after it. A marker with `resets: False` (a
+    change on our side, such as the sign-up form) is drawn on the chart but does
+    not restart the spend and pacing window: the campaign itself did not change."""
+    dates = [_parse_insights_date(a["date"]) for a in campaign_annotations() if a.get("resets", True)]
     settled = [d for d in dates if d]
     return max(settled) if settled else None
 
