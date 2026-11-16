@@ -166,7 +166,7 @@ utm_source=meta&utm_medium=paid_social&utm_campaign=BC_AU_Trial_CBO_Sep2026&utm_
 | `Ad_ClubSearch_Static_Sep2026` (120251550833470121), paused | `club_search_static` | The Aug tags are baked into the website URL (`utm_source=facebook`, `utm_campaign=bc_au_trials_cbo_aug2026`, `utm_content=checkout_your_club_v2`). Strip the website URL to `https://betterat.cricket/trial` and set the URL parameters, or its signups are refused. |
 | `Ad_Trial_Spreadsheet_Sep2026_v3` (120251301631290121), paused | `spreadsheet_hero_v3` | `utm_campaign=trial_evergreen_sep2026`, `utm_content=spreadsheet_hero_v3`. Counted via the content tag. Change the campaign tag when it goes back on. |
 | `Ad_Trial_Spreadsheet_Sep2026` (120251284367910121), paused | `spreadsheet_hero_v2` | `utm_campaign=trial_evergreen_sep2026`, `utm_content=spreadsheet_hero_v2`. Same. |
-| `Ad_Video_History_4x5_Nov2026` (not created yet), new | `history_video_4x5` | The 30s 4:5 video made 16 Nov 2026 (your history, uploads, imports, milestones; file on branch `claude/trusting-bohr-kgf9iu`, `brag-output-2026-11-16-trial-ad/`). Upload it as an ad VIDEO, not a reel, with the bare website URL and the URL parameters above. Once it exists, add its ad id to `AD_DESTINATIONS` with this tag. |
+| `Ad_Video_History_4x5_Nov2026` (120252402536450121), live 16 Nov 2026 | `history_video_4x5` | Done: uploaded as an ad video (creative 1152848390649200), bare website URL plus the URL parameters above. Mapped in `AD_DESTINATIONS` (v9.144.3.2). |
 
 Before switching any of them back on, open it in Ads Manager and check whether
 its tags are in the website URL field or in URL parameters. Tags in BOTH is the

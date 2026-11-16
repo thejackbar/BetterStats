@@ -1698,3 +1698,11 @@ Also recorded in `docs/meta-ad-campaign-self-serve.md` 4b: the new 30s 4:5 video
 
 Proof: `backend/verification/verify_meta_ads_new_campaign.py` 22 passed; control (same suite on the previous main) 20 passed, 2 failed, exactly the two new checks (marker present; window not restarted).
 
+## v9.144.3.2: map the history video ad (2026-11-16)
+
+`Ad_Video_History_4x5_Nov2026` (120252402536450121, creative 1152848390649200) went live in BC_AU_Trial_CBO_Sep2026. Read from Meta that day: link_url is the bare /trial page, url_tags carry `utm_campaign=BC_AU_Trial_CBO_Sep2026&utm_content=history_video_4x5`, and it is an ad video, not a reel. Added to `AD_DESTINATIONS` so its spend gets its own creative row instead of "(untagged)".
+
+A brief asked for three changes; two were already on main and were not repeated: the image ad (120251342626760121, `check_out_your_club_v2`) was mapped on 10 Nov, `CAMPAIGN_UTM_CAMPAIGNS` already holds `BC_AU_Trial_CBO_Sep2026` for this campaign, and `STREAM_BY_UTM_CAMPAIGN` already has it (lowercase, the lookup lowercases, so a mixed-case key would be dead). Signups through the video were already credited to the campaign by the campaign tag before this change (the control proves it); what was missing was the per-ad spend row.
+
+Proof: `verify_meta_ads_new_campaign.py` 28 passed; control on the previous main 25 passed, 3 failed (the video is mapped, its exact tag, its tag in the campaign's own set).
+

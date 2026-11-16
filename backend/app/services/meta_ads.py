@@ -170,6 +170,11 @@ AD_DESTINATIONS = {
     # The three video ads are left out on purpose: their reels were removed, so
     # they cannot deliver, and they are not part of this restart.
     "120251342626760121": {"campaign_id": "120251284365570121", "name": "Ad_CheckOutYourClub_v2_Relaunch", "destination": "betterat.cricket/trial", "utm_content": "check_out_your_club_v2", "utm_campaign": "BC_AU_Trial_CBO_Sep2026", "stream": STREAM_TRIAL},
+    # The 30s 4:5 history video (your history, uploads, imports, milestones), live 16 Nov 2026.
+    # Uploaded as an ad video, not a reel (the three Sep video ads died when their reels were
+    # removed). Creative 1152848390649200; url_tags read from Meta on 16 Nov 2026 and the website
+    # URL is the bare /trial page, so the tag below is the one its signups carry.
+    "120252402536450121": {"campaign_id": "120251284365570121", "name": "Ad_Video_History_4x5_Nov2026", "destination": "betterat.cricket/trial", "utm_content": "history_video_4x5", "utm_campaign": "BC_AU_Trial_CBO_Sep2026", "stream": STREAM_TRIAL},
     # ClubSearch's website URL still has the Aug campaign's tags baked in
     # (utm_source=facebook, bc_au_trials_cbo_aug2026, checkout_your_club_v2), so
     # switched on as it is, its signups are refused by this campaign. This entry
