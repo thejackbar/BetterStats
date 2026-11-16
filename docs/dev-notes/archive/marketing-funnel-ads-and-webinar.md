@@ -1690,3 +1690,11 @@ Proof: `backend/verification/verify_trial_two_field_signup.py` 29 passed; contro
 
 Meta side at the time (7 days to 16 Nov): live ad Ad_CheckOutYourClub_v2_Relaunch, AUD 119.53, 77 link clicks, 71 landing page views, 23 Leads, 2 Meta-attributed registrations (AUD 59.77 each), frequency 2.4 on reach 4,405. Three video ads in the same ad set (V1 ClubRecords, V3 Availability, V5 MatchSocials) had zero delivery: "Ad Creative Is Incomplete: the reel you selected is not available".
 
+## v9.144.3.1: chart-only marker for the two-field sign-up form (2026-11-16)
+
+The /trial form went from six fields to two (v9.144.2). That changes registration rates, so Meta Ads HQ needs a marker on 16 Nov 2026 for BC_AU_Trial_CBO_Sep2026. But every annotation also restarts the "since the last change" spend window (`_last_change_date()` feeds pacing, `stream_totals_since` and the settling note), and a landing-page change does not change spend: a plain marker would have blanked pacing and cost-since for days. Annotations now take `resets` (default True); `False` draws the marker and leaves the window on the 10 Nov restart.
+
+Also recorded in `docs/meta-ad-campaign-self-serve.md` 4b: the new 30s 4:5 video ad's planned tag `history_video_4x5` (ad not created yet; add its id to `AD_DESTINATIONS` once it exists) and that the three reel ads Meta lists "with issues" should be archived.
+
+Proof: `backend/verification/verify_meta_ads_new_campaign.py` 22 passed; control (same suite on the previous main) 20 passed, 2 failed, exactly the two new checks (marker present; window not restarted).
+

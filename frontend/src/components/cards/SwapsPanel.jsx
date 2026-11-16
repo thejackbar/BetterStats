@@ -217,6 +217,11 @@ export function Builder({ token, board, give: preGive, giveList, prefill, counte
           </>
         )}
 
+        {player && theirs && board.me && (
+          <Between player={player} ofMe={theirs.filter((c) => c.player_id === board.me)} ofThem={board.mine.filter((c) => c.player_id === player.player_id)}
+            want={want} give={give} onWant={toggle(setWant)} onGive={toggle(setGive)} h={h} {...ui} />
+        )}
+
         {player && (
           <>
             <div style={h}>2. The cards you want from {player.name}</div>
@@ -260,6 +265,44 @@ export function Builder({ token, board, give: preGive, giveList, prefill, counte
   )
   if (inline) return content
   return <Modal label="Start a swap" onClose={onClose} zIndex={85} solid>{content}</Modal>
+}
+
+// Between the two of you: the cards of you the other player holds, and the cards of them you hold. Both come from what each side could
+// swap (`tradeable`), so nothing shows here that their card book in the builder does not. A tap adds the card to the request.
+export function Between({ player, ofMe, ofThem, want, give, onWant, onGive, h, ...ui }) {
+  const row = (cards, chosen, onPick, side, empty) => (
+    <div data-between={side} style={{ minWidth: 0 }}>
+      {cards.length === 0
+        ? <div data-between-empty style={{ fontSize: 13, opacity: 0.7 }}>{empty}</div>
+        : (
+          <div style={{ display: 'flex', gap: 10, overflowX: 'auto', paddingBottom: 6 }}>
+            {cards.map((c) => (
+              <div key={c.key} style={{ flex: '0 0 auto' }}>
+                <Mini card={c} {...ui} width={84} selected={chosen.has(c.key)} onClick={() => onPick(c)}
+                  label={`${chosen.has(c.key) ? 'Take out of my request' : 'Add to my request'}: ${cardLine(c)}`} />
+              </div>
+            ))}
+          </div>
+        )}
+    </div>
+  )
+  const sub = { font: `600 10px ${MONO}`, letterSpacing: 1.2, textTransform: 'uppercase', opacity: 0.7, margin: '0 0 6px' }
+  return (
+    <div data-swap-between style={{ minWidth: 0 }}>
+      <div style={h}>Between you and {player.name}</div>
+      <div style={{ display: 'grid', gap: 12, padding: 12, borderRadius: 12, border: '1px solid rgba(255,255,255,.18)', background: 'rgba(255,255,255,.04)', minWidth: 0 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={sub}>Your cards they hold ({totalOf(ofMe.map((c) => ({ qty: c.tradeable })))})</div>
+          {row(ofMe, want, onWant, 'of-me', `${player.name} has none of your cards.`)}
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div style={sub}>Their cards you hold ({totalOf(ofThem.map((c) => ({ qty: c.tradeable })))})</div>
+          {row(ofThem, give, onGive, 'of-them', 'You hold none of their cards.')}
+        </div>
+        {(ofMe.length > 0 || ofThem.length > 0) && <div style={{ fontSize: 12, opacity: 0.65 }}>Tap a card to put it in the swap.</div>}
+      </div>
+    </div>
+  )
 }
 
 // Search every card in the club for who holds a copy that could be swapped, and ask for it in one tap.

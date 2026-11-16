@@ -21,7 +21,7 @@
 4. `get_registration_count` reads `organisations` (trial only). The bug was the divisor, not the count; do not change the count.
 5. `meta_capi.send_complete_registration_event` defaults are the trial's (value 399). Other callers (`public_webinar.py`) must name their own event.
 6. Each stream also carries a figure since the last deliberate change (`stream_totals_since`, `level='ad_daily'`, `_last_change_date()`). Label all-time figures as all time.
-7. Record deliberate changes in `CAMPAIGN_ANNOTATIONS` (`{date, label, detail}`); pacing never crosses one.
+7. Record deliberate changes in `CAMPAIGN_ANNOTATIONS` (`{date, label, detail}`); pacing never crosses one. A change on our side that leaves the campaign alone (the sign-up form, v9.144.3.1) carries `resets: False`: drawn on the chart, ignored by `_last_change_date()`, so spend and pacing keep their window.
 8. Spend is settled, results are not. Pacing excludes only today; the 7-day attribution window applies to conversion insights only, so a since-cost inside it is a provisional ceiling: never alert off it.
 9. A partial window withholds the cost and says why (`ad_daily` kept `CAMPAIGN_LENGTH_DAYS + 5`; short spend understates cost).
 10. `get_registration_count_since` shares `_attribution_matches_campaign` with the lifetime count; the lifetime count is never windowed.

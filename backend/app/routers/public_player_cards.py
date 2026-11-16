@@ -159,6 +159,7 @@ async def get_my_swaps(token: str, request: Request, db: AsyncSession = Depends(
         "people": await swaps.swap_people(db, club, snap, me),
         "expires_days": swaps.SWAP_DAYS,
         "max_open": swaps.MAX_OUTGOING,
+        "me": me,  # the builder picks out the cards of you another player holds, and theirs that you hold
     }
 
 

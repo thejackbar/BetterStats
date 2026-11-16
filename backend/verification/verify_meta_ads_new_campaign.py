@@ -113,7 +113,11 @@ using(NEW)
 ck("the plan is A$450 over 30 days, not the A$750 fallback", m._campaign_plan() == (450.0, 30), str(m._campaign_plan()))
 ck("the restart is recorded as a deliberate change", m._last_change_date() == RESTART, str(m._last_change_date()))
 notes = m.campaign_annotations()
-ck("and it is on the chart with a label", bool(notes) and bool(notes[-1].get("label")) and bool(notes[-1].get("detail")), str(notes))
+ck("and it is on the chart with a label", bool(notes) and bool(notes[0].get("label")) and bool(notes[0].get("detail")), str(notes))
+form = [a for a in notes if a.get("label") == "Sign-up form shortened"]
+ck("the shorter sign-up form (16 Nov) is on the chart too", len(form) == 1 and form[0]["date"] == "2026-11-16", str(notes))
+ck("but it does not restart the spend and pacing window", form and form[0].get("resets") is False and m._last_change_date() == RESTART,
+   str(m._last_change_date()))
 using(OLD)
 ck("the old campaign's plan and markers are untouched", m._campaign_plan() == (900.0, 30) and m._last_change_date() == date(2026, 9, 8),
    f"{m._campaign_plan()} {m._last_change_date()}")
