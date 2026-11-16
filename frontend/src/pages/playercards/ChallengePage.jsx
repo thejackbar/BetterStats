@@ -9,6 +9,8 @@ import { Mini, cardLine } from '../../components/cards/SwapsPanel'
 import PageHead from './PageHead'
 import { RewardChip } from './Challenges'
 import { usePC } from './context'
+import { CATEGORIES, ROLE_FILTERS } from '../../components/cards/CardGallery'
+import { DEFAULT_FILTERS, RATING_MAX, RATING_MIN, SORTS, chipCounts, clampRating, filterChallengeCards, hasCardRules, ratingNarrowed } from './challengeFilters'
 
 const MONO = "'JetBrains Mono', monospace"
 const TIERS = [['all', 'All'], ['special', 'Special'], ['legendary', 'Legendary'], ['epic', 'Epic'], ['rare', 'Rare'], ['common', 'Common']]
@@ -20,14 +22,28 @@ export default function ChallengePage() {
   const [err, setErr] = useState('')
   const [picked, setPicked] = useState(() => new Map())      // key -> card
   const [verdict, setVerdict] = useState(null)
-  const [tier, setTier] = useState('all')
-  const [q, setQ] = useState('')
+  const [f, setF] = useState(DEFAULT_FILTERS)
+  const [loText, setLoText] = useState(String(RATING_MIN))
+  const [hiText, setHiText] = useState(String(RATING_MAX))
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState(null)
   const sent = useRef(0)
 
   const read = () => api.availPublicChallenge(token, id).then((c) => { setCh(c); setErr('') }).catch((e) => setErr(e?.message || 'That challenge could not be found.'))
   useEffect(() => { setCh(null); setPicked(new Map()); setVerdict(null); setResult(null); read() }, [token, id]) // eslint-disable-line react-hooks/exhaustive-deps
+  // A challenge with rules about single cards (only batters, only Rare and up, named players) starts showing just the cards that fit.
+  const cardRules = hasCardRules(ch?.rules)
+  useEffect(() => { setF({ ...DEFAULT_FILTERS, fits: cardRules }); setLoText(String(RATING_MIN)); setHiText(String(RATING_MAX)) }, [id, cardRules])
+  const set = (patch) => setF((cur) => ({ ...cur, ...patch }))
+  // The rating boxes take any typing; the filter only moves once a box holds a number, and a low end above the high end swaps them.
+  const commitRating = (loRaw, hiRaw) => {
+    let lo = clampRating(loRaw, RATING_MIN); let hi = clampRating(hiRaw, RATING_MAX)
+    if (lo > hi) [lo, hi] = [hi, lo]
+    set({ lo, hi })
+    return [lo, hi]
+  }
+  const settleRating = () => { const [lo, hi] = commitRating(loText, hiText); setLoText(String(lo)); setHiText(String(hi)) }
+  const clearFilters = () => { setF({ ...DEFAULT_FILTERS, fits: cardRules }); setLoText(String(RATING_MIN)); setHiText(String(RATING_MAX)) }
 
   const selection = useMemo(() => [...picked.keys()].map((key) => ({ key })), [picked])
   const total = selection.length
@@ -50,11 +66,8 @@ export default function ChallengePage() {
     try { const out = await api.availPublicSubmitChallenge(token, id, selection); setResult(out); setPicked(new Map()); load(); read() } catch (e) { setErr(e?.message || 'That could not be finished.') } finally { setBusy(false) }
   }
 
-  const shown = useMemo(() => {
-    if (!ch) return []
-    const needle = q.trim().toLowerCase()
-    return ch.cards.filter((c) => (tier === 'all' || c.tier === tier) && (!needle || c.name.toLowerCase().includes(needle)))
-  }, [ch, tier, q])
+  const shown = useMemo(() => (ch ? filterChallengeCards(ch.cards, f, ch.rules) : []), [ch, f])
+  const counts = useMemo(() => chipCounts(ch?.cards || []), [ch])
 
   if (err && !ch) return <div data-challenge-error className="text-sm" style={{ color: 'var(--pb-red, #f87171)' }}>{err} <Link to={`${basePath}/challenges`} className="underline">Back to challenges</Link></div>
   if (!ch) return <div className="text-sm text-pb-faint" data-challenge-loading>Loading the challenge…</div>
@@ -73,14 +86,51 @@ export default function ChallengePage() {
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="order-2 lg:order-1 min-w-0">
           {finished && !result && <div className="text-sm text-pb-dim mb-3" data-challenge-finished>You have done this challenge{ch.max_completions > 1 ? ` ${ch.completions} of ${ch.max_completions} times` : ''}.</div>}
-          <div className="flex flex-wrap items-center gap-2 mb-3">
-            <div role="tablist" aria-label="Tier" className="flex gap-1.5 flex-wrap">
-              {TIERS.map(([k, label]) => <button key={k} type="button" role="tab" aria-selected={tier === k} data-tier-filter={k} onClick={() => setTier(k)} className="px-3 py-1.5 rounded-full text-[12.5px] font-semibold border pb-hairline" style={tier === k ? { background: accent, color: onColor(accent), borderColor: accent } : undefined}>{label}</button>)}
+          <div className="flex flex-col gap-2 mb-3" data-challenge-filters>
+            <div className="flex flex-wrap items-center gap-2">
+              <input value={f.q} onChange={(e) => set({ q: e.target.value })} placeholder="Find a card: a player, century, a season" aria-label="Find a card" data-filter-search className="rounded-lg border pb-hairline bg-transparent px-3 py-1.5 text-sm min-w-0 flex-1 basis-48" />
+              <label className="flex items-center gap-1.5 text-[12.5px] text-pb-dim">
+                <span>Sort</span>
+                <select value={f.sort} onChange={(e) => set({ sort: e.target.value })} aria-label="Sort" data-filter-sort className="rounded-lg border pb-hairline bg-transparent px-2 py-1.5 text-sm">
+                  {SORTS.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+                </select>
+              </label>
             </div>
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a card" aria-label="Find a card" className="rounded-lg border pb-hairline bg-transparent px-3 py-1.5 text-sm min-w-0 flex-1" />
+            <Chips label="Tier" name="tier" value={f.tier} onPick={(v) => set({ tier: v })} accent={accent} options={TIERS.map(([k, label]) => ({ key: k, label }))} />
+            {(counts.player > 0 && counts.special > 0) && (
+              <Chips label="Type" name="type" value={f.type} onPick={(v) => set({ type: v })} accent={accent}
+                options={[{ key: 'all', label: 'All cards' }, { key: 'player', label: 'Players', n: counts.player }, { key: 'special', label: 'Specials', n: counts.special },
+                  ...CATEGORIES.filter((c) => counts.cats[c.key]).map((c) => ({ key: c.key, label: c.label, n: counts.cats[c.key] }))]} />
+            )}
+            {Object.keys(counts.roles).length > 0 && (
+              <Chips label="Role" name="role" value={f.role} onPick={(v) => set({ role: v })} accent={accent}
+                options={[{ key: '', label: 'Any role' }, ...ROLE_FILTERS.filter(([k]) => counts.roles[k]).map(([k, label]) => ({ key: k, label, n: counts.roles[k] })),
+                  ...(counts.none ? [{ key: 'none', label: 'No role recorded', n: counts.none }] : [])]} />
+            )}
+            <div className="flex flex-wrap items-center gap-2 text-[12.5px]" data-filter-rating>
+              <span className="text-pb-dim">Rating</span>
+              <input type="number" inputMode="numeric" min={RATING_MIN} max={RATING_MAX} value={loText} aria-label="Lowest rating"
+                onChange={(e) => { setLoText(e.target.value); if (e.target.value !== '') commitRating(e.target.value, hiText) }} onBlur={settleRating}
+                data-rating-lo className="w-16 rounded-lg border pb-hairline bg-transparent px-2 py-1.5 text-sm" />
+              <span className="text-pb-faint">to</span>
+              <input type="number" inputMode="numeric" min={RATING_MIN} max={RATING_MAX} value={hiText} aria-label="Highest rating"
+                onChange={(e) => { setHiText(e.target.value); if (e.target.value !== '') commitRating(loText, e.target.value) }} onBlur={settleRating}
+                data-rating-hi className="w-16 rounded-lg border pb-hairline bg-transparent px-2 py-1.5 text-sm" />
+              {ratingNarrowed(f) && counts.special > 0 && <span className="text-pb-faint" data-rating-note>Special cards have no rating, so they are hidden while the range is set.</span>}
+            </div>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px]">
+              {cardRules && (
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input type="checkbox" checked={f.fits} onChange={(e) => set({ fits: e.target.checked })} data-filter-fits />
+                  <span>Only cards that fit the rules</span>
+                </label>
+              )}
+              <span className="font-mono text-[11px] text-pb-faint" data-filter-count>{shown.length === ch.cards.length ? `${ch.cards.length} ${ch.cards.length === 1 ? 'card' : 'cards'}` : `Showing ${shown.length} of ${ch.cards.length}`}</span>
+              {JSON.stringify(f) !== JSON.stringify({ ...DEFAULT_FILTERS, fits: cardRules }) && <button type="button" onClick={clearFilters} data-filter-clear className="underline text-pb-dim">Clear filters</button>}
+            </div>
           </div>
           {ch.cards.length === 0 && <div className="text-sm text-pb-dim" data-no-spendable>You have no cards to pick from yet, or you used them all last time. Open some packs and come back.</div>}
-          {ch.cards.length > 0 && shown.length === 0 && <div className="text-sm text-pb-dim" data-no-match>No cards match.</div>}
+          {ch.cards.length > 0 && shown.length === 0 && <div className="text-sm text-pb-dim" data-no-match>No cards match these filters. <button type="button" onClick={clearFilters} className="underline">Clear filters</button></div>}
           <div className="flex flex-wrap gap-3" data-challenge-cards>
             {shown.map((c) => {
               const on = picked.has(c.key)
@@ -129,6 +179,20 @@ export default function ChallengePage() {
           </div>
         </aside>
       </div>
+    </div>
+  )
+}
+
+// One row of filter chips. Declared at module level so typing elsewhere does not remount it.
+function Chips({ label, name, value, onPick, options, accent }) {
+  return (
+    <div role="tablist" aria-label={label} data-filter-row={name} className="flex gap-1.5 flex-wrap">
+      {options.map((o) => (
+        <button key={o.key || 'any'} type="button" role="tab" aria-selected={value === o.key} data-filter={`${name}:${o.key || 'any'}`} {...(name === 'tier' ? { 'data-tier-filter': o.key } : {})} onClick={() => onPick(o.key)}
+          className="px-3 py-1.5 rounded-full text-[12.5px] font-semibold border pb-hairline" style={value === o.key ? { background: accent, color: onColor(accent), borderColor: accent } : undefined}>
+          {o.label}{o.n != null && <span className="opacity-60 ml-1">{o.n}</span>}
+        </button>
+      ))}
     </div>
   )
 }

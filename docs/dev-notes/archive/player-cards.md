@@ -347,3 +347,14 @@ Asked for: the "Show the cards" list on a collection challenge put a tick in a s
 
 - `Members` in `pages/playercards/Challenges.jsx` (collections and a player's own sets) now shades the row itself: held is a tile with the club accent at 30% and an accent border, bold name; not held is a dashed outline at reduced opacity. The tick is gone, a screen-reader-only "(held)" or "(not held)" follows the name, and a legend line says what shading means. `data-held` is unchanged.
 - Verified: `verify_player_cards_challenges_browser.mjs` (40; the control on the previous component fails the shading and no-tick checks). Screenshot checked at 1280.
+
+## v9.144.1: filters on the squad challenge builder
+
+Asked for: the challenge builder (`/playerdash/:token/cards/challenges/:id`) only had a tier row and a name search, so a role or rating challenge meant scrolling through every card held.
+
+- `pages/playercards/challengeFilters.js` is the one pure filter for the builder: tier, type (players, specials, or a `CATEGORIES` kind), role (`role` code or `none`), rating range 1 to 99, search over name, title, season and grade, a sort, and `fits` (the per-card rules only: `kinds`, `tiers_only`, `roles`, `special_kinds`, `players`). Squad-wide rules (count, minimums, squad rating, cards per player) stay with the server's `check`.
+- `fits` starts ticked when the challenge has a per-card rule (`hasCardRules`), and Clear filters returns to that.
+- Only player cards carry `rarity`; a narrowed rating range hides specials and the screen says why. Typed ratings clamp to 1..99 on blur and a reversed range swaps.
+- Type and role chips are drawn only for values some card has. Picks are kept when a filter hides them.
+- All client side: `detail()` already returns every usable card with `role`, `rarity`, `tier`, `special_kind`, `player_id` and `rules`.
+- Verified: `verify_player_cards_challenges_browser.mjs` (58; the control on the previous `ChallengePage.jsx` fails 15 of the new checks without crashing). 390 checked for overflow, screenshot checked at 1280.
