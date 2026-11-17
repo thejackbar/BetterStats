@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import Dropdown from '../../components/Dropdown'
@@ -18,6 +19,23 @@ const EMPTY_FORM = {
   runs: '',
   is_not_out: false,
   notes: '',
+  match: '',
+}
+
+// The optional match a typed record was made in: a play.cricket.com.au link or match ID. Linked, the
+// row on the Records board opens that match's scorecard.
+function MatchField({ value, onChange }) {
+  return (
+    <div>
+      <label className="font-mono text-[10px] text-pb-faint block mb-1">Match link (optional)</label>
+      <input type="text" value={value} onChange={e => onChange(e.target.value)}
+        placeholder="https://play.cricket.com.au/match/…"
+        className={`${INPUT_CLS} font-mono`} />
+      <span className="block font-mono text-[10px] text-pb-faintest mt-1">
+        Paste the match from play.cricket.com.au so the record opens its scorecard.
+      </span>
+    </div>
+  )
 }
 
 function PlayerSearch({ label, name, playerId, onSelect, players }) {
@@ -531,6 +549,7 @@ function EditRow({ record, players, syncedGrades, onSaved, onCancel }) {
     is_not_out: record.is_not_out,
     grade_name: record.grade_name,
     notes: record.notes || '',
+    match: record.linked_game_id || '',
   })
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
@@ -556,7 +575,11 @@ function EditRow({ record, players, syncedGrades, onSaved, onCancel }) {
         runs: Number(form.runs),
         is_not_out: form.is_not_out,
         notes: form.notes || null,
+        // Only when changed, so an untouched link is left alone; blank takes it off.
+        ...(form.match !== (record.linked_game_id || '') ? { match: form.match.trim() || null } : {}),
       })
+      const linked = form.match !== (record.linked_game_id || '')
+      const fresh = linked ? (await api.adminListPartnershipRecords()).find(r => r.id === record.id) : null
       onSaved({
         ...record,
         batter1_name: form.batter1_name,
@@ -569,6 +592,7 @@ function EditRow({ record, players, syncedGrades, onSaved, onCancel }) {
         runs: Number(form.runs),
         is_not_out: form.is_not_out,
         notes: form.notes || null,
+        linked_game_id: fresh ? fresh.linked_game_id : record.linked_game_id,
       })
     } catch (e) {
       setErr(e.message)
@@ -636,6 +660,7 @@ function EditRow({ record, players, syncedGrades, onSaved, onCancel }) {
             <input type="text" value={form.notes} onChange={e => setField('notes', e.target.value)}
               className={INPUT_CLS} />
           </div>
+          <MatchField value={form.match} onChange={v => setField('match', v)} />
           {err && <p className="font-mono text-[11px] text-pb-red">{err}</p>}
           <div className="flex gap-2">
             <button
@@ -701,6 +726,7 @@ export default function AdminPartnershipRecords() {
         runs: Number(form.runs),
         is_not_out: form.is_not_out,
         notes: form.notes || null,
+        match: form.match.trim() || null,
       })
       loadRecords()
       setForm(EMPTY_FORM)
@@ -824,6 +850,7 @@ export default function AdminPartnershipRecords() {
                 placeholder="vs Opponent, ground, etc."
                 className={INPUT_CLS} />
             </div>
+            <MatchField value={form.match} onChange={v => setField('match', v)} />
             <div className="flex gap-2">
               <button type="submit" disabled={saving}
                 className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold transition text-pb-bg"
@@ -863,6 +890,12 @@ export default function AdminPartnershipRecords() {
                       <td className="py-2.5 pl-5 text-pb-text">
                         {r.batter1_name} <span className="text-pb-faintest">&amp;</span> {r.batter2_name}
                         {r.notes && <span className="block font-mono text-[10px] text-pb-faintest">{r.notes}</span>}
+                        {r.linked_game_id && (
+                          <Link to={`/games/${r.linked_game_id}`}
+                            className="block font-mono text-[10px] hover:underline" style={{ color: 'var(--pb-accent)' }}>
+                            Open the match
+                          </Link>
+                        )}
                       </td>
                       <td className="py-2.5 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>
                         {r.runs}{r.is_not_out ? '*' : ''}

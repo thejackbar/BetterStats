@@ -1039,11 +1039,14 @@ _PER_INNINGS_SPECS = (
         "v_effective_partnerships", "partnerships", "manual_partnerships",
         "t.id, t.game_id, t.innings_number, t.wicket_number, t.batter1_id, "
         "t.batter2_id, t.runs, t.balls, t.batter1_runs, t.batter2_runs, "
-        "t.is_club_innings, 'api'::text AS source, t.batter1_name, t.batter2_name",
+        "t.is_club_innings, 'api'::text AS source, t.batter1_name, t.batter2_name, "
+        # Migration 389 (services/stand_breaks_ddl): a stand no wicket ended. Appended LAST, since
+        # CREATE OR REPLACE VIEW can only add columns at the end; main.py's early copy matches.
+        "t.is_unbroken",
         "t.id, t.manual_game_id AS game_id, t.innings_number, t.wicket_number, "
         "t.batter1_id, t.batter2_id, t.runs, t.balls, t.batter1_runs, "
         "t.batter2_runs, t.is_club_innings, 'manual'::text AS source, "
-        "t.batter1_name, t.batter2_name",
+        "t.batter1_name, t.batter2_name, t.is_unbroken",
     ),
     (
         "v_effective_bowler_wickets", "bowler_wickets", "manual_bowler_wickets",

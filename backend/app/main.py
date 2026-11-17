@@ -3483,6 +3483,12 @@ async def lifespan(app: FastAPI):
         # broken once — an in-the-middle CREATE OR REPLACE VIEW crash-looped
         # the backend in production; this is the corrected version, matching
         # migration 147.)
+        # Migration 389: `is_unbroken` on both partnership tables has to exist before this view
+        # is re-issued, because the view now selects it (and a re-issue with fewer columns than
+        # the live view fails outright). Same statements as alembic's 389.
+        from app.services.stand_breaks_ddl import COLUMN_STATEMENTS as _STAND_BREAK_COLUMNS
+        for _stmt in _STAND_BREAK_COLUMNS:
+            await conn.execute(text(_stmt))
         await conn.execute(text("""
             CREATE OR REPLACE VIEW v_effective_partnerships AS
             SELECT
@@ -3490,7 +3496,7 @@ async def lifespan(app: FastAPI):
                 batter1_id, batter2_id, runs, balls,
                 batter1_runs, batter2_runs, is_club_innings,
                 'api'::text AS source,
-                batter1_name, batter2_name
+                batter1_name, batter2_name, is_unbroken
             FROM partnerships
             UNION ALL
             SELECT
@@ -3498,7 +3504,7 @@ async def lifespan(app: FastAPI):
                 batter1_id, batter2_id, runs, balls,
                 batter1_runs, batter2_runs, is_club_innings,
                 'manual'::text AS source,
-                batter1_name, batter2_name
+                batter1_name, batter2_name, is_unbroken
             FROM manual_partnerships
         """))
         await conn.execute(text("""
@@ -4745,6 +4751,13 @@ async def lifespan(app: FastAPI):
         # one-copy rule: this and alembic's 357 both run services/fow_override_ddl.STATEMENTS.
         from app.services.fow_override_ddl import STATEMENTS as _FOW_OVERRIDE_DDL
         for _stmt in _FOW_OVERRIDE_DDL:
+            await conn.execute(text(_stmt))
+
+        # Migration 389: retired and unbroken stands a club typed, premiers marks and the match a
+        # hand-typed partnership record links to. Same one-copy rule: this and alembic's 389 both
+        # run services/stand_breaks_ddl.STATEMENTS.
+        from app.services.stand_breaks_ddl import STATEMENTS as _STAND_BREAKS_DDL
+        for _stmt in _STAND_BREAKS_DDL:
             await conn.execute(text(_stmt))
 
         # Migration 358: the index behind the grade display-name lookup that Records,

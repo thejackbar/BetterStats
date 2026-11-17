@@ -151,6 +151,11 @@ async def main() -> None:
         for stmt in STATEMENTS:
             await conn.execute(text(stmt))
         from app.services.fow_override_ddl import STATEMENTS as FOW_DDL   # migration 357, as the lifespan makes it
+        try:   # migration 389: typed retirements and unbroken stands, read with the typed wickets
+            from app.services.stand_breaks_ddl import STATEMENTS as _STAND_BREAKS_DDL
+        except ImportError:   # a control run on a commit before it
+            _STAND_BREAKS_DDL = []
+        FOW_DDL = list(FOW_DDL) + _STAND_BREAKS_DDL
         for stmt in FOW_DDL:
             await conn.execute(text(stmt))
     await seed_new_club()

@@ -99,6 +99,11 @@ async def build() -> dict:
         # games.innings_totals is lifespan DDL, not on the ORM model, so create_all omits it.
         await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"))
         from app.services.premierships_ddl import STATEMENTS as PREM_DDL
+        try:   # migration 389: club match tags, read by the reconcile
+            from app.services.stand_breaks_ddl import STATEMENTS as _STAND_BREAKS_DDL
+        except ImportError:   # a control run on a commit before it
+            _STAND_BREAKS_DDL = []
+        PREM_DDL = list(PREM_DDL) + _STAND_BREAKS_DDL
         for stmt in PREM_DDL:
             await conn.execute(text(stmt))
         try:

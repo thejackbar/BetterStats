@@ -10,6 +10,7 @@ import { CAP } from '../lib/capabilities'
 import { useClubTheme } from '../hooks/useClubTheme'
 import { rememberClubSlug, readClubSlug } from '../lib/clubSlug'
 import PremiershipBanner from '../components/PremiershipBanner'
+import PremiersTick from '../components/PremiersTick'
 import TeamBadge from '../components/TeamBadge'
 import FallOfWicketsEditor from '../components/FallOfWicketsEditor'
 
@@ -800,7 +801,10 @@ function PartnershipsSection({ partnerships = [], fmtName = n => n }) {
                         )}
                       </span>
                     </td>
-                    <td className="py-2 pr-5 font-mono font-bold text-pb-text text-right pb-num">{p.runs ?? '—'}</td>
+                    <td className="py-2 pr-5 font-mono font-bold text-pb-text text-right pb-num"
+                        title={p.is_unbroken ? 'Unbroken: no wicket ended this partnership' : undefined}>
+                      {p.runs ?? '—'}{p.is_unbroken && p.runs != null ? '*' : ''}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -946,6 +950,7 @@ export default function MatchScorecard() {
   // edited from Manual entries).
   const canEditFow = hasCapability(CAP.MANAGE_MANUAL_ENTRIES)
   const [editingFow, setEditingFow] = useState(false)
+  const [premiersKey, setPremiersKey] = useState(0)
   const [claimTarget, setClaimTarget] = useState(null)
   const [existingPlayers, setExistingPlayers] = useState([])
 
@@ -1051,7 +1056,8 @@ export default function MatchScorecard() {
 
         <MatchHeader game={game} innings={innings} />
 
-        <PremiershipBanner gameId={gameId} orgId={effectiveOrgId} />
+        <PremiershipBanner gameId={gameId} orgId={effectiveOrgId} refreshKey={premiersKey} />
+        <PremiersTick gameId={gameId} onChanged={() => setPremiersKey(k => k + 1)} />
 
         {orderKnownNote && (
           <p data-testid="innings-order-note" className="-mt-2 mb-4 text-[12px] text-pb-dim">

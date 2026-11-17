@@ -5514,14 +5514,16 @@ async def get_game_partnerships(session: AsyncSession, game_id: str, org_id: str
                 p1.id::text AS batter1_id,
                 p2.id::text AS batter2_id,
                 COALESCE(p1.display_name_override, p1.name, pt.batter1_name) AS batter1_name,
-                COALESCE(p2.display_name_override, p2.name, pt.batter2_name) AS batter2_name
+                COALESCE(p2.display_name_override, p2.name, pt.batter2_name) AS batter2_name,
+                -- A stand no wicket ended (a retirement or the end of the innings), migration 389.
+                COALESCE(pt.is_unbroken, FALSE) AS is_unbroken
             FROM v_effective_partnerships pt
             LEFT JOIN players p1 ON p1.id = pt.batter1_id
                 AND (CAST(:org_id AS uuid) IS NULL OR p1.organisation_id = CAST(:org_id AS uuid))
             LEFT JOIN players p2 ON p2.id = pt.batter2_id
                 AND (CAST(:org_id AS uuid) IS NULL OR p2.organisation_id = CAST(:org_id AS uuid))
             WHERE pt.game_id = :gid
-            ORDER BY pt.innings_number, pt.wicket_number
+            ORDER BY pt.innings_number, pt.wicket_number, pt.id
         """),
         {"gid": game_id, "org_id": org_id},
     )

@@ -1134,6 +1134,7 @@ async def get_records(
             COALESCE(p2.display_name_override, p2.name) AS batter2_name,
             pt.runs, pt.wicket_number,
             pt.game_id::text AS game_id,
+            COALESCE(pt.is_unbroken, FALSE) AS is_unbroken,
             g.played_at::text,
             COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name)) AS grade_name,
             s.name AS season_name,
@@ -1176,6 +1177,7 @@ async def get_records(
                 COALESCE(p2.display_name_override, p2.name) AS batter2_name,
                 pt.runs, pt.wicket_number,
                 pt.game_id::text AS game_id,
+                COALESCE(pt.is_unbroken, FALSE) AS is_unbroken,
                 g.played_at::text AS played_at,
                 gr.id AS grade_id, gr.name AS grade_raw,
                 s.name AS season_name,
@@ -1193,7 +1195,7 @@ async def get_records(
         ), {_GRADE_NAMES_CTE}
         SELECT
             b.batter1_id, b.batter1_name, b.batter2_id, b.batter2_name,
-            b.runs, b.wicket_number, b.game_id, b.played_at,
+            b.runs, b.wicket_number, b.game_id, b.is_unbroken, b.played_at,
             n.grade_name, b.season_name, b.season_year,
             false AS is_manual,
             ROW_NUMBER() OVER (PARTITION BY b.wicket_number ORDER BY b.runs DESC) AS rn
@@ -1221,6 +1223,7 @@ async def get_records(
                 COALESCE(p2.display_name_override, p2.name) AS batter2_name,
                 pt.runs,
                 pt.game_id::text AS game_id,
+                COALESCE(pt.is_unbroken, FALSE) AS is_unbroken,
                 g.played_at::text AS played_at,
                 EXTRACT(YEAR FROM g.played_at)::int AS season_year
             FROM v_effective_partnerships pt
@@ -1239,7 +1242,7 @@ async def get_records(
                 b.season_name,
                 b.wicket_number,
                 b.batter1_id, b.batter1_name, b.batter2_id, b.batter2_name,
-                b.runs, b.game_id, b.played_at, b.season_year,
+                b.runs, b.game_id, b.is_unbroken, b.played_at, b.season_year,
                 ROW_NUMBER() OVER (
                     PARTITION BY n.grade_name, b.wicket_number
                     ORDER BY b.runs DESC
@@ -1287,6 +1290,7 @@ async def get_records(
                 "grade_name": r.grade_name,
                 "season_year": r.season_year,
                 "is_not_out": r.is_not_out,
+                "linked_game_id": str(r.linked_game_id) if r.linked_game_id else None,
                 "is_manual": True,
             })
 
@@ -1702,6 +1706,8 @@ async def get_records(
             # The match the stand was made in, so a row can open its scorecard. None for a hand-typed
             # record (manual_partnership_records), which names no match.
             "game_id":       r.get("game_id"),
+            # No wicket ended the stand (a retirement, or still going at the end): shown with a *.
+            "not_out":       bool(r.get("is_unbroken")),
             "grade_name":    r.get("grade_name"),
             "season_name":   r.get("season_name") or (str(r["season_year"]) if r.get("season_year") else None),
             "is_manual":     r.get("is_manual", False),
@@ -1724,7 +1730,9 @@ async def get_records(
             "player2_name":  mr.get("batter2_name"),
             "runs":          mr.get("runs"),
             "wicket_number": mr.get("wicket_number"),
-            "game_id":       None,   # a hand-typed record names no match
+            # The match the club linked the typed record to, if it did (migration 389).
+            "game_id":       mr.get("linked_game_id"),
+            "not_out":       bool(mr.get("is_not_out")),
             "grade_name":    mr.get("grade_name"),
             "season_name":   str(mr["season_year"]) if mr.get("season_year") else None,
             "is_manual":     True,

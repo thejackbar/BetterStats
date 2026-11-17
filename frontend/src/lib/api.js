@@ -512,8 +512,9 @@ export const api = {
     request(`/games/${gameId}/scorecard${org ? `?org=${encodeURIComponent(org)}` : ''}`),
   // A club types the fall of wickets Cricket Australia is missing for its own innings of a synced match.
   getFowEditor: (gameId) => request(`/games/${gameId}/fall-of-wickets/editor`),
-  saveFow: (gameId, innings, rows) =>
-    request(`/games/${gameId}/fall-of-wickets/${innings}`, { method: 'PUT', body: JSON.stringify({ rows }) }),
+  // extras: { retirements: [{ participant_id, score, after_wicket }], unbroken, unbroken_score }
+  saveFow: (gameId, innings, rows, extras = {}) =>
+    request(`/games/${gameId}/fall-of-wickets/${innings}`, { method: 'PUT', body: JSON.stringify({ rows, ...extras }) }),
   resetFow: (gameId, innings) =>
     request(`/games/${gameId}/fall-of-wickets/${innings}`, { method: 'DELETE' }),
 
@@ -3283,6 +3284,12 @@ export const api = {
   getPremierships: (orgId) => request(`/honours/${orgId}/premierships`),
   // The clubs that recorded a premiership off this scorecard (the scorecard banner).
   getGamePremierships: (gameId) => request(`/honours/games/${gameId}/premierships`),
+  // What a club says a match was, for its premierships (services/premierships.set_tag). `match` is a
+  // play.cricket.com.au link or match ID; kind 'normal' | 'final' | 'grand_final', or null to remove.
+  listMatchTags: (orgId) => request(`/honours/${orgId}/premierships/tags`),
+  getMatchTag: (orgId, gameId) => request(`/honours/${orgId}/premierships/tags/${gameId}`),
+  setMatchTag: (orgId, match, kind, won = false) =>
+    request(`/honours/${orgId}/premierships/tags`, { method: 'PUT', body: JSON.stringify({ match, kind, won }) }),
   // What the automatic premierships would write for the signed-in club, and writing them.
   // Mark Player of the Match / 12th Man / 13th Man on a premiership card, add or remove a player.
   editPremiershipSquad: (orgId, body) =>

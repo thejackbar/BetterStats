@@ -40,8 +40,21 @@ class FowRowIn(BaseModel):
     participant_id: Optional[str] = None
 
 
+class RetirementIn(BaseModel):
+    participant_id: Optional[str] = None
+    score: Optional[int] = None
+    # How many wickets had fallen when the batter retired.
+    after_wicket: Optional[int] = None
+
+
 class FowEditIn(BaseModel):
     rows: list[FowRowIn] = Field(default_factory=list, max_length=fo.MAX_WICKETS)
+    # A batter who retired ends a partnership without a wicket (women's and junior cricket retire
+    # at a set score). Eleven batters can retire at most ten times before nobody is left.
+    retirements: list[RetirementIn] = Field(default_factory=list, max_length=fo.MAX_WICKETS)
+    # The stand still going when the innings ended. The score defaults to the card's total.
+    unbroken: bool = False
+    unbroken_score: Optional[int] = None
 
 
 async def _load(db: AsyncSession, club: Organisation, game_id: str):
@@ -101,15 +114,19 @@ async def save_fow(
     gid, card, resolve = await _load(db, club, game_id)
     before = _find_innings(await fo.editor(db, club.id, gid, card, resolve), innings_number)
     inn = fo.batting_innings(card, innings_number)
-    if not data.rows:
+    if not data.rows and not data.retirements and not data.unbroken:
         raise HTTPException(
             status_code=422,
             detail="No wickets entered. To go back to Cricket Australia's figures, use Reset instead.")
     rows, errors = fo.clean_rows(inn, [r.model_dump() for r in data.rows])
     if errors:
         raise HTTPException(status_code=422, detail=" ".join(errors))
+    breaks, errors = fo.clean_breaks(inn, rows, [r.model_dump() for r in data.retirements],
+                                     data.unbroken, data.unbroken_score)
+    if errors:
+        raise HTTPException(status_code=422, detail=" ".join(errors))
 
-    await fo.save(db, club.id, current_user.id, gid, innings_number, rows)
+    await fo.save(db, club.id, current_user.id, gid, innings_number, rows, breaks)
     await fo.apply(db, club.id, gid, card, resolve)
     after = _find_innings(await fo.editor(db, club.id, gid, card, resolve), innings_number)
     warnings = []
@@ -117,11 +134,14 @@ async def save_fow(
         warnings.append(
             f"The batting card shows {before['wickets']} dismissal(s) and you entered {len(rows)} wickets, "
             "so no partnerships could be worked out for this innings. Check the batting card.")
-    summary = fo.summarise(innings_number, rows, after["stands"], before["wickets"])
+    summary = fo.summarise(innings_number, rows, after["stands"], before["wickets"], breaks)
     await fo.audit(
         db, club.id, current_user, gid, "fow_edit", summary,
         {"innings": innings_number, "before": before["fow"], "after": after["fow"],
-         "stands": [{"wicket": s["wicket_number"], "runs": s["runs"]} for s in after["stands"]]})
+         "before_retirements": before["retirements"], "after_retirements": after["retirements"],
+         "unbroken": after["unbroken"],
+         "stands": [{"wicket": s["wicket_number"], "runs": s["runs"], "unbroken": s["is_unbroken"]}
+                    for s in after["stands"]]})
     await db.commit()
     return {"innings": after, "summary": summary, "warnings": warnings}
 

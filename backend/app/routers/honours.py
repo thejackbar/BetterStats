@@ -76,6 +76,71 @@ async def apply_auto_premierships(
     return await premierships.reconcile(db, org_id, apply=True)
 
 
+@router.get("/{org_id}/premierships/tags")
+async def list_match_tags(
+    org_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_cap(MANAGE_AWARDS)),
+    club: Organisation = Depends(get_current_club),
+):
+    """The matches the club tagged as a normal game, a final or the grand final, and what each gives."""
+    _same_club(club, org_id)
+    return {"tags": await premierships.tagged_matches(db, club)}
+
+
+@router.get("/{org_id}/premierships/tags/{game_id}")
+async def get_match_tag(
+    org_id: uuid.UUID,
+    game_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_cap(MANAGE_AWARDS)),
+    club: Organisation = Depends(get_current_club),
+):
+    """How the club tagged one match, for the match page's Premiers tick. 404 for another club's match."""
+    _same_club(club, org_id)
+    if await premierships._club_game(db, club, game_id) is None:
+        raise HTTPException(status_code=404, detail="That match is not one of this club's.")
+    return await premierships.tag_state(db, club, game_id)
+
+
+class MatchTagIn(BaseModel):
+    # A play.cricket.com.au match link or its match ID (a game id from the match page works too).
+    match: str
+    # None takes the tag off.
+    kind: Optional[Literal["normal", "final", "grand_final"]] = None
+    won: bool = False
+
+
+def _game_id_from(ref: str) -> uuid.UUID:
+    from app.services.social_match_lookup import parse_reference
+    parsed = parse_reference(ref)
+    if parsed and parsed.get("match_id"):
+        return uuid.UUID(parsed["match_id"])
+    if parsed and parsed.get("playhq_code"):
+        raise HTTPException(status_code=422, detail=(
+            "That's a playhq.com link, which uses a different match ID. Find the same match on "
+            "play.cricket.com.au and paste that link instead."))
+    raise HTTPException(status_code=422, detail="Paste a match link from play.cricket.com.au, or its match ID.")
+
+
+@router.put("/{org_id}/premierships/tags")
+async def put_match_tag(
+    org_id: uuid.UUID,
+    body: MatchTagIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_cap(MANAGE_AWARDS)),
+    club: Organisation = Depends(get_current_club),
+):
+    """Tag a match as a normal game, a final or the grand final, from a pasted match link or ID. A grand
+    final the club won gives every player on the team sheet the flag, linked to the match, at once."""
+    _same_club(club, org_id)
+    gid = _game_id_from(body.match)
+    try:
+        return await premierships.set_tag(db, club, gid, body.kind, body.won, user)
+    except premierships.MarkError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
 @router.get("/{org_id}/office-bearers")
 async def get_office_bearers(org_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     # The club's own order, where it has saved one. A club that has not gets the

@@ -2257,6 +2257,9 @@ class Partnership(Base):
     # (migration 147).
     batter1_name = Column(Text, nullable=True)
     batter2_name = Column(Text, nullable=True)
+    # TRUE for a stand no wicket ended (a retirement, or still going at the end of the innings);
+    # NULL when the source does not say (migration 389, services/stand_breaks_ddl).
+    is_unbroken = Column(Boolean, nullable=True)
 
     game = relationship("Game", back_populates="partnerships")
     batter1 = relationship("Player", foreign_keys=[batter1_id])
@@ -2370,6 +2373,9 @@ class ManualPartnershipRecord(Base):
     is_not_out = Column(Boolean, server_default="false", nullable=False)
     notes = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    # The match the stand was made in (a synced or a manual game id, so no foreign key), so the
+    # records board can open its scorecard. Migration 389.
+    linked_game_id = Column(UUID(as_uuid=True), nullable=True)
 
     org = relationship("Organisation")
     batter1 = relationship("Player", foreign_keys=[batter1_id])
@@ -2627,6 +2633,8 @@ class ManualPartnership(Base):
     # matches `partnerships` (migration 147).
     batter1_name = Column(Text, nullable=True)
     batter2_name = Column(Text, nullable=True)
+    # Same meaning as partnerships.is_unbroken (migration 389).
+    is_unbroken = Column(Boolean, nullable=True)
 
 
 class ManualSeasonAdjustment(Base):

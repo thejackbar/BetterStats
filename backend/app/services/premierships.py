@@ -25,6 +25,13 @@ What is stored, and what is not:
 * A player who asked to be removed (``players.privacy_hidden_at``) gets no automatic honour.
 * Nothing is guessed. A grand final with no winner on the card (a draw, a
   no-result, a missing round name) writes nothing and is reported.
+* A club can tag a match (``club_match_tags``, migration 389) from the admin Premierships screen or the
+  match page, and the tag is read before the round name. ``grand_final``: the decider, whatever Cricket
+  Australia calls the round ("Round 16", "Final Series"); it gives a flag when the card says the club
+  won, or whatever the card says when the club also ticked ``won`` (a final washed out and won on the
+  ladder). ``final`` and ``normal``: not the decider, so no flag even under a "Grand Final" round name.
+  A person has said so, so nothing is guessed. Changing or removing a tag lets the reconcile take back
+  the automatic honours (they are ours), and unlinks a hand-typed flag as for any game no longer a win.
 * A hand-entered or imported game counts too, when somebody marked it as the grand final
   (``manual_games.is_grand_final``): the squad is the players its card records, and whether the
   club won is read by ``services/manual_premiership`` from the winner and result line the club
@@ -36,6 +43,7 @@ while an admin presses the button cannot write a player twice.
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 import uuid
@@ -94,6 +102,21 @@ async def _own_grade_names(db: AsyncSession, org_id) -> dict[str, str]:
     return out
 
 
+TAG_KINDS = ("normal", "final", "grand_final")
+
+
+async def match_tags(db: AsyncSession, org_id) -> dict[str, dict]:
+    """``{game_id: {"kind", "won"}}``: what the club says its tagged matches were (synced or manual ids)."""
+    rows = (await db.execute(text(
+        "SELECT game_id::text AS g, kind, won FROM club_match_tags WHERE organisation_id = CAST(:org AS UUID)"),
+        {"org": str(org_id)})).mappings().all()
+    return {r["g"]: {"kind": r["kind"], "won": bool(r["won"])} for r in rows}
+
+
+def _tagged_deciders(tags: dict[str, dict]) -> list[uuid.UUID]:
+    return [uuid.UUID(g) for g, t in tags.items() if t["kind"] == "grand_final"]
+
+
 async def grand_final_wins(db: AsyncSession, club: Organisation) -> tuple[list[dict], list[dict]]:
     """``(wins, unresolved)``, from Cricket Australia's games and from the club's own marked ones.
 
@@ -103,14 +126,15 @@ async def grand_final_wins(db: AsyncSession, club: Organisation) -> tuple[list[d
     final cannot be read as a win or a loss): each carries a ``reason``, and an admin
     can add the honour by hand.
     """
-    wins, unresolved = await _synced_grand_final_wins(db, club)
+    tags = await match_tags(db, club.id)
+    wins, unresolved = await _synced_grand_final_wins(db, club, tags)
     m_wins, m_unresolved = await _manual_grand_final_wins(
-        db, club, counted_synced={w["game_id"] for w in wins})
+        db, club, counted_synced={w["game_id"] for w in wins}, tags=tags)
     return wins + m_wins, unresolved + m_unresolved
 
 
-async def _manual_grand_final_wins(db: AsyncSession, club: Organisation,
-                                   counted_synced: set[str]) -> tuple[list[dict], list[dict]]:
+async def _manual_grand_final_wins(db: AsyncSession, club: Organisation, counted_synced: set[str],
+                                   tags: Optional[dict] = None) -> tuple[list[dict], list[dict]]:
     """The same answer for the games the club typed in or imported and marked as the grand final."""
     org_id = club.id
     rows = (await db.execute(text("""
@@ -120,9 +144,10 @@ async def _manual_grand_final_wins(db: AsyncSession, club: Organisation,
         FROM manual_games g
         JOIN seasons s ON s.id = g.season_id
         LEFT JOIN grades gr ON gr.id = g.grade_id
-        WHERE g.organisation_id = CAST(:org AS UUID) AND g.is_grand_final = TRUE
+        WHERE g.organisation_id = CAST(:org AS UUID)
+          AND (g.is_grand_final = TRUE OR g.id = ANY(CAST(:marked AS uuid[])))
         ORDER BY g.played_at NULLS LAST, g.id
-    """), {"org": str(org_id)})).mappings().all()
+    """), {"org": str(org_id), "marked": _tagged_deciders(tags or {})})).mappings().all()
     if not rows:
         return [], []
 
@@ -140,8 +165,15 @@ async def _manual_grand_final_wins(db: AsyncSession, club: Organisation,
         # itself a counted grand final, never from both (one match, one premiership).
         if r["superseded_by_game_id"] is not None and str(r["superseded_by_game_id"]) in counted_synced:
             continue
+        tag = (tags or {}).get(str(r["id"]))
+        if tag and tag["kind"] != "grand_final":
+            continue   # the club says it was not the decider
         game = SimpleNamespace(**dict(r))
-        outcome, reason = manual_premiership.manual_outcome(game, club)
+        if tag and tag["won"]:
+            # The club said it won this grand final: that is the answer.
+            outcome, reason = manual_premiership.WON, None
+        else:
+            outcome, reason = manual_premiership.manual_outcome(game, club)
         ours, theirs = _manual_sides(game, club)
         base = {
             "game_id": str(r["id"]), "played_at": r["played_at"],
@@ -186,8 +218,11 @@ def _manual_sides(game, club) -> tuple[str, str]:
     return _manual_side_names(game, club)
 
 
-async def _synced_grand_final_wins(db: AsyncSession, club: Organisation) -> tuple[list[dict], list[dict]]:
-    """``(wins, unresolved)`` for Cricket Australia's synced games (the round name says which is the decider)."""
+async def _synced_grand_final_wins(db: AsyncSession, club: Organisation,
+                                   tags: Optional[dict] = None) -> tuple[list[dict], list[dict]]:
+    """``(wins, unresolved)`` for Cricket Australia's synced games. The club's tag says which is the decider
+    where it tagged one (``club_match_tags``); otherwise the round name does."""
+    tags = tags or {}
     org_id = club.id
     rows = (await db.execute(text("""
         SELECT g.id, g.grade_id, g.played_at, g.home_team, g.away_team, g.home_org_id, g.away_org_id,
@@ -198,10 +233,9 @@ async def _synced_grand_final_wins(db: AsyncSession, club: Organisation) -> tupl
         FROM games g
         JOIN grades gr ON gr.id = g.grade_id
         JOIN seasons s ON s.id = gr.season_id
-        WHERE g.is_final = TRUE
-          AND g.round_name IS NOT NULL
+        WHERE ((g.is_final = TRUE AND g.round_name IS NOT NULL) OR g.id = ANY(CAST(:marked AS uuid[])))
           AND (g.home_org_id = CAST(:org AS UUID) OR g.away_org_id = CAST(:org AS UUID))
-    """), {"org": str(org_id)})).mappings().all()
+    """), {"org": str(org_id), "marked": _tagged_deciders(tags)})).mappings().all()
 
     own_names = await _own_grade_names(db, org_id)
     aliases = await grade_alias_map(db, org_id)
@@ -213,18 +247,36 @@ async def _synced_grand_final_wins(db: AsyncSession, club: Organisation) -> tupl
     candidates: list[dict] = []
     unresolved: list[dict] = []
     for r in rows:
-        if not is_grand_final_round(r["round_name"]):
+        tag = tags.get(str(r["id"]))
+        if tag and tag["kind"] != "grand_final":
+            continue   # the club says it was not the decider, whatever the round is called
+        is_marked = bool(tag)              # tagged as the grand final
+        forced = is_marked and tag["won"]  # and the club says it won it
+        if not is_marked and not is_grand_final_round(r["round_name"]):
             continue
         if r["grade_id"] is not None and str(r["grade_id"]) in hidden_grades:
             continue
-        if (r["status"] or "COMPLETED").upper() != "COMPLETED" or r["ca_called_off"]:
+        # A final washed out and won on the ladder is still the club's flag, when the club says it won.
+        if not forced and ((r["status"] or "COMPLETED").upper() != "COMPLETED" or r["ca_called_off"]):
+            if is_marked:
+                unresolved.append({"game_id": str(r["id"]), "played_at": r["played_at"],
+                                   "grade_name": r["grade_name"], "opponent": None, "our_team": None,
+                                   "round_name": r["round_name"] or "Grand Final",
+                                   "reason": "Cricket Australia does not list it as completed. Tick 'we won' "
+                                             "if the club took the flag"})
             continue
+        mark_base = {"game_id": str(r["id"]), "played_at": r["played_at"], "grade_name": r["grade_name"],
+                     "opponent": None, "our_team": None, "round_name": r["round_name"] or "Grand Final"}
         # Both sides the club's own (an in-house final) has two candidate
         # squads and nothing here to choose between them: left to a person.
         if r["home_org_id"] and r["away_org_id"] and r["home_org_id"] == r["away_org_id"]:
+            if is_marked:
+                unresolved.append({**mark_base, "reason": "both sides are the club's own, so add the flag by hand"})
             continue
         side = fixture_side(club, r["home_team"], r["away_team"], r["home_org_id"], r["away_org_id"])
         if side is None:
+            if is_marked:
+                unresolved.append({**mark_base, "reason": "the club's side cannot be told apart on that match"})
             continue
         ours = r["home_team"] if side == "home" else r["away_team"]
         theirs = r["away_team"] if side == "home" else r["home_team"]
@@ -232,11 +284,13 @@ async def _synced_grand_final_wins(db: AsyncSession, club: Organisation) -> tupl
         base = {
             "game_id": str(r["id"]), "played_at": r["played_at"],
             "grade_name": r["grade_name"], "opponent": theirs, "our_team": ours,
-            "round_name": r["round_name"],
+            "round_name": r["round_name"] or "Grand Final",
+            "marked": is_marked,
         }
-        if not won or won != _norm(ours):
+        if not forced and (not won or won != _norm(ours)):
             if not won:
-                unresolved.append({**base, "reason": "no winner on the card"})
+                unresolved.append({**base, "reason": "no winner on the card"
+                                   + (". Tick 'we won' if the club took the flag" if is_marked else "")})
             continue
         key = grade_key(r["grade_name"])
         key = aliases.get(key, key)
@@ -547,6 +601,102 @@ async def reconcile(db: AsyncSession, org_id, apply: bool = True) -> dict:
     return report
 
 
+class MarkError(ValueError):
+    """A premiers mark this club cannot set. The message is shown to the admin."""
+
+
+async def _club_game(db: AsyncSession, club: Organisation, game_id) -> Optional[dict]:
+    """The match, when it is one of this club's (synced: either side; typed in: the club's own)."""
+    from app.services.club_grades import club_game_sql
+    row = (await db.execute(text(f"""
+        SELECT g.id::text AS id, g.source FROM v_effective_games g
+         WHERE g.id = CAST(:g AS UUID) AND {club_game_sql('g', 'org')}"""),
+        {"g": str(game_id), "org": str(club.id)})).mappings().first()
+    return dict(row) if row else None
+
+
+async def set_tag(db: AsyncSession, club: Organisation, game_id, kind: Optional[str], won: bool = False,
+                  user=None) -> dict:
+    """Tag a match as a normal game, a final or the grand final (``kind`` None takes the tag off), then
+    reconcile so the honours follow. ``won`` only means something on a grand final.
+
+    Returns ``tag_state``. Writes an audit row. Commits.
+    """
+    game = await _club_game(db, club, game_id)
+    if game is None:
+        raise MarkError("That match is not one of this club's. Check the link is for a game your club played "
+                        "and that it has synced.")
+    if kind is not None and kind not in TAG_KINDS:
+        raise MarkError("Choose a normal game, a final or the grand final.")
+    gid = str(game_id)
+    before = (await match_tags(db, club.id)).get(gid)
+    await db.execute(text(
+        "DELETE FROM club_match_tags WHERE organisation_id = CAST(:o AS UUID) AND game_id = CAST(:g AS UUID)"),
+        {"o": str(club.id), "g": gid})
+    if kind is not None:
+        await db.execute(text("""
+            INSERT INTO club_match_tags (organisation_id, game_id, kind, won, tagged_by)
+            VALUES (CAST(:o AS UUID), CAST(:g AS UUID), :k, :w, CAST(:u AS UUID))"""),
+            {"o": str(club.id), "g": gid, "k": kind, "w": bool(won and kind == "grand_final"),
+             "u": str(user.id) if user is not None else None})
+    label = {"normal": "a normal game", "final": "a final", "grand_final": "the grand final"}
+    summary = (f"Match tagged as {label[kind]}" + (" won by the club" if won and kind == "grand_final" else "")
+               if kind else "Match tag taken off")
+    name = (getattr(user, "display_name", None) or getattr(user, "username", None)) if user is not None else None
+    await db.execute(text("""
+        INSERT INTO audit_events (organisation_id, user_id, user_name, via, area, action, fixture_id, summary, detail)
+        VALUES (CAST(:o AS UUID), CAST(:u AS UUID), :un, 'admin', 'awards', 'match_tag', CAST(:g AS UUID), :s,
+                CAST(:d AS JSONB))"""),
+        {"o": str(club.id), "u": str(user.id) if user is not None else None, "un": name, "g": gid,
+         "s": summary, "d": json.dumps({"before": before, "after": {"kind": kind, "won": bool(won)} if kind else None})})
+    report = await reconcile(db, club.id, apply=True)
+    await db.commit()
+    return {**await tag_state(db, club, gid), "skipped": report.get("skipped")}
+
+
+async def tag_state(db: AsyncSession, club: Organisation, game_id, _wins=None) -> dict:
+    """How the club tagged this match, how many premiership honours link to it, and why a grand final
+    tag gives none."""
+    gid = str(game_id)
+    tag = (await match_tags(db, club.id)).get(gid)
+    players = (await db.execute(text("""
+        SELECT COUNT(DISTINCT COALESCE(player_id::text, player_name)) FROM player_achievements
+         WHERE org_id = CAST(:o AS UUID) AND linked_game_id = CAST(:g AS UUID) AND category = :cat"""),
+        {"o": str(club.id), "g": gid, "cat": CATEGORY})).scalar() or 0
+    reason = None
+    if tag and tag["kind"] == "grand_final" and not players:
+        wins, unresolved = _wins if _wins is not None else await grand_final_wins(db, club)
+        reason = next((u["reason"] for u in unresolved if u["game_id"] == gid), None)
+        if reason is None:
+            reason = ("the card shows the other side won" if not any(w["game_id"] == gid for w in wins)
+                      else "nobody of the club's is on the team sheet for that match yet")
+    return {"game_id": gid, "kind": tag["kind"] if tag else None, "won": bool(tag and tag["won"]),
+            "players": int(players), "reason": reason}
+
+
+async def tagged_matches(db: AsyncSession, club: Organisation) -> list[dict]:
+    """Every match the club tagged, newest first, with its one-line story and what it gives."""
+    tags = await match_tags(db, club.id)
+    if not tags:
+        return []
+    cards = await game_cards(db, club, list(tags))
+    found = await grand_final_wins(db, club)
+    extra = {r["id"]: dict(r) for r in (await db.execute(text("""
+        SELECT g.id::text AS id, gr.name AS grade_name, g.played_at FROM v_effective_games g
+          LEFT JOIN grades gr ON gr.id = g.grade_id WHERE g.id = ANY(CAST(:ids AS uuid[]))"""),
+        {"ids": [uuid.UUID(g) for g in tags]})).mappings().all()}
+    out = []
+    for gid in tags:
+        st = await tag_state(db, club, gid, _wins=found)
+        card = cards.get(gid) or {}
+        out.append({**st, "played_at": card.get("played_at") or (
+                        extra.get(gid, {}).get("played_at").isoformat() if extra.get(gid, {}).get("played_at") else None),
+                    "opponent": card.get("opponent"), "round_name": card.get("round_name"),
+                    "grade_name": extra.get(gid, {}).get("grade_name")})
+    out.sort(key=lambda r: r.get("played_at") or "", reverse=True)
+    return out
+
+
 async def maybe_reconcile(org_id) -> dict:
     """After a sync: reconcile on its own session. Never raises, because a
     premiership failure must not read as a sync failure."""
@@ -559,6 +709,8 @@ async def maybe_reconcile(org_id) -> dict:
                 UNION ALL
                 SELECT 1 FROM manual_games
                 WHERE organisation_id = CAST(:org AS UUID) AND is_grand_final = TRUE
+                UNION ALL
+                SELECT 1 FROM club_match_tags WHERE organisation_id = CAST(:org AS UUID)
                 UNION ALL
                 SELECT 1 FROM player_achievements
                 WHERE org_id = CAST(:org AS UUID) AND auto_created = TRUE LIMIT 1

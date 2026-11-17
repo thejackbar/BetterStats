@@ -161,6 +161,11 @@ async def stands(game_id, inn=1):
 async def main() -> None:
     await h.build_schema()
     from app.services.fow_override_ddl import STATEMENTS as FOW_OVERRIDE_DDL   # the lifespan's own list
+    try:   # migration 389: typed retirements and unbroken stands, read with the typed wickets
+        from app.services.stand_breaks_ddl import STATEMENTS as _STAND_BREAKS_DDL
+    except ImportError:   # a control run on a commit before it
+        _STAND_BREAKS_DDL = []
+    FOW_OVERRIDE_DDL = list(FOW_OVERRIDE_DDL) + _STAND_BREAKS_DDL
     async with h.engine.begin() as conn:
         for stmt in FOW_OVERRIDE_DDL:
             await conn.execute(text(stmt))

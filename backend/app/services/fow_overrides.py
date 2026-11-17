@@ -39,6 +39,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services import participant_relink as relink
+from app.services import stand_breaks
 from app.services.partial_partnerships import skipped_reasons
 from app.services.sync import _derive_partnerships_grassroots, _dismissed_pids_grassroots
 
@@ -76,6 +77,26 @@ async def load(db: AsyncSession, org_id, game_id) -> dict[int, list[dict]]:
     return out
 
 
+async def load_breaks(db: AsyncSession, org_id, game_id) -> dict[int, list[dict]]:
+    """The retirements and unbroken stand a club typed for a game (`fow_override_breaks`, migration
+    389), by innings number, in the order they happened."""
+    rows = (await db.execute(text("""
+        SELECT innings_number, kind, after_wicket, score, participant_id, batter_name
+          FROM fow_override_breaks
+         WHERE organisation_id = CAST(:o AS UUID) AND game_id = CAST(:g AS UUID)
+         ORDER BY innings_number, (kind = 'unbroken'), after_wicket, score NULLS LAST, id"""),
+        {"o": str(org_id), "g": str(game_id)})).mappings().all()
+    out: dict[int, list[dict]] = {}
+    for r in rows:
+        out.setdefault(r["innings_number"], []).append(dict(r))
+    return out
+
+
+async def typed_innings(db: AsyncSession, org_id, game_id) -> set[int]:
+    """Every innings of a game the club typed anything for: wickets, a retirement or an unbroken stand."""
+    return set(await load(db, org_id, game_id)) | set(await load_breaks(db, org_id, game_id))
+
+
 def as_grassroots(rows: list[dict]) -> list[dict]:
     """Typed rows in the shape Cricket Australia's `fallOfWickets` has, so the one deriver reads them."""
     return [{"order": r["wicket_number"], "runs": r["score_at_fall"],
@@ -84,13 +105,24 @@ def as_grassroots(rows: list[dict]) -> list[dict]:
             for r in sorted(rows, key=lambda r: r["wicket_number"])]
 
 
-def overlay(scorecard: dict, typed: dict[int, list[dict]]) -> dict:
-    """The scorecard with the typed fall of wickets in place of Cricket Australia's, innings by innings."""
+def overlay(scorecard: dict, typed: dict[int, list[dict]], breaks: Optional[dict[int, list[dict]]] = None) -> dict:
+    """The scorecard with the typed fall of wickets in place of Cricket Australia's, innings by innings.
+
+    An innings with typed retirements or an unbroken stand also carries them as `_standBreaks`, which
+    tells `participant_relink.attach_innings_detail` to walk it with `stand_breaks`. An innings with
+    breaks but no typed wickets (no wicket fell) gets an empty fall of wickets.
+    """
+    breaks = breaks or {}
     card = dict(scorecard)
     innings = []
     for inn in scorecard.get("innings") or []:
-        rows = typed.get(innings_number(inn))
-        innings.append(dict(inn, fallOfWickets=as_grassroots(rows)) if rows else inn)
+        num = innings_number(inn)
+        rows = typed.get(num)
+        if rows or num in breaks:
+            inn = dict(inn, fallOfWickets=as_grassroots(rows or []))
+        if num in breaks:
+            inn["_standBreaks"] = breaks[num]
+        innings.append(inn)
     card["innings"] = innings
     return card
 
@@ -121,13 +153,15 @@ async def apply(db: AsyncSession, org_id, game_id, scorecard: dict, resolve) -> 
     typed nothing for this game. Does not commit.
     """
     typed = await load(db, org_id, game_id)
-    if not typed:
+    breaks = await load_breaks(db, org_id, game_id)
+    innings = set(typed) | set(breaks)
+    if not innings:
         return {}
     await db.flush()  # rows sync has added but not flushed must be there to be replaced
-    for inn in sorted(typed):
+    for inn in sorted(innings):
         await _clear_innings(db, org_id, game_id, inn)
     return await relink.attach_innings_detail(
-        db, org_id, game_id, overlay(scorecard, typed), resolve, replace_innings=frozenset(typed))
+        db, org_id, game_id, overlay(scorecard, typed, breaks), resolve, replace_innings=frozenset(innings))
 
 
 async def apply_in_sync(session: AsyncSession, org_id, game_id, scorecard: dict, resolve) -> dict:
@@ -219,18 +253,85 @@ def clean_rows(inn: dict, rows: list[dict]) -> tuple[list[dict], list[str]]:
     return out, errors
 
 
+def clean_breaks(inn: dict, rows: list[dict], retirements: list[dict], unbroken: bool,
+                 unbroken_score: Optional[int]) -> tuple[list[dict], list[str]]:
+    """Check typed retirements and the unbroken stand against the card, then walk them with the
+    wickets (`rows`, already cleaned) so a save that cannot give stands is refused with the reason,
+    rather than saved and quietly giving none. Returns (breaks, errors)."""
+    errors: list[str] = []
+    who = {b["participantId"]: b for b in stand_breaks.batted(inn.get("batting") or [])}
+    out: list[dict] = []
+    seen: set = set()
+    for i, r in enumerate(retirements, start=1):
+        pid = (r.get("participant_id") or "").strip() or None
+        score = r.get("score")
+        after = r.get("after_wicket")
+        if not pid or pid not in who:
+            errors.append(f"Retirement {i}: pick a batter from this innings' batting card.")
+            continue
+        name = who[pid].get("playerShortName") or "That batter"
+        if not isinstance(score, int) or isinstance(score, bool) or score < 0:
+            errors.append(f"Retirement {i} ({name}): the score has to be a whole number of runs, 0 or more.")
+            continue
+        if not isinstance(after, int) or isinstance(after, bool) or not 0 <= after <= MAX_WICKETS:
+            errors.append(f"Retirement {i} ({name}): wickets down has to be between 0 and {MAX_WICKETS}.")
+            continue
+        if (pid, after, score) in seen:
+            errors.append(f"Retirement {i} ({name}) is entered twice.")
+            continue
+        seen.add((pid, after, score))
+        out.append({"kind": stand_breaks.RETIRED, "after_wicket": after, "score": score,
+                    "participant_id": pid, "batter_name": who[pid].get("playerShortName")})
+    if unbroken:
+        if unbroken_score is not None and (not isinstance(unbroken_score, int) or isinstance(unbroken_score, bool)
+                                           or unbroken_score < 0):
+            errors.append("The score at the end of the innings has to be a whole number of runs, 0 or more.")
+        else:
+            out.append({"kind": stand_breaks.UNBROKEN, "after_wicket": len(rows),
+                        "score": unbroken_score if unbroken_score is not None else inn.get("runsScored"),
+                        "participant_id": None, "batter_name": None})
+    if errors or not out:
+        return out, errors
+    try:
+        stand_breaks.derive(inn.get("batting") or [], as_grassroots(rows), out, inn.get("runsScored"))
+    except stand_breaks.WalkRefused as exc:
+        errors.append(str(exc))
+    return out, errors
+
+
+def suggested_breaks(inn: dict, fow: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Cricket Australia's own fall of wickets, split for the editor to open on.
+
+    Women's and junior cards sometimes record a retirement as a fall-of-wicket row (the batter it
+    names is not out on the card). Those rows are offered as retirements, and the real wickets are
+    numbered 1, 2, 3 again. Only a draft: nothing is stored until the club saves.
+    """
+    dismissed = set(_dismissed_pids_grassroots(inn.get("batting") or []))
+    batted_pids = {b["participantId"] for b in stand_breaks.batted(inn.get("batting") or [])}
+    wickets: list[dict] = []
+    retired: list[dict] = []
+    for f in sorted(fow, key=lambda f: f.get("order") or 99):
+        pid = f.get("participantId")
+        if pid and pid in batted_pids and pid not in dismissed:
+            retired.append({"kind": stand_breaks.RETIRED, "after_wicket": len(wickets), "score": f.get("runs"),
+                            "participant_id": pid, "batter_name": f.get("playerShortName")})
+        else:
+            wickets.append(dict(f, order=len(wickets) + 1) if retired else f)
+    return wickets, retired
+
+
 # ─── What the editor shows ────────────────────────────────────────────────────
 
 async def _stands(db: AsyncSession, org_id, game_id, innings: int) -> list[dict]:
     rows = (await db.execute(text("""
-        SELECT pt.wicket_number, pt.runs,
+        SELECT pt.wicket_number, pt.runs, COALESCE(pt.is_unbroken, FALSE) AS is_unbroken,
                COALESCE(p1.display_name_override, p1.name, pt.batter1_name) AS batter1_name,
                COALESCE(p2.display_name_override, p2.name, pt.batter2_name) AS batter2_name
           FROM v_effective_partnerships pt
           LEFT JOIN players p1 ON p1.id = pt.batter1_id AND p1.organisation_id = CAST(:o AS UUID)
           LEFT JOIN players p2 ON p2.id = pt.batter2_id AND p2.organisation_id = CAST(:o AS UUID)
          WHERE pt.game_id = CAST(:g AS UUID) AND pt.innings_number = :i
-         ORDER BY pt.wicket_number"""), {"o": str(org_id), "g": str(game_id), "i": innings})).mappings().all()
+         ORDER BY pt.wicket_number, pt.id"""), {"o": str(org_id), "g": str(game_id), "i": innings})).mappings().all()
     return [dict(r) for r in rows]
 
 
@@ -246,18 +347,35 @@ async def editor(db: AsyncSession, org_id, game_id, scorecard: dict, resolve) ->
     our_pids = {resolve(p.get("participantId")) for p in team.get("players") or [] if p.get("participantId")}
     our_pids.discard(None)
     typed = await load(db, org_id, game_id)
+    typed_breaks = await load_breaks(db, org_id, game_id)
     out = []
     for inn in sorted(scorecard.get("innings") or [], key=innings_number):
         if not relink.is_club_innings_of(inn, team, resolve, our_pids):
             continue
         num = innings_number(inn)
         wickets = len(_dismissed_pids_grassroots(inn.get("batting") or []))
-        fow = as_grassroots(typed[num]) if num in typed else sorted(
-            inn.get("fallOfWickets") or [], key=lambda f: f.get("order") or 99)
+        edited = num in typed or num in typed_breaks
+        if edited:
+            fow = as_grassroots(typed.get(num) or [])
+            breaks = typed_breaks.get(num) or []
+        else:
+            fow, breaks = suggested_breaks(inn, inn.get("fallOfWickets") or [])
         stands = await _stands(db, org_id, game_id, num)
+        unbroken = next((b for b in breaks if b["kind"] == stand_breaks.UNBROKEN), None)
         out.append({
             "innings_number": num,
-            "edited": num in typed,
+            "edited": edited,
+            "innings_total": inn.get("runsScored"),
+            # Everyone who went in, for the retirements (a batter who retired is not out on the card).
+            "all_batters": [{"participant_id": b["participantId"], "name": b.get("playerShortName"),
+                             "bat_order": b.get("batOrder"), "runs": b.get("runsScored"),
+                             "dismissal": b.get("dismissalType")}
+                            for b in stand_breaks.batted(inn.get("batting") or [])],
+            "retirements": [{"after_wicket": b["after_wicket"], "score": b["score"],
+                             "participant_id": b["participant_id"], "batter_name": b["batter_name"]}
+                            for b in breaks if b["kind"] == stand_breaks.RETIRED],
+            "unbroken": unbroken is not None,
+            "unbroken_score": unbroken["score"] if unbroken else None,
             "wickets": wickets,
             "batters": [{"participant_id": b["participantId"], "name": b.get("playerShortName"),
                          "bat_order": b.get("batOrder"), "runs": b.get("runsScored"),
@@ -267,15 +385,30 @@ async def editor(db: AsyncSession, org_id, game_id, scorecard: dict, resolve) ->
                      "participant_id": f.get("participantId") or None,
                      "batter_name": f.get("playerShortName")} for f in fow if f.get("order") is not None],
             "stands": stands,
-            "missing": skipped_reasons(wickets, fow, stands) if len(stands) < wickets else {},
+            # Only the stands a wicket ended answer for a wicket; a retirement's or the unbroken one do not.
+            "missing": (skipped_reasons(wickets, fow, [x for x in stands if not x["is_unbroken"]])
+                        if sum(1 for x in stands if not x["is_unbroken"]) < wickets else {}),
         })
     return out
 
 
 # ─── Saving ───────────────────────────────────────────────────────────────────
 
-async def save(db: AsyncSession, org_id, user_id, game_id, num: int, rows: list[dict]) -> None:
-    """Replace the club's typed wickets for one innings. Does not commit."""
+async def save(db: AsyncSession, org_id, user_id, game_id, num: int, rows: list[dict],
+               breaks: Optional[list[dict]] = None) -> None:
+    """Replace the club's typed wickets, retirements and unbroken stand for one innings. Does not commit."""
+    await db.execute(text("""
+        DELETE FROM fow_override_breaks
+         WHERE organisation_id = CAST(:o AS UUID) AND game_id = CAST(:g AS UUID) AND innings_number = :i"""),
+        {"o": str(org_id), "g": str(game_id), "i": num})
+    for b in breaks or []:
+        await db.execute(text("""
+            INSERT INTO fow_override_breaks (organisation_id, game_id, innings_number, kind, after_wicket,
+                                             score, participant_id, batter_name, entered_by)
+            VALUES (CAST(:o AS UUID), CAST(:g AS UUID), :i, :k, :a, :s, :p, :n, CAST(:u AS UUID))"""),
+            {"o": str(org_id), "g": str(game_id), "i": num, "k": b["kind"], "a": b["after_wicket"],
+             "s": b["score"], "p": b["participant_id"], "n": b["batter_name"],
+             "u": str(user_id) if user_id else None})
     await db.execute(text("""
         DELETE FROM fow_overrides
          WHERE organisation_id = CAST(:o AS UUID) AND game_id = CAST(:g AS UUID) AND innings_number = :i"""),
@@ -291,12 +424,17 @@ async def save(db: AsyncSession, org_id, user_id, game_id, num: int, rows: list[
 
 
 async def remove(db: AsyncSession, org_id, game_id, num: int) -> int:
-    """Drop the club's typed wickets for one innings. Returns how many rows went. Does not commit."""
+    """Drop the club's typed wickets (and retirements) for one innings. Returns how many rows went.
+    Does not commit."""
+    gone = (await db.execute(text("""
+        DELETE FROM fow_override_breaks
+         WHERE organisation_id = CAST(:o AS UUID) AND game_id = CAST(:g AS UUID) AND innings_number = :i"""),
+        {"o": str(org_id), "g": str(game_id), "i": num})).rowcount or 0
     res = await db.execute(text("""
         DELETE FROM fow_overrides
          WHERE organisation_id = CAST(:o AS UUID) AND game_id = CAST(:g AS UUID) AND innings_number = :i"""),
         {"o": str(org_id), "g": str(game_id), "i": num})
-    return res.rowcount or 0
+    return (res.rowcount or 0) + gone
 
 
 async def restore_synced(db: AsyncSession, org_id, game_id, scorecard: dict, resolve, num: int) -> dict:
@@ -324,7 +462,13 @@ async def audit(db: AsyncSession, org_id, user, game_id, action: str, summary: s
          "g": str(game_id), "fl": (label or "").strip() or None, "s": summary, "d": json.dumps(detail)})
 
 
-def summarise(inn_num: int, rows: list[dict], stands: list[dict], wickets: int) -> str:
+def summarise(inn_num: int, rows: list[dict], stands: list[dict], wickets: int,
+              breaks: Optional[list[dict]] = None) -> str:
     wk = len(rows)
     base = f"Fall of wickets for innings {inn_num}: {wk} of {wickets} wicket{'s' if wickets != 1 else ''} entered"
+    retired = sum(1 for b in breaks or [] if b["kind"] == stand_breaks.RETIRED)
+    if retired:
+        base += f", {retired} retirement{'s' if retired != 1 else ''}"
+    if any(b["kind"] == stand_breaks.UNBROKEN for b in breaks or []):
+        base += ", the unbroken stand"
     return f"{base}, {len(stands)} partnership{'s' if len(stands) != 1 else ''} worked out."

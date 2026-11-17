@@ -52,6 +52,11 @@ try:
     from app.services import grassroots_scores_client as gr
     from app.services import participant_relink as relink
     from app.services.fow_override_ddl import STATEMENTS as FOW_DDL
+    try:   # migration 389: typed retirements and unbroken stands, read with the typed wickets
+        from app.services.stand_breaks_ddl import STATEMENTS as _STAND_BREAKS_DDL
+    except ImportError:   # a control run on a commit before it
+        _STAND_BREAKS_DDL = []
+    FOW_DDL = list(FOW_DDL) + _STAND_BREAKS_DDL
 except Exception as exc:  # control run against the previous commit
     MISSING.append(str(exc))
 
