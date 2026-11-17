@@ -266,7 +266,7 @@ export default function TeaserCard() {
             <div data-card-cta style={{ flex: 1, background: '#16c784', color: '#08110b', fontWeight: 800, textAlign: 'center',
                                         borderRadius: 16, padding: wide ? '14px 12px' : (story ? '30px 24px' : '24px 20px'),
                                         fontSize: wide ? 24 : (story ? 40 : 36) }}>
-              {names ? 'See the whole season' : 'Is this your club? Claim it free'}
+              {names ? 'See the whole season' : 'Is this your club? See every season'}
             </div>
             <img src={brandWhite} alt="BetterCricket" style={{ width: wide ? 64 : (story ? 120 : 104), height: wide ? 64 : (story ? 120 : 104), flex: 'none' }} />
           </div>

@@ -37,7 +37,7 @@ import { useSelfServeTrialGate } from '../hooks/useSelfServeTrialGate'
 // OWN club, and the wizard opens on a blank search.
 //
 // The wording matches the Meta ad a prospect clicked ("Check out your club",
-// "Free · about 3 minutes · no card"), so the ask on the club page reads as
+// "Free · about a minute · no card"), so the ask on the club page reads as
 // the same offer rather than a new one. Keep the two in step when the ad
 // changes.
 
@@ -213,7 +213,7 @@ export default function ClubCTABar() {
                   : 'This is a real club’s history on BetterCricket.'}
               </strong>{' '}
               See your own club like this.{' '}
-              <span data-testid="club-cta-terms" style={{ whiteSpace: 'nowrap' }}>Free · about 3 minutes · no card</span>
+              <span data-testid="club-cta-terms" style={{ whiteSpace: 'nowrap' }}>Free · about a minute · no card</span>
             </span>
             <button type="button" data-testid="club-cta-start" onClick={start} style={PRIMARY_STYLE}>
               Check out your club →

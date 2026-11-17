@@ -4,7 +4,7 @@
 //   npx vite build && npx vite preview --port 5207 &
 //   PW_CHROMIUM=/opt/pw-browsers/chromium node frontend/verification/verify_trial_two_field_browser.mjs [baseUrl]
 //
-// Measured on the real screen, API stubbed at the network layer: the club step has one "Claim <club>"
+// Measured on the real screen, API stubbed at the network layer: the club step has one "Sync every season of <club>"
 // button; the details step has exactly two inputs; the details check sends blanks for the fields it no
 // longer asks (the server fills them); "Sign-up form opened" is beaconed once with the club; the code
 // is sent with no click; a pasted "Code: 1234" is checked by itself and the wizard moves on to Terms;
@@ -63,7 +63,7 @@ await section('two-field sign-up', async () => {
   const { page, ctx, seen } = await openWizard()
   const claim = page.getByTestId('claim-club')
   await claim.waitFor()
-  ck('club step: one Claim button naming the club', (await claim.innerText()).trim() === 'Claim Brand New', await claim.innerText())
+  ck('club step: one button naming the club and what signing up does', (await claim.innerText()).trim() === 'Sync every season of Brand New', await claim.innerText())
   ck('club step: sets the time expectation', await page.getByText('About a minute · free · no card').isVisible())
   ck('club step: no second CONTINUE competing in the footer', (await page.getByRole('button', { name: 'CONTINUE' }).count()) === 0)
   ck('control: Sign-up form opened is not sent before the form is on screen', !seen.steps.some((s) => s.step === 'signup_form_opened'))

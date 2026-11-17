@@ -776,7 +776,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
                       className="w-full px-4 py-3 rounded-lg font-display font-semibold text-sm text-pb-bg transition hover:opacity-90"
                       style={{ background: 'var(--pb-accent)', overflowWrap: 'anywhere' }}
                     >
-                      Claim {preparedClub.short_name || preparedClub.name}
+                      Sync every season of {preparedClub.short_name || preparedClub.name}
                     </button>
                     <p className="text-center font-mono text-[10px] text-pb-faint -mt-1">
                       About a minute · free · no card

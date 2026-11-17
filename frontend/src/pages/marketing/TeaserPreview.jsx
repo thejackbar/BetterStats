@@ -132,7 +132,7 @@ function TeaserNav({ name, short, logo, mode, onMode, onOpen, registered, captur
           </button>
           <button type="button" data-testid="teaser-header-cta" onClick={() => onOpen(null)}
                   className="shrink-0 ml-2 hidden sm:inline-flex items-center font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text border pb-hairline rounded px-2.5 py-1.5">
-            {registered ? 'OPEN YOUR SITE' : 'CLAIM YOUR CLUB'}
+            {registered ? 'OPEN YOUR SITE' : 'SEE EVERY SEASON'}
           </button>
           <span className="hidden xl:flex items-center gap-1.5 shrink-0 ml-3" title="Powered by BetterCricket">
             <span className="hidden min-[1500px]:block text-pb-faint text-[9px] font-mono tracking-wide2 uppercase">Powered by</span>
@@ -345,7 +345,9 @@ export default function TeaserPreview({ capture = false }) {
   const { record, ladders_shown: ladders, club } = data
   const place = [club.suburb, club.state].filter(Boolean).join(', ')
   const short = name.replace(/ (Cricket )?Club$/i, '')
-  const ctaLabel = registered ? `Open ${name}'s site` : `Claim ${name} on BetterCricket`
+  // What signing up gets them, not "claim": this page is one season of public data, and the
+  // sign-up syncs every season the club has played.
+  const ctaLabel = registered ? `Open ${name}'s site` : `See every season of ${short}`
   const records = data.records || []
   const hasThird = records.length > 0 || fielding.length > 0
   const meta = [
@@ -483,7 +485,7 @@ export default function TeaserPreview({ capture = false }) {
            style={{ background: 'color-mix(in srgb, var(--pb-bg) 94%, transparent)' }}>
         <div className="max-w-[1400px] mx-auto px-4 sm:px-6 py-3 flex items-center gap-3">
           <p className="hidden sm:block flex-1 text-sm text-pb-dim">
-            {registered ? 'Already set up.' : 'Free, about 3 minutes, no card.'}
+            {registered ? 'Already set up.' : 'Free 14-day trial, about a minute, no card.'}
           </p>
           <button type="button" data-testid="teaser-bar-cta" onClick={() => openSheet(null)}
                   style={{ background: 'var(--pb-accent)', color: 'var(--pb-on-accent)' }}
@@ -500,7 +502,7 @@ export default function TeaserPreview({ capture = false }) {
                className="relative w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl border pb-hairline bg-pb-surface p-6 shadow-2xl">
             <h2 id="teaser-sheet-title" className="text-xl font-bold leading-snug">
               {registered ? `${name} is already on BetterCricket`
-                : info ? info.title(name) : `This is ${name}'s site on BetterCricket. Claim it.`}
+                : info ? info.title(name) : `This is one season. Sync every season ${name} has played.`}
             </h2>
             {registered ? (
               <p className="mt-2 text-sm text-pb-dim">Open the club's own site to see every player, record and result.</p>
@@ -508,7 +510,7 @@ export default function TeaserPreview({ capture = false }) {
               <ul className="mt-3 space-y-2 text-sm text-pb-dim">
                 {info ? <li data-testid="teaser-sheet-line">{info.line}</li>
                   : <li>Leaderboards, records and a club website that update after every match.</li>}
-                <li>Free trial, no card, about 3 minutes to set up.</li>
+                <li>Free 14-day trial, no card, about a minute to start.</li>
               </ul>
             )}
             <div className="mt-5 flex flex-col gap-2">

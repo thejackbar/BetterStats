@@ -83,7 +83,7 @@ for (const [fmt, [w, h]] of Object.entries(SIZES)) {
     const named = NAMES.filter((n) => t.includes(n))
     if (fmt === 'card') ck('card: the email card names the player behind the figure', named.includes('K. Parekh'), t.slice(0, 200))
     else ck(`${fmt}: an ad never prints a player's name`, named.length === 0, named.join(', '))
-    ck(`${fmt}: the call to action fits the format`, fmt === 'card' ? /See the whole season/.test(t) : /Claim it free/.test(t))
+    ck(`${fmt}: the call to action fits the format`, fmt === 'card' ? /See the whole season/.test(t) : /See every season/.test(t) && !/Claim/.test(t))
     ck(`${fmt}: no navbar, cookie bar or other fixed chrome sits over the picture`,
        await page.evaluate(() => [...document.querySelectorAll('body *')].filter((e) => {
          const s = getComputedStyle(e); return s.position === 'fixed' && e.getBoundingClientRect().width > 100
