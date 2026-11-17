@@ -230,6 +230,11 @@ async def main() -> None:
             from app.services.premierships_ddl import STATEMENTS
         except ImportError:
             STATEMENTS = []
+        try:   # migration 389: club match tags, read by the reconcile
+            from app.services.stand_breaks_ddl import STATEMENTS as _STAND_BREAKS_DDL
+        except ImportError:   # a control run on a commit before it
+            _STAND_BREAKS_DDL = []
+        STATEMENTS = list(STATEMENTS) + _STAND_BREAKS_DDL
         for stmt in STATEMENTS:
             await conn.execute(text(stmt))
         from app.services.junior_hiding_ddl import STATEMENTS as JUNIOR_DDL

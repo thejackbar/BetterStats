@@ -32,6 +32,7 @@ export const GROUPS = [
       { to: '/admin/manual-entries', label: 'Manual Entries', icon: 'list', cap: CAP.MANAGE_MANUAL_ENTRIES, desc: "Hand-enter a game we can't sync." },
       { to: '/admin/milestones', label: 'Milestones', icon: 'check', cap: CAP.MANAGE_MILESTONES, desc: 'Review and manage player milestones.' },
       { to: '/admin/partnerships', label: 'Partnership Records', icon: 'teams', cap: CAP.MANAGE_AWARDS, desc: 'Check and fix partnership records.' },
+      { to: '/admin/premierships', label: 'Premierships', icon: 'check', cap: CAP.MANAGE_AWARDS, desc: 'Tag a match as a grand final, a final or a normal game so premierships are written for it.' },
     ],
   },
   {

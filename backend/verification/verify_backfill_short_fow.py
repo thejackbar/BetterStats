@@ -108,6 +108,11 @@ async def main() -> None:
     await h.build_schema()
     from app.services.audit_ddl import STATEMENTS as AUDIT_DDL
     from app.services.fow_override_ddl import STATEMENTS as FOW_OVERRIDE_DDL
+    try:   # migration 389: typed retirements and unbroken stands, read with the typed wickets
+        from app.services.stand_breaks_ddl import STATEMENTS as _STAND_BREAKS_DDL
+    except ImportError:   # a control run on a commit before it
+        _STAND_BREAKS_DDL = []
+    FOW_OVERRIDE_DDL = list(FOW_OVERRIDE_DDL) + _STAND_BREAKS_DDL
     from app.services.partnership_backfill_ddl import STATEMENTS as PBF_LOG_DDL   # migration 359
     async with h.engine.begin() as conn:
         for stmt in AUDIT_DDL + FOW_OVERRIDE_DDL + PBF_LOG_DDL:

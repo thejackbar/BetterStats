@@ -311,6 +311,23 @@ def _stand_batters(p: dict, resolve, our_pids: set, roster_guids: set) -> tuple:
     return b1_id, b2_id, b1_name, b2_name
 
 
+def _innings_stands(inn: dict, batting_rows: list, fow_rows: list) -> list[dict]:
+    """The stands of one innings. An innings the club typed retirements or an unbroken stand for
+    (`fow_overrides.overlay` puts them on it as `_standBreaks`) is walked by `stand_breaks`, which
+    knows a stand can end without a wicket; every other innings by Cricket Australia's deriver."""
+    breaks = inn.get("_standBreaks")
+    if not breaks:
+        return _derive_partnerships_grassroots(batting_rows, fow_rows)
+    from app.services import stand_breaks   # imports sync, like this module; kept local
+    try:
+        return stand_breaks.derive(batting_rows, fow_rows, breaks, inn.get("runsScored"))
+    except stand_breaks.WalkRefused as exc:
+        # Checked when the club saved, so this means the card changed underneath (a scorer
+        # corrected it). No stand is better than a wrongly paired one; the editor says why.
+        logger.info("stand_breaks: innings %s refused on apply: %s", inn.get("inningsOrder"), exc)
+        return []
+
+
 async def attach_innings_detail(db: AsyncSession, org_id, game_id, scorecard: dict, resolve,
                                 replace_innings: frozenset = frozenset()) -> dict:
     """Add the fall of wickets and partnerships a stored game lacks, one innings at a time.
@@ -373,7 +390,7 @@ async def attach_innings_detail(db: AsyncSession, org_id, game_id, scorecard: di
             continue
         is_club_innings = is_club_innings_of(inn, team, resolve, our_pids)
 
-        for p in _derive_partnerships_grassroots(batting_rows, fow_rows):
+        for p in _innings_stands(inn, batting_rows, fow_rows):
             b1_id, b2_id, b1_name, b2_name = _stand_batters(p, resolve, our_pids, roster_guids)
             if not b1_id and not b2_id and not b1_name and not b2_name:
                 continue
@@ -381,7 +398,8 @@ async def attach_innings_detail(db: AsyncSession, org_id, game_id, scorecard: di
                 game_id=gid, innings_number=inn_num, wicket_number=p["wicket_number"],
                 batter1_id=b1_id, batter2_id=b2_id, batter1_name=b1_name, batter2_name=b2_name,
                 runs=p.get("runs") or 0, batter1_runs=p.get("batter1_runs"),
-                batter2_runs=p.get("batter2_runs"), is_club_innings=is_club_innings))
+                batter2_runs=p.get("batter2_runs"), is_club_innings=is_club_innings,
+                is_unbroken=p.get("is_unbroken")))
             n["partnerships"] += 1
     await db.flush()
     return n
@@ -414,7 +432,7 @@ async def complete_innings_detail(db: AsyncSession, org_id, game_id, scorecard: 
         return n
     gid = game_id if isinstance(game_id, uuid.UUID) else uuid.UUID(str(game_id))
     from app.services import fow_overrides   # imports this module, so not at the top
-    typed = set(await fow_overrides.load(db, org_id, gid))
+    typed = await fow_overrides.typed_innings(db, org_id, gid)
 
     our_pids: set = set()
     roster_guids: set = set()

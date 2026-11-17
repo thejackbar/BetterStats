@@ -1576,6 +1576,35 @@ class ManualPartnershipCreate(BaseModel):
     runs: int
     is_not_out: bool = False
     notes: Optional[str] = None
+    # The match the stand was made in: a play.cricket.com.au link or match ID, or a game id. Optional.
+    match: Optional[str] = None
+
+
+async def _partnership_match(db: AsyncSession, club: Organisation, ref: Optional[str]) -> Optional[uuid.UUID]:
+    """The game id a typed partnership record links to, from what the admin pasted (None for blank).
+
+    Only one of this club's matches (synced, either side, or one it typed in), so a record can never
+    open another club's scorecard. Raises 422 with a reason a club can act on."""
+    if not (ref or "").strip():
+        return None
+    from app.services.social_match_lookup import parse_reference
+    from app.services.club_grades import club_game_sql
+    parsed = parse_reference(ref)
+    if not parsed or not parsed.get("match_id"):
+        if parsed and parsed.get("playhq_code"):
+            raise HTTPException(status_code=422, detail=(
+                "That's a playhq.com link, which uses a different match ID. Find the same match on "
+                "play.cricket.com.au and paste that link instead."))
+        raise HTTPException(status_code=422, detail="Paste a match link from play.cricket.com.au, or its match ID.")
+    found = (await db.execute(_text(f"""
+        SELECT g.id FROM v_effective_games g
+         WHERE g.id = CAST(:g AS UUID) AND {club_game_sql('g', 'org')}"""),
+        {"g": parsed["match_id"], "org": str(club.id)})).scalar()
+    if found is None:
+        raise HTTPException(status_code=422, detail=(
+            "That match is not one of this club's, or it has not synced yet. Check the link is for a game "
+            "your club played."))
+    return found
 
 
 @router.get("/partnership-records")
@@ -1603,6 +1632,7 @@ async def list_partnership_records(
             "runs": r.runs,
             "is_not_out": r.is_not_out,
             "notes": r.notes,
+            "linked_game_id": str(r.linked_game_id) if r.linked_game_id else None,
         }
         for r in records
     ]
@@ -1627,6 +1657,7 @@ async def create_partnership_record(
         runs=data.runs,
         is_not_out=data.is_not_out,
         notes=data.notes,
+        linked_game_id=await _partnership_match(db, club, data.match),
     )
     db.add(record)
     await db.commit()
@@ -1665,6 +1696,8 @@ class ManualPartnershipPatch(BaseModel):
     runs: Optional[int] = None
     is_not_out: Optional[bool] = None
     notes: Optional[str] = None
+    # Sent: link to that match (a link or ID); sent blank or null: take the link off; absent: leave it.
+    match: Optional[str] = None
 
 
 @router.patch("/partnership-records/{record_id}", dependencies=[Depends(require_cap(MANAGE_AWARDS))])
@@ -1705,6 +1738,8 @@ async def patch_partnership_record(
         record.is_not_out = data.is_not_out
     if 'notes' in fields:
         record.notes = data.notes
+    if 'match' in fields:
+        record.linked_game_id = await _partnership_match(db, club, data.match)
     await db.commit()
     return {"status": "updated"}
 

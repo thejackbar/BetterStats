@@ -1324,3 +1324,7 @@ runs a meeting from, reached from OPEN MEETING on each row of the meetings list.
   overwrite a list someone has started.
 
 <!-- END original CLAUDE.md L9672-9924 -->
+
+## v9.144.3.4: event details keep their layout (2026-11-17)
+
+A club pasted an email-style write-up (emoji lines, blank lines, bank details) into an event's Details. The textarea stored the newlines but `PublicEventRegister.jsx` rendered it in a centred `<p>`, so it collapsed into one paragraph. The details now render left aligned in a card with `whitespace-pre-line break-words`, bare `http(s)` links become tappable, and the admin Details textarea is 8 rows and resizable. Checked in Chromium at 390px with the event API stubbed: no horizontal overflow, link present.

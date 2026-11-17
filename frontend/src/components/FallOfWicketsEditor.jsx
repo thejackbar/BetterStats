@@ -7,32 +7,58 @@ import { PbSpinner } from '../lib/presskit'
 // the synced ones for that innings and the partnerships are worked out from them on the server.
 
 const blankRow = () => ({ score: '', pid: '' })
+const blankRetirement = () => ({ score: '', pid: '', after: '' })
+const str = v => (v == null ? '' : String(v))
 
 function draftFrom(inn) {
   const rows = {}
   for (const f of inn.fow || []) {
     rows[f.wicket_number] = {
-      score: f.score_at_fall == null ? '' : String(f.score_at_fall),
+      score: str(f.score_at_fall),
       pid: f.participant_id || '',
     }
   }
   return rows
 }
 
+// Retirements and the unbroken last stand: what ends a partnership without a wicket.
+function extrasFrom(inn) {
+  return {
+    retirements: (inn.retirements || []).map(r => ({
+      score: str(r.score), pid: r.participant_id || '', after: str(r.after_wicket),
+    })),
+    unbroken: !!inn.unbroken,
+    unbrokenScore: inn.unbroken ? str(inn.unbroken_score) : '',
+  }
+}
+
+const inputCls = 'w-full min-w-0 px-2 py-1.5 rounded bg-pb-surface2 border border-pb-hairline text-sm text-pb-text'
+
+function ordinal(n) {
+  if (n % 100 >= 11 && n % 100 <= 13) return 'th'
+  return { 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] || 'th'
+}
+
 function InningsEditor({ gameId, inn, onChanged }) {
   const [rows, setRows] = useState(() => draftFrom(inn))
+  const [extras, setExtras] = useState(() => extrasFrom(inn))
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const [note, setNote] = useState(null)
 
-  useEffect(() => { setRows(draftFrom(inn)) }, [inn])
+  useEffect(() => { setRows(draftFrom(inn)); setExtras(extrasFrom(inn)) }, [inn])
 
   const recorded = Object.keys(draftFrom(inn)).map(Number)
   const slots = Math.max(inn.wickets, ...recorded, 0)
   const used = useMemo(() => new Set(Object.values(rows).map(r => r.pid).filter(Boolean)), [rows])
   const dirty = JSON.stringify(rows) !== JSON.stringify(draftFrom(inn))
+    || JSON.stringify(extras) !== JSON.stringify(extrasFrom(inn))
+  const allBatters = inn.all_batters || inn.batters || []
 
   const set = (w, patch) => setRows(r => ({ ...r, [w]: { ...(r[w] || blankRow()), ...patch } }))
+  const setRet = (i, patch) => setExtras(x => ({
+    ...x, retirements: x.retirements.map((r, j) => (j === i ? { ...r, ...patch } : r)),
+  }))
 
   async function run(fn) {
     setBusy(true); setErr(null); setNote(null)
@@ -58,16 +84,24 @@ function InningsEditor({ gameId, inn, onChanged }) {
         participant_id: r.pid || null,
       })
     }
-    return run(() => api.saveFow(gameId, inn.innings_number, out))
+    const retirements = extras.retirements
+      .filter(r => r.score !== '' || r.pid || r.after !== '')
+      .map(r => ({
+        participant_id: r.pid || null,
+        score: r.score === '' ? null : Number(r.score),
+        after_wicket: r.after === '' ? null : Number(r.after),
+      }))
+    return run(() => api.saveFow(gameId, inn.innings_number, out, {
+      retirements,
+      unbroken: extras.unbroken,
+      unbroken_score: extras.unbroken && extras.unbrokenScore !== '' ? Number(extras.unbrokenScore) : null,
+    }))
   }
 
-  if (!slots) {
-    return (
-      <p className="text-xs text-pb-faint">The batting card shows no wickets in this innings, so there is nothing to enter.</p>
-    )
-  }
-
-  const standByWicket = Object.fromEntries((inn.stands || []).map(s => [s.wicket_number, s]))
+  // A stand a wicket ended belongs to that wicket's row; a retirement's or the unbroken one is listed below.
+  const standByWicket = Object.fromEntries(
+    (inn.stands || []).filter(s => !s.is_unbroken).map(s => [s.wicket_number, s]))
+  const unbrokenStands = (inn.stands || []).filter(s => s.is_unbroken)
   const missing = inn.missing || {}
 
   return (
@@ -77,6 +111,10 @@ function InningsEditor({ gameId, inn, onChanged }) {
         {inn.edited ? ', typed by the club' : ' by Cricket Australia'}.
       </p>
 
+      {!slots && (
+        <p className="text-xs text-pb-faint mb-3">The batting card shows no wickets in this innings.</p>
+      )}
+      {slots > 0 && (
       <div className="grid grid-cols-[2.25rem_4.75rem_minmax(0,1fr)] gap-x-2 gap-y-2 items-center">
         <span className="font-mono text-[10px] tracking-wide2 text-pb-faintest">WKT</span>
         <span className="font-mono text-[10px] tracking-wide2 text-pb-faintest">SCORE</span>
@@ -116,6 +154,87 @@ function InningsEditor({ gameId, inn, onChanged }) {
             </div>
           )
         })}
+      </div>
+      )}
+
+      <div className="mt-5 pt-4 pb-hairline-t">
+        <p className="font-mono text-[10px] tracking-wide2 text-pb-faintest mb-1">RETIREMENTS</p>
+        <p className="text-[11px] text-pb-faint mb-2">
+          A batter who retired ends the partnership without a wicket. Enter the score when they retired and how many
+          wickets were down. A retired batter is taken to come back once everyone else has batted.
+        </p>
+        {extras.retirements.length > 0 && (
+          <div className="grid grid-cols-[4.25rem_minmax(0,1fr)_4.25rem_1.25rem] gap-x-2 gap-y-2 items-center mb-2">
+            <span className="font-mono text-[10px] tracking-wide2 text-pb-faintest">SCORE</span>
+            <span className="font-mono text-[10px] tracking-wide2 text-pb-faintest">BATTER RETIRED</span>
+            <span className="font-mono text-[10px] tracking-wide2 text-pb-faintest">WKTS DOWN</span>
+            <span />
+            {extras.retirements.map((r, i) => (
+              <div key={i} className="contents">
+                <input type="number" inputMode="numeric" min="0" value={r.score}
+                  aria-label={`Score at retirement ${i + 1}`}
+                  onChange={e => setRet(i, { score: e.target.value })}
+                  className={`${inputCls} font-mono`} />
+                <select value={r.pid} aria-label={`Batter who retired, retirement ${i + 1}`}
+                  onChange={e => setRet(i, { pid: e.target.value })} className={inputCls}>
+                  <option value="">Pick a batter</option>
+                  {allBatters.map(b => (
+                    <option key={b.participant_id} value={b.participant_id}>
+                      {b.name}{b.runs != null ? ` (${b.runs})` : ''}
+                    </option>
+                  ))}
+                </select>
+                <input type="number" inputMode="numeric" min="0" max="10" value={r.after}
+                  aria-label={`Wickets down at retirement ${i + 1}`}
+                  onChange={e => setRet(i, { after: e.target.value })}
+                  className={`${inputCls} font-mono`} />
+                <button type="button" aria-label={`Remove retirement ${i + 1}`}
+                  onClick={() => setExtras(x => ({ ...x, retirements: x.retirements.filter((_, j) => j !== i) }))}
+                  className="text-pb-faint hover:text-pb-text text-sm">×</button>
+              </div>
+            ))}
+          </div>
+        )}
+        <button type="button"
+          onClick={() => setExtras(x => ({ ...x, retirements: [...x.retirements, blankRetirement()] }))}
+          className="font-mono text-[10px] tracking-wide2 hover:underline" style={{ color: 'var(--pb-accent)' }}>
+          + ADD A RETIREMENT
+        </button>
+
+        <div className="flex items-start gap-2 mt-4 text-sm text-pb-text">
+          <input id={`unbroken-${inn.innings_number}`} type="checkbox" checked={extras.unbroken} className="mt-1"
+            onChange={e => setExtras(x => ({ ...x, unbroken: e.target.checked }))} />
+          <label htmlFor={`unbroken-${inn.innings_number}`}>
+            Last partnership unbroken at the end of the innings
+            <span className="block text-[11px] text-pb-faint">
+              Records the stand between the two batters still in. Needs every wicket entered with its batter.
+            </span>
+          </label>
+        </div>
+        {extras.unbroken && (
+          <div className="flex flex-wrap items-center gap-2 mt-2 pl-6">
+            <span className="text-[11px] text-pb-faint">Score at the end</span>
+            <input type="number" inputMode="numeric" min="0" value={extras.unbrokenScore}
+              aria-label="Score at the end of the innings"
+              placeholder={inn.innings_total != null ? String(inn.innings_total) : ''}
+              onChange={e => setExtras(x => ({ ...x, unbrokenScore: e.target.value }))}
+              className={`${inputCls} font-mono !w-24`} />
+            {inn.innings_total != null && extras.unbrokenScore === '' && (
+              <span className="text-[11px] text-pb-faintest">blank uses the card&apos;s total</span>
+            )}
+          </div>
+        )}
+
+        {unbrokenStands.length > 0 && (
+          <ul className="mt-3 space-y-0.5">
+            {unbrokenStands.map((s, i) => (
+              <li key={i} className="text-[11px] text-pb-faintest">
+                Unbroken {s.wicket_number}{ordinal(s.wicket_number)} wicket partnership: {s.runs}*
+                {' '}({[s.batter1_name, s.batter2_name].filter(Boolean).join(' and ')})
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       {err && <p className="text-pb-red text-xs mt-3">{err}</p>}
@@ -169,7 +288,7 @@ export default function FallOfWicketsEditor({ gameId, onClose, onSaved }) {
         <p className="text-xs text-pb-faint mb-4">
           Enter the score and the batter out at each wicket from your scorebook. You can leave a wicket out, or leave
           its batter as &quot;Not sure&quot;. Partnerships are worked out from what you enter, for the wickets where the
-          figures settle who was at the crease.
+          figures settle who was at the crease. Add any retirements, and tick the last partnership if it was unbroken.
         </p>
 
         {state.loading && <div className="py-6 flex justify-center"><PbSpinner /></div>}

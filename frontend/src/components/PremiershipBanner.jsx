@@ -5,7 +5,7 @@ import { api } from '../lib/api'
 // A grand final the club won, on its own scorecard: which flag it was and a way into the
 // Premierships page. Reads the honours the sync wrote from this game (services/premierships.py),
 // so it shows for exactly the games the Premierships page links back to, and for no other.
-export default function PremiershipBanner({ gameId, orgId }) {
+export default function PremiershipBanner({ gameId, orgId, refreshKey = 0 }) {
   const [rows, setRows] = useState([])
 
   useEffect(() => {
@@ -14,7 +14,7 @@ export default function PremiershipBanner({ gameId, orgId }) {
       .then(r => { if (live) setRows(r?.premierships || []) })
       .catch(() => { if (live) setRows([]) })
     return () => { live = false }
-  }, [gameId])
+  }, [gameId, refreshKey])
 
   if (!rows.length) return null
   // A grand final between two clubs that both recorded it: the club the visitor came from, else the first.

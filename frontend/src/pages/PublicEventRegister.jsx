@@ -14,6 +14,14 @@ function money(cents) {
   return `$${(cents / 100).toFixed(2)}`
 }
 
+const URL_RE = /(https?:\/\/[^\s]+)/g
+
+function linkify(text) {
+  return text.split(URL_RE).map((part, i) => (i % 2 === 1
+    ? <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="underline" style={{ color: 'var(--pb-accent)' }}>{part}</a>
+    : part))
+}
+
 export default function PublicEventRegister() {
   const { eventId } = useParams()
   const [searchParams] = useSearchParams()
@@ -69,7 +77,14 @@ export default function PublicEventRegister() {
             <div className="font-mono text-[10px] text-pb-faintest mt-1">{event.sold_out ? 'Fully booked' : `${event.spots_left} spot${event.spots_left === 1 ? '' : 's'} left`}</div>
           )}
         </div>
-        {event.description && <p className="text-pb-dim text-sm text-center mb-6">{event.description}</p>}
+        {event.description && (
+          // The club types these details like an email: line breaks, blank
+          // lines between sections, emoji bullets. Keep them as typed, left
+          // aligned so a list reads as a list, and make bare links clickable.
+          <div className="pb-card p-5 mb-6 text-pb-dim text-sm leading-relaxed text-left whitespace-pre-line break-words">
+            {linkify(event.description)}
+          </div>
+        )}
 
         {paidParam === '1' && (
           <div className="rounded-lg px-3.5 py-2.5 mb-4 text-sm text-center" style={{ background: 'color-mix(in srgb, var(--pb-positive) 12%, transparent)', color: 'var(--pb-positive)', border: '1px solid color-mix(in srgb, var(--pb-positive) 35%, transparent)' }}>

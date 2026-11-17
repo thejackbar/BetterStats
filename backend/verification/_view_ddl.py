@@ -113,4 +113,17 @@ def view_statements() -> list[tuple[str, str]]:
         m = re.search(r"CREATE\s+(?:OR\s+REPLACE\s+)?VIEW\s+(\w+)\s+AS", stmt, re.I)
         if m:
             views.append((m.group(1), stmt))
+    # Migration 389 added `is_unbroken` to `v_effective_partnerships` through services/superseded_ddl (which owns the
+    # view and which the lifespan re-issues on every boot), not as a literal, so the definition read above lacks it.
+    # Append the column to both branches, the way the live view carries it, when the module says it is there (a
+    # control run on an earlier commit keeps the old list). The rest of the definition is left as the suites knew it.
+    try:
+        from app.services.superseded_ddl import PER_INNINGS_VIEWS
+        has_unbroken = any("v_effective_partnerships " in v and "t.is_unbroken" in v for v in PER_INNINGS_VIEWS)
+    except ImportError:
+        has_unbroken = False
+    if has_unbroken:
+        views = [(n, re.sub(r"batter2_name(\s+FROM\s+(?:manual_)?partnerships\b)", r"batter2_name, is_unbroken\1", sql)
+                  if n == "v_effective_partnerships" and "is_unbroken" not in sql else sql)
+                 for n, sql in views]
     return views

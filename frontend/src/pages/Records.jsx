@@ -409,7 +409,7 @@ function PartnershipsTab({ data, latestSeason, fmt = n => n }) {
                       <span className="text-pb-faintest mx-1">&amp;</span>
                       <PlayerLink id={r.player2_id} name={r.player2_name} fmt={fmt} />
                     </td>
-                    <td className="py-2.5 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{r.runs}</td>
+                    <td className="py-2.5 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{r.runs}{r.not_out ? '*' : ''}</td>
                     <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{r.grade_name}{isNew(r.season_name) && <NewBadge />}</td>
                   </GameRow>
                 ))}
@@ -447,7 +447,7 @@ function PartnershipsTab({ data, latestSeason, fmt = n => n }) {
                       <span className="text-pb-faintest mx-1">&amp;</span>
                       <PlayerLink id={r.player2_id} name={r.player2_name} fmt={fmt} />
                     </td>
-                    <td className="py-2.5 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{r.runs}</td>
+                    <td className="py-2.5 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{r.runs}{r.not_out ? '*' : ''}</td>
                     <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{r.wicket_number ? ORDINALS[r.wicket_number - 1] : '—'}</td>
                     <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{r.grade_name || '—'}</td>
                     <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{formatSeason(r.season_name) || '—'}{isNew(r.season_name) && <NewBadge />}</td>
@@ -490,7 +490,7 @@ function PartnershipsTab({ data, latestSeason, fmt = n => n }) {
                           <span className="text-pb-faintest mx-1">&amp;</span>
                           <PlayerLink id={r.player2_id} name={r.player2_name} fmt={fmt} />
                         </td>
-                        <td className="py-2 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{r.runs}</td>
+                        <td className="py-2 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{r.runs}{r.not_out ? '*' : ''}</td>
                         <td className="py-2 px-3 font-mono text-pb-faintest text-[11px] text-right">{formatSeason(r.season_name) || '—'}{isNew(r.season_name) && <NewBadge />}</td>
                       </GameRow>
                     ))}
@@ -534,7 +534,7 @@ function PartnershipsTab({ data, latestSeason, fmt = n => n }) {
                           <span className="text-pb-faintest mx-1">&amp;</span>
                           <PlayerLink id={r.player2_id} name={r.player2_name} fmt={fmt} />
                         </td>
-                        <td className="py-2.5 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{r.runs}</td>
+                        <td className="py-2.5 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{r.runs}{r.not_out ? '*' : ''}</td>
                         <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{r.grade_name || '—'}</td>
                         <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{formatSeason(r.season_name) || '—'}{isNew(r.season_name) && <NewBadge />}</td>
                       </GameRow>

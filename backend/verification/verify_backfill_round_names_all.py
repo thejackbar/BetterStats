@@ -111,6 +111,11 @@ async def main() -> None:
                 id SERIAL PRIMARY KEY, merged_at TIMESTAMPTZ DEFAULT NOW(), org_id UUID NOT NULL,
                 canonical_name TEXT NOT NULL, alias_name TEXT NOT NULL, undone_at TIMESTAMPTZ)"""))
         from app.services.premierships_ddl import STATEMENTS
+        try:   # migration 389: club match tags, read by the reconcile
+            from app.services.stand_breaks_ddl import STATEMENTS as _STAND_BREAKS_DDL
+        except ImportError:   # a control run on a commit before it
+            _STAND_BREAKS_DDL = []
+        STATEMENTS = list(STATEMENTS) + _STAND_BREAKS_DDL
         for stmt in STATEMENTS:
             await conn.execute(text(stmt))
     await seed()
