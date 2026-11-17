@@ -216,9 +216,9 @@ function ClubActionModal({ club, onSetUp, onClose }) {
                 className="w-full px-4 py-2.5 rounded-lg font-display font-semibold text-sm text-pb-bg transition hover:opacity-90"
                 style={{ background: 'var(--pb-accent)' }}
               >
-                Claim my club
+                Sync my club's history
               </button>
-              <p className="text-center text-xs text-pb-dim">Free · about 3 minutes · no card</p>
+              <p className="text-center text-xs text-pb-dim">Free · about a minute · no card</p>
               <button
                 onClick={() => setMode('request')}
                 className="w-full px-4 py-2.5 rounded-lg font-display font-semibold text-sm border pb-hairline text-pb-text hover:bg-pb-surface2 transition"
