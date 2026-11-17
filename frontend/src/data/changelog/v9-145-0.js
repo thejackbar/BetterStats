@@ -1,8 +1,8 @@
 export default {
   version: 'v9.145.0',
   date: '2026-11-17',
-  // Above v9.144.3.2's sortKey (2026-11-21T04:00:00Z). Check origin/main at merge time.
-  sortKey: '2026-11-21T05:00:00Z',
+  // Above v9.144.3.3's sortKey (2026-11-21T05:00:00Z). Check origin/main at merge time.
+  sortKey: '2026-11-21T06:00:00Z',
   title: 'Unbroken and retired partnerships, and tagging premierships',
   items: [
     'Fall of wickets editor: tick "Last partnership unbroken" and the stand between the two batters still in is recorded against the match, scored off the card\'s total unless you type the end score.',
