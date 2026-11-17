@@ -246,7 +246,7 @@ function EventForm({ event, seedDate, types, members, onSaved, onClose }) {
         </div>
         <div>
           <label className={lbl}>DESCRIPTION</label>
-          <textarea className={inp} rows={3} placeholder="Details (optional)" value={form.description} onChange={e => set({ description: e.target.value })} />
+          <textarea className={`${inp} resize-y`} rows={8} placeholder="Details (optional). Line breaks and blank lines show on the public page as typed." value={form.description} onChange={e => set({ description: e.target.value })} />
         </div>
 
         <div className="border-t pb-hairline-t pt-3">
