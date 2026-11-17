@@ -288,6 +288,38 @@ async def main() -> None:
           {d["name"] for d in miss} == {"Echo CC"}, str({d["name"] for d in miss}))
     check("--force lists up-to-date clubs too (and still never a customer)",
           {"Alpha CC", "Bravo CC", "Echo CC"} <= {d["name"] for d in forced} and "Foxtrot CC" not in {d["name"] for d in forced})
+    # --before: the redraw after a design change, in batches that make progress.
+    import inspect as _inspect
+    import time as _t
+    cut = _t.time() - 3600
+    has_before = "drawn_before" in _inspect.signature(ti.due_clubs).parameters
+
+    async def before_due(limit=50):
+        # Reports, never crashes, on code without the option (a control run).
+        if not has_before:
+            return None
+        async with Session() as s:
+            return await ti.due_clubs(s, limit, drawn_before=cut)
+    check("due_clubs takes drawn_before (the --before redraw)", has_before)
+    b1 = {d["name"] for d in (await before_due() or [])}
+    check("--before skips a club drawn after the cutoff and takes one whose file is missing",
+          has_before and "Bravo CC" not in b1 and "Echo CC" in b1, str(b1))
+    check("--before never takes an undrawn club (the ordinary draw does) or a customer",
+          has_before and not ({"Alpha CC", "Foxtrot CC", "Charlie CC", "Delta CC"} & b1), str(b1))
+    for fmt in ti.FORMATS:
+        os.utime(ti.image_path(B["token"], fmt), (cut - 86400, cut - 86400))
+    b2 = {d["name"] for d in (await before_due() or [])}
+    b_lim = await before_due(1) or []
+    check("--before takes a club whose picture was drawn before the cutoff", has_before and "Bravo CC" in b2, str(b2))
+    check("--before honours the limit", len(b_lim) == 1, str(b_lim))
+    for fmt in ti.FORMATS:
+        put_file(B["token"], fmt)            # what a redraw does: a fresh file
+    b3 = {d["name"] for d in (await before_due() or [])}
+    check("once redrawn it drops out, so the next run moves on (unlike --force)", has_before and "Bravo CC" not in b3, str(b3))
+    dry_b = (await ti.render_pending(Session, limit=10, apply=False, drawn_before=cut)
+             if "drawn_before" in _inspect.signature(ti.render_pending).parameters else {})
+    check("render_pending passes --before through (dry run lists the same clubs)",
+          has_before and {c["name"] for c in dry_b.get("clubs", [])} == b3, str(dry_b))
     async with Session() as s:
         check("a limit of zero or less draws nothing, and a huge one is capped",
               await ti.due_clubs(s, 0) == [] and len(await ti.due_clubs(s, 10**9)) <= ti.MAX_BATCH)
