@@ -291,7 +291,8 @@ async def images_progress(session: AsyncSession) -> dict:
 
 async def due_clubs(session: AsyncSession, limit: int, *, club_id: Optional[str] = None,
                     force: bool = False, missing_files: bool = False,
-                    skip: Optional[Iterable[str]] = None, returning_only: bool = False) -> list:
+                    skip: Optional[Iterable[str]] = None, returning_only: bool = False,
+                    drawn_before: Optional[float] = None) -> list:
     """The clubs to draw now: never drawn first, then the longest out of date.
     ``force`` redraws clubs that are up to date (a design change).
     ``missing_files`` is for a restore or an unmounted volume: clubs marked as
@@ -299,7 +300,11 @@ async def due_clubs(session: AsyncSession, limit: int, *, club_id: Optional[str]
     across runs, because a club drawn this time no longer matches.
     ``skip`` is a set of tokens to leave out (clubs that just failed).
     ``returning_only`` keeps only clubs behind an archived or lapsed-trial
-    BetterCricket club (the group ``pull_returning_club_teasers`` re-crawls)."""
+    BetterCricket club (the group ``pull_returning_club_teasers`` re-crawls).
+    ``drawn_before`` (epoch seconds) is the redraw after a design change: clubs
+    already drawn whose picture file is older than that time, or missing. Unlike
+    ``force`` it makes progress across runs, because drawing a club writes a
+    fresh file, so a big redraw can be done in batches of ``MAX_BATCH``."""
     limit = max(0, min(int(limit), MAX_BATCH))
     only = (" AND " + FINISHED_WITH_TRIAL_SQL) if returning_only else ""
     if limit == 0:
@@ -313,6 +318,27 @@ async def due_clubs(session: AsyncSession, limit: int, *, club_id: Optional[str]
         left_alone = {str(t) for t in (skip or [])}
         return [dict(r) for r in rows
                 if r["token"] not in left_alone and not image_path(r["token"], EMAIL_FORMAT).is_file()][:limit]
+    if drawn_before is not None:
+        where = ("FROM club_teaser_snapshots t JOIN marketing_clubs mc ON mc.id = t.marketing_club_id "
+                 "WHERE t.status = 'ok' AND t.snapshot IS NOT NULL AND " + NOT_A_CUSTOMER_SQL + " "
+                 "AND t.image_version IS NOT NULL" + only + _CURRENT_SCHEMA)
+        params = {"schema": _schema_version()}
+        if club_id:
+            where += " AND t.marketing_club_id = CAST(:cid AS uuid)"
+            params["cid"] = str(club_id)
+        rows = (await session.execute(text(
+            "SELECT t.id, t.token, t.version, t.image_version, mc.id AS club_id, mc.name " + where +
+            " ORDER BY t.changed_at NULLS LAST"), params)).mappings().all()
+        left_alone = {str(t) for t in (skip or [])}
+
+        def stale(token: str) -> bool:
+            # All four pictures are written together; the email one stands for the set.
+            p = image_path(token, EMAIL_FORMAT)
+            try:
+                return p.stat().st_mtime < drawn_before
+            except FileNotFoundError:
+                return True
+        return [dict(r) for r in rows if r["token"] not in left_alone and stale(r["token"])][:limit]
     where = _DUE_SQL if not force else """
     FROM club_teaser_snapshots t
     JOIN marketing_clubs mc ON mc.id = t.marketing_club_id
@@ -464,7 +490,8 @@ RUN_STATE: dict = {"running": False, "started_at": None, "finished_at": None, "l
 async def render_pending(session_maker, *, limit: int = 50, club_id: Optional[str] = None,
                          force: bool = False, missing_files: bool = False, apply: bool = True, renderer_factory=None,
                          base: Optional[str] = None, on_progress=None,
-                         skip: Optional[Iterable[str]] = None, returning_only: bool = False) -> dict:
+                         skip: Optional[Iterable[str]] = None, returning_only: bool = False,
+                         drawn_before: Optional[float] = None) -> dict:
     """Draw the pictures that are due. With ``apply=False`` only reports what
     would be drawn. Never raises for one club's failure; the club is listed in
     ``failed`` and stays due."""
@@ -477,7 +504,7 @@ async def render_pending(session_maker, *, limit: int = 50, club_id: Optional[st
             async with session_maker() as s:
                 clubs = await due_clubs(s, limit, club_id=club_id, force=force,
                                         missing_files=missing_files, skip=skip,
-                                        returning_only=returning_only)
+                                        returning_only=returning_only, drawn_before=drawn_before)
             summary["due"] = len(clubs)
             if not apply or not clubs:
                 summary["clubs"] = [{"id": str(c["club_id"]), "name": c["name"], "token": c["token"]}

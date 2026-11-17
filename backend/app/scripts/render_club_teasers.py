@@ -2,7 +2,7 @@
 previews, and the two ad sizes) for clubs whose picture is missing or out of date.
 
     python -m app.scripts.render_club_teasers [--limit N] [--club TEXT]
-        [--returning-only] [--force | --missing] [--base-url URL] [--apply]
+        [--returning-only] [--force | --missing | --before TIME] [--base-url URL] [--apply]
 
 Dry run by default: lists the clubs that would be drawn and writes nothing.
 ``--apply`` opens headless Chromium on the site, takes the four pictures per
@@ -19,7 +19,10 @@ a design change to the card (it starts from the same clubs every run, so use
 it with ``--club`` or one big ``--limit``). ``--missing`` draws clubs marked as
 drawn whose picture file is not on disk, which is what to run after a restore
 onto a fresh box or if the media volume was not mounted; it carries on from
-where the last run stopped. ``--base-url`` is the site to open; it defaults to
+where the last run stopped. ``--before TIME`` redraws every club whose picture
+was drawn before TIME (an ISO date or date and time, Perth time unless it says
+otherwise), for after a change to the picture: unlike ``--force`` each run moves
+on to the next clubs, so repeat it until it says 0 due. ``--base-url`` is the site to open; it defaults to
 ``TEASER_RENDER_BASE_URL``, then the public site.
 
 The same function runs from the Club Directory panel's "Draw pictures" button.
@@ -42,11 +45,26 @@ async def main(argv=None) -> int:
     grp = ap.add_mutually_exclusive_group()
     grp.add_argument("--force", action="store_true")
     grp.add_argument("--missing", action="store_true")
+    grp.add_argument("--before", metavar="TIME",
+                     help="redraw clubs whose picture was drawn before TIME, e.g. 2026-11-17 or 2026-11-17T14:00")
     ap.add_argument("--returning-only", action="store_true",
                     help="only archived and expired-trial clubs")
     ap.add_argument("--base-url")
     ap.add_argument("--apply", action="store_true")
     a = ap.parse_args(argv)
+
+    drawn_before = None
+    if a.before:
+        from datetime import datetime, timedelta, timezone
+        try:
+            cut = datetime.fromisoformat(a.before)
+        except ValueError:
+            print(f"--before must be an ISO date or date and time, e.g. 2026-11-17T14:00; got {a.before!r}")
+            return 2
+        if cut.tzinfo is None:
+            cut = cut.replace(tzinfo=timezone(timedelta(hours=8)))   # Perth, like the rest of the ops tooling
+        drawn_before = cut.timestamp()
+        print(f"redrawing pictures drawn before {cut.isoformat()}")
 
     from app.models.db import async_session_maker
     club_id = None
@@ -65,7 +83,7 @@ async def main(argv=None) -> int:
 
     out = await ti.render_pending(async_session_maker, limit=a.limit, club_id=club_id,
                                   force=a.force, missing_files=a.missing, apply=a.apply, base=a.base_url,
-                                  returning_only=a.returning_only)
+                                  returning_only=a.returning_only, drawn_before=drawn_before)
     if out["status"] == "busy":
         print("a render is already running")
         return 1
