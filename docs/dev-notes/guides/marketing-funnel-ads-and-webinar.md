@@ -65,7 +65,7 @@
 **Club page call to action (v9.91.0, v9.92.1)**
 36. The bar is for PROSPECTS only: a session from a Meta click (utm_source meta/facebook/fb/instagram/ig, medium paid_social, fbclid/igshid) or that passed `/trial`. Never a club's members or signed-in users. Dismiss minimises to a pill. The club shown is already registered, so copy sells the visitor's OWN club.
 37. Read campaign params from the session (`visitor.rememberLandingParams()` in `main.jsx`, `bc:landingParams`), not the address bar. The bar must not draw on `/trial` or `/demo`. `lib/clubPath.publicClubSlug` is the one "is a club page" rule. CompleteRegistration fires only on `status === 'completed'`.
-39. Wording follows the ad ("Check out your club", "Free · about 3 minutes · no card"); `/trial` placeholder names no real club.
+39. Wording follows the ad ("Check out your club", "Free · about a minute · no card" since the two-field form); `/trial` placeholder names no real club. The sign-up path never says "claim": buttons name what signing up gets ("See every season of <club>", "Sync every season of <club>"), since the season page is one season of public data (v9.144.3.3).
 
 **Webinar registration (migration 296 on)**
 40. A pixel cannot fire on a third-party domain: register on our page and RENDER success (a redirect races the beacon). Persist, then fire; never on load, click or validation failure.

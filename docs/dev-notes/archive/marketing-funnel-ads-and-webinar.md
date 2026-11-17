@@ -1706,3 +1706,9 @@ A brief asked for three changes; two were already on main and were not repeated:
 
 Proof: `verify_meta_ads_new_campaign.py` 28 passed; control on the previous main 25 passed, 3 failed (the video is mapped, its exact tag, its tag in the campaign's own set).
 
+## v9.144.3.3: "claim" wording off the sign-up path (2026-11-17)
+
+Owner feedback: "Claim it" reads as misleading and may stop people clicking through. The club's season page (`TeaserPreview.jsx`), opened from /trial when a club is picked, said "CLAIM YOUR CLUB", "Claim <club> on BetterCricket" and "This is <club>'s site on BetterCricket. Claim it." It now sells what signing up gets: header "SEE EVERY SEASON", bar and sheet button "See every season of <short name>", sheet title "This is one season. Sync every season <club> has played." The shared picture (`TeaserCard.jsx`) reads "Is this your club? See every season"; pictures already drawn keep the old line until redrawn (the Teaser images panel's force redraw). The wizard's first button is "Sync every season of <club>", the /trial no-page popup's is "Sync my club's history". Every "about 3 minutes" on the path (season page, /trial popup, `ClubCTABar`) is "about a minute" now that the form is two fields.
+
+Proof: `verify_teaser_page_browser.mjs` 94 passed, 3 failed; the 3 (the /trial?teaser= hand-off: wizard opens on the matching club, a registered club goes to its site, an unplaced club prefills the search) fail identically on main before this change, so they are not from it. `verify_teaser_card_browser.mjs` 62/0, `verify_trial_two_field_browser.mjs` 29/0, `verify_club_cta_browser.mjs` 39 passed and the same 2 known "no page errors" failures.
+
