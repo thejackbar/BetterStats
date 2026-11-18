@@ -349,7 +349,6 @@ const DEFAULT_SCORECARD = {
     result: 'HOME WON BY 6 WICKETS',
     series: 'SEASON 2025/26',
     motm: { first: 'Player', last: 'NAME', team: 'HOME', line: '87 (54) · 2/22' },
-    sponsors: [{ url: null, name: '' }, { url: null, name: '' }],
   },
   home: { ...DEFAULT_TEAM('HOME TEAM', 'HOM', '#1a4eb8'), headerInk: '#0a0a0a' },
   away: { ...DEFAULT_TEAM('AWAY TEAM', 'AWY', '#cc1f2c'), headerInk: '#0a0a0a' },
@@ -1905,26 +1904,8 @@ export default function AdminSocialPost() {
   // link) — { message, matches: [...] } for the picker.
   const [scPicks, setScPicks] = useState(null)
 
-  // Editor: { key: 'hero' | `sponsor-${i}`, source: File|string }
+  // Editor: { key: 'hero' | 'blankimg' | 'libraryimg', source: File|string }
   const [editor, setEditor] = useState(null)
-
-  const [sponsorFiles, setSponsorFiles] = useState([null, null])
-  const applySponsorBlob = (idx, blob, name) => {
-    const url = URL.createObjectURL(blob)
-    setSponsorFiles(prev => { const next = [...prev]; next[idx] = url; return next })
-    setScorecardMatch(m => ({
-      ...m,
-      meta: {
-        ...m.meta,
-        sponsors: m.meta.sponsors.map((s, i) => i === idx ? { url, name: name || s.name || '' } : s),
-      },
-    }))
-  }
-
-  const handleSponsorFile = (idx, file) => {
-    if (!file) return
-    setEditor({ key: `sponsor-${idx}`, source: file, sponsorIdx: idx, sponsorName: file.name.replace(/\.[^.]+$/, '') })
-  }
 
   const [milestone, setMilestone] = useState({ value: '', unit: 'GAMES', reason: '', detail: '', playerIdx: 0 })
   const [announcement, setAnnouncement] = useState({ kind: 'APPOINTMENT', headline: 'NAMED CAPTAIN', subheadline: 'FOR THE 2025-26 SEASON', playerIdx: 0 })
@@ -2467,19 +2448,6 @@ export default function AdminSocialPost() {
         setAllPlayers(p)
         const sponsors = sp || []
         setAdminSponsors(sponsors)
-        if (sponsors.length > 0) {
-          setScorecardMatch(m => ({
-            ...m,
-            meta: {
-              ...m.meta,
-              sponsors: [0, 1].map(i => {
-                const s = sponsors[i]
-                if (!s) return m.meta.sponsors[i] || { url: null, name: '' }
-                return { url: sponsorLogoUrl(s), name: s.name }
-              }),
-            },
-          }))
-        }
       })
       .catch(() => { setTemplateSync((cur) => (cur.state === 'loading' ? { state: 'offline' } : cur)) })
       .finally(() => setLoading(false))
@@ -2545,7 +2513,7 @@ export default function AdminSocialPost() {
       const data = await api.getSocialScorecard(matchId)
       setScorecardMatch(prev => ({
         ...data,
-        meta: { ...data.meta, date: fmtIsoDate(data.meta?.date) || data.meta?.date || '', sponsors: prev.meta.sponsors },
+        meta: { ...data.meta, date: fmtIsoDate(data.meta?.date) || data.meta?.date || '' },
         home: { ...data.home, headerInk: prev.home?.headerInk || '#0a0a0a' },
         away: { ...data.away, headerInk: prev.away?.headerInk || '#0a0a0a' },
       }))
@@ -3820,6 +3788,21 @@ export default function AdminSocialPost() {
     // template always draws current logos.
     sponsors: adminSponsors.filter(sponsorLogoUrl).map((s) => ({ id: s.id, name: s.name, url: sponsorLogoUrl(s) })),
   }
+  // A scorecard's Instagram squares are not a LayerRoot, so the post's blocks do
+  // not reach them. Each square is handed the post's sponsor grid instead, the
+  // same logos and backing, placed in the square's own sponsor bar. Moving the
+  // grid on the wide post does not move it here: the square keeps its bar.
+  if (scSplitOn) {
+    const sb = overlay.items.find((it) => it.type === 'sponsors')
+    if (sb && (sb.sponsorIds || []).length) {
+      const { panel: _slotPanel, ...geo } = sponsorSlotFor(templateId, 1080, 1080, sb.sponsorIds.length)
+      extraProps.sponsorLayer = (
+        <BlankCanvas team={team} palette={templatePalette} items={[{ ...sb, ...geo, rotation: 0 }]} data={blankData}
+          transparent width={1080} height={1080} testId="sc-square-sponsors"
+          style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }} />
+      )
+    }
+  }
 
 
   // Fetch career stats for any player referenced by a player data block.
@@ -3875,14 +3858,12 @@ export default function AdminSocialPost() {
     extraProps.meta = roundMeta
     extraProps.fixtures = asClubs(roundPagesOn ? chunkEven(fixtures, roundPage.count)[roundPage.idx] || [] : fixtures)
     extraProps.club = clubMark
-    extraProps.sponsors = scorecardMatch.meta.sponsors
   }
   if (tmpl.kind === 'results') {
     extraProps.meta = roundMeta
     extraProps.results = asClubs(roundPagesOn ? chunkEven(results, roundPage.count)[roundPage.idx] || [] : results)
     if (tmpl.hasLeaders) extraProps.perfSide = rrPerfSide
     extraProps.club = clubMark
-    extraProps.sponsors = scorecardMatch.meta.sponsors
   }
   if (openParts) extraProps.parts = openParts
   if (tmpl.kind === 'totw') {
@@ -3895,13 +3876,11 @@ export default function AdminSocialPost() {
       // What the pull counted, not what the button says now (the heading cannot disagree with the team).
       basis: totwImport.data?.mode === 'round' ? 'round' : undefined,
     }
-    extraProps.sponsors = scorecardMatch.meta.sponsors
   }
   if (tmpl.kind === 'milestones') {
     extraProps.milestones = milestoneCards
     // Typed as it is: no 'ROUND 1' placeholder on a post that is not about a round.
     extraProps.milestoneMeta = { title: msOpts.title, round: match.round, date: match.date, comp: match.competition }
-    extraProps.sponsors = scorecardMatch.meta.sponsors
   }
   if (tmpl.kind === 'singleresult') {
     const mapPerf = (arr) => (arr || []).map((p) => ({ n: p.last, l: p.line, first: p.first || '', sn: p.surname || '', o: p.overs || '' })).filter((p) => p.n || p.l)
@@ -3928,7 +3907,6 @@ export default function AdminSocialPost() {
       topBat: { us: mapPerf(result.topBatters.team), them: mapPerf(result.topBatters.opponent) },
       topBowl: { us: mapPerf(result.topBowlers.team), them: mapPerf(result.topBowlers.opponent) },
     }
-    extraProps.sponsors = scorecardMatch.meta.sponsors
     if (templateId === 'RS7') {
       extraProps.look = glassLook
       extraProps.photo = heroImage.blobUrl || null
@@ -4042,12 +4020,11 @@ export default function AdminSocialPost() {
   const [sponsorPin, setSponsorPin] = useState(null)
   // Posts (template + page) whose sponsors somebody took off on purpose.
   const sponsorDismissed = useRef({})
-  const metaSponsorsAuto = useRef(null)
   const sponsorTarget = isBlankTab ? canvas : overlay
   const sponsorKey = `${templateId}|${isBlankTab ? pages.index : 0}`
-  // Only the scorecards still draw sponsor slots of their own (a 1920 landscape
-  // sheet with a footer strip). Every other layout reserves a slot for the grid.
-  const nativeSponsors = isScorecard
+  // Every layout reserves a slot for the grid, the scorecards included (their
+  // sponsor bar, `scSponsorSlot`). Until v9.145.4 the scorecards drew two logo
+  // slots of their own, filled from `scorecardMatch.meta.sponsors`.
   // A layout whose sponsor slot moves with an editor choice (the Glass Card's position).
   // The Split Poster's grid sits under its XI, which is as long as the side is.
   const slotOpts = templateId === 'RS7' ? { position: glassLook.position }
@@ -4080,7 +4057,7 @@ export default function AdminSocialPost() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, usableSponsorKey, headline, match.competition])
   useEffect(() => {
-    if (loading || !sponsorDefault.loaded || !sponsorDefault.ids.length || nativeSponsors) return
+    if (loading || !sponsorDefault.loaded || !sponsorDefault.ids.length) return
     const existing = sponsorTarget.items.find((it) => it.type === 'sponsors')
     const geo = sponsorSlotFor(templateId, sponsorCanvas.w, sponsorCanvas.h, sponsorDefault.ids.length, slotOpts)
     if (!existing) {
@@ -4103,26 +4080,7 @@ export default function AdminSocialPost() {
       sponsorTarget.patchMany({ [existing.id]: { sponsorIds: sponsorDefault.ids, followDefault: true } })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, sponsorDefault, sponsorTarget.items, sponsorKey, sponsorCanvas.w, sponsorCanvas.h, nativeSponsors, templateId, slotOpts?.position, slotOpts?.players])
-  // A layout with sponsor slots of its own (fixtures, results, scorecards) fills
-  // them from the same default, until somebody picks their own logos there.
-  useEffect(() => {
-    if (loading || !sponsorDefault.loaded || !nativeSponsors || !sponsorDefault.ids.length) return
-    const want = [0, 1].map((i) => {
-      const sp = usableSponsors.find((x) => x.id === sponsorDefault.ids[i])
-      return sp ? { url: sponsorLogoUrl(sp), name: sp.name } : { url: null, name: '' }
-    })
-    const wantKey = want.map((x) => x.url || '').join('|')
-    setScorecardMatch((m) => {
-      const curKey = m.meta.sponsors.map((x) => x.url || '').join('|')
-      // Somebody has changed a slot since the last time this filled them: theirs.
-      if (metaSponsorsAuto.current !== null && curKey !== metaSponsorsAuto.current) return m
-      if (curKey === wantKey) { metaSponsorsAuto.current = wantKey; return m }
-      metaSponsorsAuto.current = wantKey
-      return { ...m, meta: { ...m.meta, sponsors: want } }
-    })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, sponsorDefault, nativeSponsors, usableSponsorKey])
+  }, [loading, sponsorDefault, sponsorTarget.items, sponsorKey, sponsorCanvas.w, sponsorCanvas.h, templateId, slotOpts?.position, slotOpts?.players])
 
   // Measure the Match Day Card's logo so the layout can give a 6:1 wordmark and
   // a square crest each the box that suits them. An image that will not load
@@ -4913,7 +4871,7 @@ export default function AdminSocialPost() {
   const sponsorsPanel = (
     <SponsorsPanel
       sponsors={sponsorsForPanel} block={sponsorBlock} defaultInfo={sponsorDefault}
-      context={{ team: headline, grade: match.competition }} native={nativeSponsors}
+      context={{ team: headline, grade: match.competition }} squares={scSplitOn}
       onPick={pickSponsors} onPanel={setSponsorPanel} onUseDefault={useDefaultSponsors}
       onEditOnPost={editSponsorsOnPost} onRemove={() => sponsorBlock && hRemove(sponsorBlock.id)}
       onPin={pinSponsors} pinState={sponsorPin}
@@ -6877,59 +6835,14 @@ export default function AdminSocialPost() {
                   <Field label="MOTM First"><TextInput value={scorecardMatch.meta.motm.first} onChange={v => patchScMotm({ ...scorecardMatch.meta.motm, first: v })} placeholder="Player" /></Field>
                   <Field label="MOTM Last"><TextInput value={scorecardMatch.meta.motm.last} onChange={v => patchScMotm({ ...scorecardMatch.meta.motm, last: v })} placeholder="NAME" /></Field>
                   <div className="col-span-2"><Field label="MOTM Line"><TextInput value={scorecardMatch.meta.motm.line} onChange={v => patchScMotm({ ...scorecardMatch.meta.motm, line: v })} placeholder="87 (54) · 2/22" /></Field></div>
-                  <div className="col-span-2">
-                    <p className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2 mb-1">Sponsor Logos</p>
-                    {adminSponsors.length > 0 && (
-                      <div className="mb-2 flex flex-wrap gap-2">
-                        {adminSponsors.filter(sponsorLogoUrl).map(sp => {
-                          const logoUrl = sponsorLogoUrl(sp)
-                          return (
-                            <button key={sp.id} title={sp.name}
-                              onClick={() => {
-                                const slot = scorecardMatch.meta.sponsors[0]?.url ? 1 : 0
-                                setScorecardMatch(m => ({ ...m, meta: { ...m.meta, sponsors: m.meta.sponsors.map((s, i) => i === slot ? { url: logoUrl, name: sp.name } : s) } }))
-                                setSponsorFiles(prev => { const next = [...prev]; next[slot] = logoUrl; return next })
-                              }}
-                              className="flex items-center gap-1.5 px-2 py-1 rounded border pb-hairline hover:bg-pb-surface2 text-[10px] font-mono text-pb-faint"
-                            >
-                              <img src={logoUrl} alt={sp.name} className="h-5 object-contain" onError={e => e.target.style.display='none'} />
-                              {sp.name}
-                            </button>
-                          )
-                        })}
-                      </div>
-                    )}
-                    <div className="grid grid-cols-2 gap-2">
-                      {[0, 1].map(i => {
-                        const currentUrl = scorecardMatch.meta.sponsors[i]?.url
-                        return (
-                          <div key={i} className="flex flex-col gap-1">
-                            <label className="flex items-center gap-2 px-2 py-1.5 rounded border pb-hairline cursor-pointer hover:bg-pb-surface2 text-xs font-mono text-pb-faint">
-                              <span>{currentUrl ? '✓ Set' : `Upload ${i + 1}`}</span>
-                              <input type="file" accept="image/*" className="hidden" onChange={e => handleSponsorFile(i, e.target.files?.[0])} />
-                            </label>
-                            {currentUrl && (
-                              <div className="flex items-center gap-2">
-                                <img src={currentUrl} alt="" className="h-8 object-contain rounded border pb-hairline flex-1 min-w-0" onError={e => e.target.style.opacity='0.3'} />
-                                <button
-                                  onClick={() => setEditor({ key: `sponsor-${i}`, source: currentUrl, sponsorIdx: i, sponsorName: scorecardMatch.meta.sponsors[i]?.name || '' })}
-                                  className="shrink-0 text-[10px] font-mono text-pb-faint hover:text-pb-text whitespace-nowrap"
-                                >
-                                  ✎ Edit
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    setSponsorFiles(prev => { const next = [...prev]; next[i] = null; return next })
-                                    setScorecardMatch(m => ({ ...m, meta: { ...m.meta, sponsors: m.meta.sponsors.map((s, j) => j === i ? { url: null, name: '' } : s) } }))
-                                  }}
-                                  className="shrink-0 text-[10px] text-pb-faintest hover:text-red-400"
-                                >✕</button>
-                              </div>
-                            )}
-                          </div>
-                        )
-                      })}
-                    </div>
+                  {/* The scorecards carry the sponsor grid like every other layout, so the
+                      logos are picked in the Sponsors panel, any number of them. */}
+                  <div className="col-span-2" data-testid="sc-sponsors-note">
+                    <p className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2 mb-1">Sponsor logos</p>
+                    <p className="text-[11px] leading-relaxed text-pb-faint">
+                      Pick which sponsors go in the sponsor bar in the Sponsors panel.{' '}
+                      <button type="button" onClick={() => setTool('sponsors')} className="underline hover:text-pb-text">Open Sponsors</button>
+                    </p>
                   </div>
                 </div>
 
@@ -7121,8 +7034,6 @@ export default function AdminSocialPost() {
             // Stored as its own asset (see editLibraryAsset) and applied
             // straight away, so the cut-out is both reusable and on the post.
             await uploadMedia([file], { use: true })
-          } else if (typeof e.sponsorIdx === 'number') {
-            applySponsorBlob(e.sponsorIdx, file, e.sponsorName)
           }
         }}
       />

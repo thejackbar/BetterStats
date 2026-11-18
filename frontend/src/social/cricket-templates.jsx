@@ -2991,33 +2991,47 @@ function ScMatchup({ m, ink, dim, size = 28, style = {} }) {
 }
 ScMatchup.displayName = 'ScMatchup'
 
-function ScSponsorFooter({ bg, ink, dim, dimmer, rule, style = {}, sponsors = [] }) {
-  const slots = [0, 1]
+// The scorecard's sponsor bar: a strip along the foot of the post with the
+// BetterCricket credit at the right. It holds no logos of its own. The sponsor
+// grid (the same block every other layout carries, any number of logos, picked
+// in the Sponsors panel) sits in the rest of the bar, at `scSponsorSlot`. Both
+// read `scBar`, so the room the bar keeps and the place the grid goes cannot
+// drift apart. Until v9.145.4 this drew two logo slots of its own, which is why a
+// scorecard only ever carried two sponsors.
+const SC_BAR = { side: 32, bottom: 16, h: 56, padX: 22, credit: 44, gap: 24 }
+function scBar(width, height) {
+  const top = height - SC_BAR.bottom - SC_BAR.h
+  return { left: SC_BAR.side, right: width - SC_BAR.side, top, h: SC_BAR.h }
+}
+// The grid's rectangle: the bar's height less a little, from its left edge to
+// just short of the credit. Logos are about 40px tall, as the old slots were
+// (36px). Six fit in one row on the wide post and on a square.
+export function scSponsorSlot(width = 1920, height = SC_H) {
+  const b = scBar(width, height)
+  const x = b.left + 10
+  const right = b.right - SC_BAR.padX - SC_BAR.credit - SC_BAR.gap
+  return { x, y: b.top + 4, w: right - x, h: b.h - 8, pad: 4, gap: 24, panel: 'none' }
+}
+
+function ScSponsorFooter({ bg, ink, rule, style = {}, width = 1920, height = SC_H }) {
+  const b = scBar(width, height)
   return (
     <div style={{
-      position: 'absolute', left: 32, right: 32, bottom: 16, height: 56,
-      display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: 24,
-      padding: '0 22px', borderRadius: 12, background: bg, border: `1px solid ${rule}`, ...style,
+      position: 'absolute', left: b.left, right: width - b.right, bottom: height - b.top - b.h, height: b.h,
+      display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+      padding: `0 ${SC_BAR.padX}px`, borderRadius: 12, background: bg, border: `1px solid ${rule}`, ...style,
     }}>
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 40, fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 18, letterSpacing: 3, color: dimmer }}>
-        {slots.map(i => {
-          const s = sponsors?.[i]
-          return s?.url
-            ? <img key={i} src={s.url} alt={s.name || `Sponsor ${i+1}`} style={{ maxHeight: 36, maxWidth: 180, objectFit: 'contain', borderRadius: 4 }} />
-            : <div key={i} style={{ padding: '6px 18px', border: `1px dashed ${dimmer}`, borderRadius: 6 }}>SPONSOR LOGO</div>
-        })}
-      </div>
       {/* `ink` is the footer's OWN text colour, handed in by each SC template.
           SC2 inverts the bar (bg={ink} ink={bg}), so read the prop, never the
           palette: this component is not given one, and reaching for it is what
           made every scorecard post throw "palette is not defined". */}
-      <CreditMark ink={ink} h={44} style={{ justifySelf: 'end' }} />
+      <CreditMark ink={ink} h={SC_BAR.credit} />
     </div>
   )
 }
 
 // ─── SC1: Broadcast ───────────────────────────────────────────────────────────
-export function SC1_Broadcast({ match, palette = {}, square = false, only = 'home', parts }) {
+export function SC1_Broadcast({ match, palette = {}, square = false, only = 'home', parts, sponsorLayer }) {
   const m = match
   const [headRef, headH] = useBoxHeight(170)
   const panelBox = SC_H - headH - SC_CLEAR
@@ -3052,7 +3066,6 @@ export function SC1_Broadcast({ match, palette = {}, square = false, only = 'hom
   const wicketInk = pc(parts, 'wicketColor', accent)
   const footBg = pc(parts, 'footerBg', panel)
   const footInk = partPicked(parts, 'footerBg') ? inkOn(footBg) : ink
-  const footDimmer = partPicked(parts, 'footerBg') ? _toRgba(footInk, 0.35) : dimmer
   const footRule = pc(parts, 'footerRule', rule)
 
   const TeamPanel = ({ team, accentC, side, panelH = 800 }) => {
@@ -3166,7 +3179,10 @@ export function SC1_Broadcast({ match, palette = {}, square = false, only = 'hom
         <div style={{ padding: '0 20px', height: panelBox }}>
           <TeamPanel team={team} accentC={team.color || (side === 'home' ? '#1a4eb8' : '#cc1f2c')} side={side} panelH={panelBox} />
         </div>
-        <ScSponsorFooter bg={footBg} ink={footInk} dim={dim} dimmer={footDimmer} rule={footRule} sponsors={m.meta?.sponsors} />
+        <ScSponsorFooter width={1080} height={1080} bg={footBg} ink={footInk} rule={footRule} />
+        {/* Not a LayerRoot, so the editor's blocks do not reach this page: it hands the
+            sponsor grid over already placed at scSponsorSlot(1080, 1080). */}
+        {sponsorLayer || null}
         <GrainSVG opacity={dark ? 0.22 : 0.16} id={`sc1g-${side}`} />
       </div>
     )
@@ -3202,7 +3218,7 @@ export function SC1_Broadcast({ match, palette = {}, square = false, only = 'hom
         <TeamPanel team={m.home || {}} accentC={m.home?.color || '#1a4eb8'} side='home' panelH={panelBox} />
         <TeamPanel team={m.away || {}} accentC={m.away?.color || '#cc1f2c'} side='away' panelH={panelBox} />
       </div>
-      <ScSponsorFooter bg={footBg} ink={footInk} dim={dim} dimmer={footDimmer} rule={footRule} sponsors={m.meta?.sponsors} />
+      <ScSponsorFooter bg={footBg} ink={footInk} rule={footRule} />
       <GrainSVG opacity={dark ? 0.22 : 0.16} id='sc1g' />
     </LayerRoot>
   )
@@ -3246,7 +3262,7 @@ registerParts({
 })
 
 // ─── SC2: Brutalist ───────────────────────────────────────────────────────────
-export function SC2_Brutalist({ match, palette = {}, square = false, only = 'home', parts }) {
+export function SC2_Brutalist({ match, palette = {}, square = false, only = 'home', parts, sponsorLayer }) {
   const m = match
   const [headRef, headH] = useBoxHeight(150)
   const panelBox = SC_H - headH - SC_CLEAR
@@ -3386,7 +3402,10 @@ export function SC2_Brutalist({ match, palette = {}, square = false, only = 'hom
         <div style={{ height: panelBox }}>
           <TeamCol team={m[side] || {}} side={side} panelH={panelBox} />
         </div>
-        <ScSponsorFooter bg={footBg} ink={footInk} dim={_toRgba(footInk, 0.55)} dimmer={_toRgba(footInk, 0.35)} rule={ruleStrong} sponsors={m.meta?.sponsors} style={{ borderRadius: 0, borderTop: `3px solid ${footRule}` }} />
+        <ScSponsorFooter width={1080} height={1080} bg={footBg} ink={footInk} rule={ruleStrong} style={{ borderRadius: 0, borderTop: `3px solid ${footRule}` }} />
+        {/* Not a LayerRoot, so the editor's blocks do not reach this page: it hands the
+            sponsor grid over already placed at scSponsorSlot(1080, 1080). */}
+        {sponsorLayer || null}
         <GrainSVG opacity={dark ? 0.28 : 0.18} id={`sc2g-${side}`} />
       </div>
     )
@@ -3419,7 +3438,7 @@ export function SC2_Brutalist({ match, palette = {}, square = false, only = 'hom
         <TeamCol team={m.home || {}} side='home' panelH={panelBox} />
         <TeamCol team={m.away || {}} side='away' panelH={panelBox} />
       </div>
-      <ScSponsorFooter bg={footBg} ink={footInk} dim={_toRgba(footInk, 0.55)} dimmer={_toRgba(footInk, 0.35)} rule={ruleStrong} sponsors={m.meta?.sponsors} style={{ borderRadius: 0, borderTop: `3px solid ${footRule}` }} />
+      <ScSponsorFooter bg={footBg} ink={footInk} rule={ruleStrong} style={{ borderRadius: 0, borderTop: `3px solid ${footRule}` }} />
       <GrainSVG opacity={dark ? 0.28 : 0.18} id='sc2g' />
     </LayerRoot>
   )
@@ -3463,7 +3482,7 @@ registerParts({
 })
 
 // ─── SC3: Dashboard ───────────────────────────────────────────────────────────
-export function SC3_Dashboard({ match, palette = {}, square = false, only = 'home', parts }) {
+export function SC3_Dashboard({ match, palette = {}, square = false, only = 'home', parts, sponsorLayer }) {
   const m = match
   const [headRef, headH] = useBoxHeight(170)
   const panelBox = SC_H - headH - SC_CLEAR
@@ -3494,7 +3513,6 @@ export function SC3_Dashboard({ match, palette = {}, square = false, only = 'hom
   const wicketInk = pc(parts, 'wicketColor', accent)
   const footBg = pc(parts, 'footerBg', card)
   const footInk = partPicked(parts, 'footerBg') ? inkOn(footBg) : ink
-  const footDimmer = partPicked(parts, 'footerBg') ? _toRgba(footInk, 0.40) : dimmer
   const footRule = pc(parts, 'footerRule', rule)
 
   const Card = ({ children, style }) => (
@@ -3614,7 +3632,10 @@ export function SC3_Dashboard({ match, palette = {}, square = false, only = 'hom
         <div style={{ padding: '0 24px', height: panelBox }}>
           <TeamCard team={team} accentC={team.color || (side === 'home' ? '#2563eb' : '#10b981')} side={side} panelH={panelBox} />
         </div>
-        <ScSponsorFooter bg={footBg} ink={footInk} dim={dim} dimmer={footDimmer} rule={footRule} sponsors={m.meta?.sponsors} />
+        <ScSponsorFooter width={1080} height={1080} bg={footBg} ink={footInk} rule={footRule} />
+        {/* Not a LayerRoot, so the editor's blocks do not reach this page: it hands the
+            sponsor grid over already placed at scSponsorSlot(1080, 1080). */}
+        {sponsorLayer || null}
       </div>
     )
   }
@@ -3648,7 +3669,7 @@ export function SC3_Dashboard({ match, palette = {}, square = false, only = 'hom
         <TeamCard team={m.home || {}} accentC={m.home?.color || '#2563eb'} side='home' panelH={panelBox} />
         <TeamCard team={m.away || {}} accentC={m.away?.color || '#10b981'} side='away' panelH={panelBox} />
       </div>
-      <ScSponsorFooter bg={footBg} ink={footInk} dim={dim} dimmer={footDimmer} rule={footRule} sponsors={m.meta?.sponsors} />
+      <ScSponsorFooter bg={footBg} ink={footInk} rule={footRule} />
     </LayerRoot>
   )
 }
@@ -3706,4 +3727,6 @@ BrandLockup.displayName = 'BrandLockup'
 export const SLOTS_LINEUP_A = { T1: SLOT_T1, T2: SLOT_T2, T3: SLOT_T3, T4: SLOT_T4, T5: SLOT_T5 } // T1 to T5
 export const SLOTS_LINEUP_B = { T6: SLOT_T6, T7: SLOT_T7, T8: SLOT_T8, T9: SLOT_T9, T10: SLOT_T10 } // T6 to T10
 export const SLOTS_COMPANION = { C1: SLOT_C1, C2: SLOT_C2, C3: SLOT_C3, C4: SLOT_C4 } // C1 to C4
-export const SPONSOR_SLOTS = { ...SLOTS_LINEUP_A, ...SLOTS_LINEUP_B, ...SLOTS_COMPANION }
+// The scorecards' grid sits in their sponsor bar, the same rectangle at any count.
+export const SLOTS_SCORECARD = { SC1: scSponsorSlot, SC2: scSponsorSlot, SC3: scSponsorSlot }
+export const SPONSOR_SLOTS = { ...SLOTS_LINEUP_A, ...SLOTS_LINEUP_B, ...SLOTS_COMPANION, ...SLOTS_SCORECARD }
