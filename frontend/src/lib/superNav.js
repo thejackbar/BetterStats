@@ -91,12 +91,13 @@ export const SUPER_SECTIONS = [
   {
     key: 'reporting',
     label: 'Reporting',
-    blurb: 'Changelog, sign-ins, ad performance and usage.',
+    blurb: 'Changelog, sign-ins, ad performance, trials and usage.',
     items: [
       { to: '/admin/changelog', label: 'Changelog', blurb: 'Release history across the platform.' },
       { to: '/admin/super/login-attempts', label: 'Login Attempts', blurb: 'Recent sign-in activity and failures.' },
       { to: '/admin/super/meta-ads', label: 'Meta Ads', blurb: 'Campaign performance and ad signups.', badge: 'metaToken' },
       { to: '/admin/super/wizard-analytics', label: 'Setup Wizard Analytics', blurb: 'How clubs move through setup.' },
+      { to: '/admin/super/trial-summary', label: 'Trial Summary', blurb: 'Every club that signed up: what it is trialling, how much it has used, and when the trial ends.' },
       { to: '/admin/usage', label: 'Usage', blurb: 'Traffic, features and per-club engagement.' },
     ],
   },

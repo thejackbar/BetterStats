@@ -305,6 +305,19 @@ async def searched_clubs(
     return await meta_ads.get_searched_clubs(db, days, scope)
 
 
+@router.get("/season-page-clubs")
+async def season_page_clubs(
+    days: int = Query(TABLE_DAYS_DEFAULT, ge=1, le=TABLE_DAYS_MAX),
+    scope: str = Query("campaign", pattern=SCOPE_PATTERN),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_super_admin),
+):
+    """Names the clubs whose season page (/preview/<token>) a visitor opened, from an
+    outreach email, a teaser ad or the /trial search. A lead even with no /trial search
+    behind it. See meta_ads.get_season_page_clubs."""
+    return await meta_ads.get_season_page_clubs(db, days, scope)
+
+
 @router.get("/ad-signups")
 async def ad_signups(db: AsyncSession = Depends(get_db), _: User = Depends(require_super_admin)):
     """Every club that registered itself through the public self-serve flow

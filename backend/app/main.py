@@ -21,7 +21,7 @@ from app.routers import support_chat as support_chat_router
 from app.routers import product_updates
 from app.routers import club_links as club_links_router
 from app.routers import privacy_requests as privacy_requests_router
-from app.routers import card_review, auth, organisations, players, games, game_fow, game_exclusions, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, cricketstatz, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, public_player_cards, player_cards_admin, player_dashboard_admin, public_net_checkin, net_manager, rotation, public_rotation, fines, website, comms, public_comms, public_ses, public_contact, public_trusted_clubs, public_teaser, public_webinar, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, public_billing, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
+from app.routers import card_review, auth, organisations, players, games, game_fow, game_exclusions, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, cricketstatz, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, public_player_cards, player_cards_admin, player_dashboard_admin, public_net_checkin, net_manager, rotation, public_rotation, fines, website, comms, public_comms, public_ses, public_contact, public_trusted_clubs, public_teaser, public_webinar, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, trial_summary, meta_ads, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, public_billing, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
     stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store, \
     club_diary, social_media, votes, public_votes, roles_activities, club_room, roster, facility_requests, directory, \
     public_club_room, sales_workspace, sales_commissions, honours, role_programs
@@ -6728,6 +6728,7 @@ app.include_router(sales_workspace.router)  # Sales Workspace — calling lens o
 app.include_router(sales_commissions.router)  # Sales Commissions — forecast + earned commission per rep (super-admin only)
 app.include_router(usage.router)
 app.include_router(login_attempts.router)
+app.include_router(trial_summary.router)                                                  # Better HQ Trial Summary (super admin, read only)
 app.include_router(admin_broadcasts.router)  # Super-admin messages on the club admin dashboard
 app.include_router(support_chat_router.admin_router)   # Help window identity (Chatwoot)
 app.include_router(support_chat_router.public_router)  # Chatwoot agent bot webhook (secret in the path)

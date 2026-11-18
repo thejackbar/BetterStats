@@ -2297,6 +2297,8 @@ export const api = {
   superOverview: () => request('/club-admin/super/overview'),
   superListOnboarding: () => request('/club-admin/super/onboarding-requests'),
   // Login-attempt audit log (super admin). opts: { limit, onlyFailures, q }
+  // Better HQ > Reporting > Trial Summary: every club that signed up or went on a trial.
+  superTrialSummary: () => request('/club-admin/super/trial-summary'),
   superListLoginAttempts: (opts = {}) => {
     const p = new URLSearchParams()
     if (opts.limit) p.set('limit', opts.limit)
@@ -2338,6 +2340,9 @@ export const api = {
   // clicked — the interest before a selection. See searched-clubs endpoint.
   metaAdsSearchedClubs: (days = 365, scope = 'campaign') =>
     request(`/club-admin/meta-ads/searched-clubs?days=${days}&scope=${scope}`),
+  // Clubs whose season page (/preview/<token>) a visitor opened, with or without a search.
+  metaAdsSeasonPageClubs: (days = 365, scope = 'campaign') =>
+    request(`/club-admin/meta-ads/season-page-clubs?days=${days}&scope=${scope}`),
   metaAdsHideSelection: (name, days = 365, scope = 'campaign') =>
     request(`/club-admin/meta-ads/selected-clubs/hide?days=${days}&scope=${scope}`, { method: 'POST', body: JSON.stringify({ name }) }),
   metaAdsUnhideSelection: (name, days = 365, scope = 'campaign') =>

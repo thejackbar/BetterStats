@@ -1525,6 +1525,94 @@ async def get_searched_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS,
     }
 
 
+# A season-page view by one of our own super admins (checking a club's page from the
+# Directory) is not a lead. Their browser's visitor id is on their signed-in page views.
+_NOT_STAFF_VISITOR_SQL = """NOT EXISTS (
+            SELECT 1 FROM usage_events sv
+            JOIN club_memberships cm ON cm.user_id = sv.user_id AND cm.role = 'super_admin'
+            WHERE sv.visitor_id = ue.visitor_id AND sv.user_id IS NOT NULL
+        )"""
+
+
+async def get_season_page_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS,
+                                scope: str = "campaign") -> dict:
+    """Name the clubs whose season page (/preview/<token>) a visitor opened.
+
+    Someone opening their own club's season page from an outreach email or a teaser ad
+    is a lead even if they never touch the /trial search, so without this they were
+    invisible on the Meta Ads page. Read from the page's own `view` beacon
+    (public_teaser.teaser_event: event_type 'teaser', the club in
+    metadata.marketing_club_id), so visits made before this list existed show too.
+    `pressed_claim` is the page's claim button (`claim_go`), which hands over to the
+    trial wizard without a club_prepared beacon.
+
+    Left out: live customers (paying, or on a running trial; a lapsed trial is a lead
+    again) and views from a browser a super admin has signed in on. Same window, scope
+    and hidden list as get_searched_clubs; not windowed by the counting-since cutoff."""
+    await _use_active_campaign(db)
+    scope = normalise_scope(scope)
+    window = _scope_params(days, _scope_since(scope, manual=False))
+    from app.services.club_teaser_link import LIVE_CUSTOMER_SQL
+
+    view_rows = (await db.execute(text(f"""
+        SELECT mc.name                  AS club_name,
+               mc.grassroots_guid       AS org_id,
+               MIN(ue.created_at)       AS first_at,
+               MAX(ue.created_at)       AS last_at,
+               COUNT(DISTINCT ue.visitor_id) AS visitors,
+               COUNT(*) FILTER (WHERE ue.route = 'view') AS views,
+               bool_or(ue.route = 'claim_go') AS pressed_claim,
+               bool_or({_META_VISITOR_EXISTS_PLAIN_BOUND}) AS via_meta,
+               bool_or({_campaign_visitor_exists(_SINCE_LOWER_BOUND)}) AS via_campaign,
+               {_VISITOR_ORIGIN_SQL} AS origins
+        FROM usage_events ue
+        JOIN marketing_clubs mc ON mc.id::text = ue.metadata->>'marketing_club_id'
+        WHERE ue.event_type = 'teaser'
+          AND ue.route IN ('view', 'claim_go')
+          AND ue.created_at >= {_SINCE_LOWER_BOUND}
+          AND NULLIF(TRIM(mc.name), '') IS NOT NULL
+          AND NOT {LIVE_CUSTOMER_SQL}
+          AND {_NOT_STAFF_VISITOR_SQL}
+        GROUP BY mc.id, mc.name, mc.grassroots_guid
+    """), window)).mappings().all()
+
+    rows: list[dict] = []
+    for r in view_rows:
+        name = (r["club_name"] or "").strip()
+        rows.append({
+            "name": name,
+            "key": name.lower(),
+            "org_id": r["org_id"],
+            "visitors": int(r["visitors"] or 0),
+            "views": int(r["views"] or 0),
+            "pressed_claim": bool(r["pressed_claim"]),
+            "via_meta": bool(r["via_meta"]),
+            "via_campaign": bool(r["via_campaign"]),
+            "origin": pick_origin([origin_from_event(ev) for ev in (r["origins"] or [])]),
+            "first_at": r["first_at"].isoformat() if r["first_at"] else None,
+            "last_at": r["last_at"].isoformat() if r["last_at"] else None,
+        })
+
+    outside_campaign = 0
+    if scope == "campaign":
+        outside_campaign = sum(1 for c in rows if not c["via_campaign"])
+        rows = [c for c in rows if c["via_campaign"]]
+    rows.sort(key=lambda c: c["last_at"] or "", reverse=True)
+
+    from app.services import platform_settings
+    hidden_keys = await platform_settings.get_hidden_meta_selections(db)
+    visible = [c for c in rows if c["key"] not in hidden_keys]
+    hidden = [c for c in rows if c["key"] in hidden_keys]
+    return {
+        "clubs": visible,
+        "hidden_clubs": hidden,
+        "identified": len(visible),
+        "hidden_count": len(hidden),
+        "scope": scope,
+        "outside_campaign": outside_campaign,
+    }
+
+
 def build_insights(campaign: dict, ads: list[dict], daily_history: list[dict],
                     campaign_budget: float, campaign_length_days: int,
                     streams: list[dict] | None = None) -> list[dict]:

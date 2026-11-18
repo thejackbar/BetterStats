@@ -1,17 +1,19 @@
-// One list of the clubs that typed into the trial page, with the furthest stage each
-// reached. The API keeps two lists (clubs SELECTED, clubs SEARCHED) because they come
-// from different beacons; a person asking "who did we lose, and where" wants one, so
-// this folds them on the normalised club name the server already groups by.
+// One list of the clubs that typed into the trial page or opened their season page, with
+// the furthest stage each reached. The API keeps three lists (clubs SELECTED, SEARCHED and
+// SEASON PAGE opened) because they come from different beacons; a person asking "who did we
+// lose, and where" wants one, so this folds them on the normalised club name the server
+// already groups by.
 //
 // Stages, furthest last. A selected-clubs row says how far it got in words
 // (`furthest_step`); a searched-clubs row only says whether the club was ever picked.
 export const STAGES = {
   searched: { rank: 1, label: 'Searched only' },
-  selected: { rank: 2, label: 'Selected a club' },
-  terms: { rank: 3, label: 'Reached terms' },
-  completed: { rank: 4, label: 'Completed' },
+  viewed: { rank: 2, label: 'Opened season page' },
+  selected: { rank: 3, label: 'Selected a club' },
+  terms: { rank: 4, label: 'Reached terms' },
+  completed: { rank: 5, label: 'Completed' },
 }
-export const STAGE_ORDER = ['completed', 'terms', 'selected', 'searched']
+export const STAGE_ORDER = ['completed', 'terms', 'selected', 'viewed', 'searched']
 
 // The labels the server writes (meta_ads._SELECTED_STEP_LABEL). Anything else a
 // selected-clubs row carries is the first step, not a guess at something further.
@@ -45,7 +47,7 @@ const betterOrigin = (a, b) => {
   return ORIGIN_ORDER.indexOf(b.channel) < ORIGIN_ORDER.indexOf(a.channel) ? b : a
 }
 
-export function mergeClubs(selected, searched) {
+export function mergeClubs(selected, searched, seasonPage = null) {
   const out = new Map()
   const take = (c, stage, hidden) => {
     const key = (c.key || c.name || '').trim().toLowerCase()
@@ -55,6 +57,7 @@ export function mergeClubs(selected, searched) {
       m = {
         key, name: (c.name || '').trim(), stage, email: null, slug: null, org_id: null,
         via_meta: false, via_campaign: false, origin: null, last_at: null, hidden: false,
+        pressed_claim: false,
       }
       out.set(key, m)
     }
@@ -62,6 +65,7 @@ export function mergeClubs(selected, searched) {
     m.email = m.email || c.email || null
     m.slug = m.slug || c.slug || null
     m.org_id = m.org_id || c.org_id || null
+    m.pressed_claim = m.pressed_claim || !!c.pressed_claim
     m.via_meta = m.via_meta || !!c.via_meta
     m.via_campaign = m.via_campaign || !!c.via_campaign
     m.last_at = later(m.last_at, c.last_at)
@@ -73,6 +77,8 @@ export function mergeClubs(selected, searched) {
   for (const c of selected?.hidden_clubs || []) take(c, stageOfStep(c.furthest_step), true)
   for (const c of searched?.clubs || []) take(c, c.selected ? 'selected' : 'searched', false)
   for (const c of searched?.hidden_clubs || []) take(c, c.selected ? 'selected' : 'searched', true)
+  for (const c of seasonPage?.clubs || []) take(c, 'viewed', false)
+  for (const c of seasonPage?.hidden_clubs || []) take(c, 'viewed', true)
   return [...out.values()].sort((a, b) => (b.last_at || '').localeCompare(a.last_at || ''))
 }
 
@@ -88,7 +94,7 @@ export function originCounts(rows) {
 }
 
 export function stageCounts(rows) {
-  const counts = { all: rows.length, completed: 0, terms: 0, selected: 0, searched: 0 }
+  const counts = { all: rows.length, completed: 0, terms: 0, selected: 0, viewed: 0, searched: 0 }
   for (const r of rows) counts[r.stage] += 1
   return counts
 }

@@ -169,8 +169,11 @@ const ONSITE = {
   landing: [{ page: '/trial', label: 'Trial page', visitors: 31 }],
 }
 
+// Clubs whose season page was opened (meta_ads.get_season_page_clubs). Empty unless a test says.
+const SEASON_EMPTY = { clubs: [], hidden_clubs: [], identified: 0, hidden_count: 0, outside_campaign: 0 }
+
 async function open({ summary, signups = { rows: ROWS, campaigns: [] }, signupsFail = false, listsFail = false,
-                      selected = SELECTED_ALL, searched = SEARCHED,
+                      selected = SELECTED_ALL, searched = SEARCHED, seasonPage = SEASON_EMPTY, seasonFail = false,
                       tokens = null, width = 1500 } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: 3200 } })
   const page = await ctx.newPage()
@@ -212,6 +215,7 @@ async function open({ summary, signups = { rows: ROWS, campaigns: [] }, signupsF
     }
     if (/meta-ads\/selected-clubs/.test(p)) return listsFail ? json({ detail: 'boom' }, 500) : json(scopeQ === 'campaign' && selected === SELECTED_ALL ? SELECTED : selected)
     if (/meta-ads\/searched-clubs/.test(p)) return listsFail ? json({ detail: 'boom' }, 500) : json(searched)
+    if (/meta-ads\/season-page-clubs/.test(p)) return seasonFail ? json({ detail: 'boom' }, 500) : json(seasonPage)
     if (/meta-ads\/onsite/.test(p)) return json({ ...ONSITE, scope: scopeQ || 'campaign', days: Number(u.searchParams.get('days') || 30) })
     if (/meta-ads\/ad-signups/.test(p)) return signupsFail ? json({ detail: 'boom' }, 500) : json(signups)
     if (/usage\/campaigns/.test(p)) {
@@ -361,7 +365,7 @@ const money = (n) => `A$${n.toFixed(2)}`
   ck('no empty or failed message when there is data', !(await has(page.locator('[data-testid="clubs-empty"], [data-testid="lists-failed"]'))))
   ck('the wizard funnel and the traffic card are on screen too',
      /wizard: where visitors drop off \(7 days\)/i.test(bodyNow) && await has(page.locator('[data-testid="traffic-card"]')))
-  ck('the club list leads, before the wizard funnel', bodyNow.search(/clubs that typed in their club/i) > -1 && bodyNow.search(/clubs that typed in their club/i) < bodyNow.search(/wizard: where visitors drop off/i))
+  ck('the club list leads, before the wizard funnel', bodyNow.search(/clubs that searched for their club or opened its season page/i) > -1 && bodyNow.search(/clubs that searched for their club or opened its season page/i) < bodyNow.search(/wizard: where visitors drop off/i))
 
   // ── The trial funnel: Club selected and Meta's Lead are one step, not two ────────
   const funnelText = await textOf(page.locator('[data-testid="stream-card-trial"]').locator('xpath=ancestor::div[contains(@class,"grid")][1]'))
@@ -439,7 +443,7 @@ const money = (n) => `A$${n.toFixed(2)}`
 {
   const empty = { clubs: [], hidden_clubs: [], identified: 0, hidden_count: 0, anonymous: 0, searched_only_count: 0, converted_count: 0, outside_campaign: 0 }
   const { page, ctx } = await open({ summary: summaryFor(), selected: empty, searched: empty })
-  ck('an empty list says no club typed in during the period instead of vanishing', /no club typed into the trial page in the last 7 days/i.test(await textOf(page.locator('[data-testid="clubs-empty"]'))))
+  ck('an empty list says no club typed in during the period instead of vanishing', /no club searched the trial page or opened its season page in the last 7 days/i.test(await textOf(page.locator('[data-testid="clubs-empty"]'))))
   ck('and that is not reported as a load failure', !(await has(page.locator('[data-testid="lists-failed"]'))))
   await ctx.close()
 }
@@ -548,6 +552,55 @@ const money = (n) => `A$${n.toFixed(2)}`
   ck('390px: the strip is still there', await has(page.locator('[data-testid="kpi-strip"]')))
   await page.screenshot({ path: '/tmp/meta_ads_kpi_mobile.png', fullPage: false })
   ck('390px: no page errors', errors.length === 0, errors.join(' | '))
+  await ctx.close()
+}
+
+
+// ── A3. A club that only opened its season page (the Melbourne Crickeroos report) ──
+{
+  const at = '2026-11-18T09:30:00Z'
+  const seasonPage = {
+    clubs: [
+      { name: 'Melbourne Crickeroos', key: 'melbourne crickeroos', org_id: 'g-melb', visitors: 1, views: 1, pressed_claim: false,
+        via_meta: false, via_campaign: false, origin: { channel: 'email', label: 'Email (our outreach)', detail: 'utm_id MELB1' },
+        first_at: at, last_at: at },
+      { name: 'Claimer CC', key: 'claimer cc', visitors: 1, views: 2, pressed_claim: true, via_meta: false, via_campaign: false,
+        origin: { channel: 'direct', label: 'Direct' }, first_at: at, last_at: at },
+    ],
+    hidden_clubs: [], identified: 2, hidden_count: 0, outside_campaign: 0,
+  }
+  // Bayview is also on the selected list (stage Reached terms): a season page view must not demote it.
+  const seasonWithBayview = { ...seasonPage, clubs: [...seasonPage.clubs, { name: 'Bayview CC', key: 'bayview cc', visitors: 1, views: 1, pressed_claim: false, last_at: at }] }
+  const { page, ctx, errors, wire } = await open({ summary: summaryFor(), seasonPage: seasonWithBayview })
+  const rowText = async (name) => textOf(page.locator('[data-testid="club-row"]', { hasText: name }))
+  ck('the page asks for the season page list with the period and scope on screen',
+     wire.some((w) => /season-page-clubs\?days=7&scope=all/.test(w)), wire.filter((w) => /season/.test(w)).join(' | '))
+  const melb = await rowText('Melbourne Crickeroos')
+  ck('a club that only opened its season page is listed', melb.length > 0)
+  ck('its stage says it opened the season page', /opened season page/i.test(melb), melb)
+  ck('and where from is our outreach email', /email \(our outreach\)/i.test(melb), melb)
+  ck('a press of the claim button is shown', /pressed claim/i.test(await rowText('Claimer CC')), await rowText('Claimer CC'))
+  ck('a plain view does not claim a press', !/pressed claim/i.test(melb))
+  ck('a club further on keeps its further stage', /reached terms/i.test(await rowText('Bayview CC')) && !/opened season page/i.test(await rowText('Bayview CC')), await rowText('Bayview CC'))
+  ck('the Opened season page chip counts them', (await textOf(page.locator('[data-testid="club-chip-count-viewed"]'))).trim() === '2',
+     await textOf(page.locator('[data-testid="club-chip-count-viewed"]')))
+  await clickIf(page.locator('[data-testid="club-chip-viewed"]'))
+  const onlyViewed = await page.locator('[data-testid="club-row"]').count()
+  ck('the chip shows just those clubs', onlyViewed === 2, String(onlyViewed))
+  ck('no page errors', errors.length === 0, errors.join(' | '))
+  await ctx.close()
+}
+{
+  const { page, ctx } = await open({ summary: summaryFor(), seasonFail: true })
+  ck('a failed season page list says what is missing', /season page visits/i.test(await textOf(page.locator('[data-testid="season-page-failed"]'))))
+  ck('while the searched and selected clubs still show', (await page.locator('[data-testid="club-row"]').count()) > 0
+     && !(await has(page.locator('[data-testid="lists-failed"]'))))
+  await ctx.close()
+}
+{
+  const { page, ctx } = await open({ summary: summaryFor(), width: 390 })
+  const over = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+  ck('no horizontal page scroll at 390px', over <= 1, String(over))
   await ctx.close()
 }
 

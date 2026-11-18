@@ -487,6 +487,7 @@ const STAGE_BADGE = {
   completed: 'border-emerald-500/40 text-emerald-300 bg-emerald-500/10',
   terms: 'border-amber-500/40 text-amber-300 bg-amber-500/10',
   selected: 'border-violet-500/40 text-violet-300 bg-violet-500/10',
+  viewed: 'border-cyan-500/40 text-cyan-300 bg-cyan-500/10',
   searched: 'border-sky-500/40 text-sky-300 bg-sky-500/10',
 }
 const ORIGIN_BADGE = {
@@ -507,6 +508,7 @@ const STAGE_CHIPS = [
   { key: 'completed', label: 'Completed' },
   { key: 'terms', label: 'Reached terms, not finished' },
   { key: 'selected', label: 'Selected a club' },
+  { key: 'viewed', label: 'Opened season page' },
   { key: 'searched', label: 'Searched only' },
 ]
 
@@ -520,6 +522,10 @@ function ClubRow({ c, busy, onFlag, onRestore }) {
         <span data-testid="club-stage" className={`inline-block px-1.5 py-0.5 rounded-full border font-mono text-[9px] uppercase whitespace-nowrap ${STAGE_BADGE[c.stage]}`}>
           {STAGES[c.stage].label}
         </span>
+        {c.pressed_claim && c.stage === 'viewed' && (
+          <span data-testid="club-pressed-claim" title="Pressed the claim button on the season page, then did not pick a club in the trial wizard"
+            className="ml-1 font-mono text-[9px] text-pb-faint whitespace-nowrap">pressed claim</span>
+        )}
       </td>
       <td className="px-2 py-2" title={c.origin?.detail || 'No page view of this club\'s visitor on record'}>
         <span data-testid="club-origin" className={`inline-block px-1.5 py-0.5 rounded-full border font-mono text-[9px] whitespace-nowrap ${ORIGIN_BADGE[originOf(c)]}`}>
@@ -553,13 +559,13 @@ function ClubRow({ c, busy, onFlag, onRestore }) {
 // each, with the furthest stage it reached. It was two tables (selected, searched) that said the
 // same club twice; they fold on the club name. Always stacked in view, never behind a tab, and
 // an empty or failed list says so (it was lost once to a tab that opened on the funnel).
-function ClubsPanel({ selected, searched, scope, onScope, period, failed, busyKey, onFlag, onRestore }) {
+function ClubsPanel({ selected, searched, seasonPage, scope, onScope, period, failed, busyKey, onFlag, onRestore }) {
   const filter = useClubFilter()
   const [stage, setStage] = useState('all')
   const [origin, setOrigin] = useState('all')
   const [showHidden, setShowHidden] = useState(false)
   const [limit, setLimit] = useState(40)
-  const rows = useMemo(() => mergeClubs(selected, searched), [selected, searched])
+  const rows = useMemo(() => mergeClubs(selected, searched, seasonPage), [selected, searched, seasonPage])
   const visible = rows.filter((r) => !r.hidden)
   const hidden = rows.filter((r) => r.hidden)
   const counts = stageCounts(visible)
@@ -567,8 +573,8 @@ function ClubsPanel({ selected, searched, scope, onScope, period, failed, busyKe
   const searchedRows = filter.apply(visible)
   const shown = applyClubFilters(searchedRows, { stage, origin })
   const shownHidden = showHidden ? filter.apply(hidden) : []
-  const loading = !failed && (selected == null || searched == null)
-  const outside = selected?.outside_campaign || 0
+  const loading = !failed && (selected == null || searched == null || seasonPage == null)
+  const outside = Math.max(selected?.outside_campaign || 0, seasonPage?.outside_campaign || 0)
   const unnamed = selected?.anonymous || 0
   const pickedClubs = (selected?.clubs || []).length
   const namedPicks = (selected?.clubs || []).reduce((n, c) => n + (c.visitors || 0), 0)
@@ -576,7 +582,7 @@ function ClubsPanel({ selected, searched, scope, onScope, period, failed, busyKe
     <div data-testid="clubs-panel" className="pb-card p-4 mb-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
         <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint">
-          Clubs that typed in their club, and how far they got
+          Clubs that searched for their club or opened its season page, and how far they got
         </div>
         <span className="font-mono text-[10px] text-pb-faintest flex items-center gap-2">
           <span data-testid="clubs-count">{shown.length} of {visible.length} club{visible.length === 1 ? '' : 's'}, {periodLabel(period)}</span>
@@ -627,10 +633,15 @@ function ClubsPanel({ selected, searched, scope, onScope, period, failed, busyKe
         </p>
       )}
       {loading && <p className="text-xs text-pb-faint">Loading&hellip;</p>}
+      {seasonPage?.failed && (
+        <p data-testid="season-page-failed" className="font-mono text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded px-3 py-2 mb-3">
+          Could not load the season page visits, so clubs that only opened their season page are missing below.
+        </p>
+      )}
 
       {!failed && !loading && rows.length === 0 && (
         <p data-testid="clubs-empty" className="text-xs text-pb-faint">
-          No club typed into the trial page {scope === 'campaign' ? 'from this campaign ' : ''}in the last {periodLabel(period)}.
+          No club searched the trial page or opened its season page {scope === 'campaign' ? 'from this campaign ' : ''}in the last {periodLabel(period)}.
         </p>
       )}
       {!failed && !loading && rows.length > 0 && shown.length === 0 && shownHidden.length === 0 && (
@@ -682,7 +693,7 @@ function ClubsPanel({ selected, searched, scope, onScope, period, failed, busyKe
       <p className="font-mono text-[9px] text-pb-faintest mt-3">
         One row per club, with the furthest stage it reached and where it came from: the first tagged visit we saw from that
         visitor (UTM tags, ad click id, outreach code or referrer), so a returning visitor shows how they FIRST arrived. &ldquo;Direct&rdquo; means none of those: a typed address, a bookmark, or an app that hides the referrer (a shared
-        link can sit here). &ldquo;Reached terms, not finished&rdquo; is the list worth a call. &ldquo;Flag as test&rdquo; hides a row here and doesn&rsquo;t touch the Sales Pipeline.
+        link can sit here). &ldquo;Opened season page&rdquo; means someone opened the club&rsquo;s own season page (from an email, an ad or the search) and went no further; views by our own team and by live customers are left out. &ldquo;Reached terms, not finished&rdquo; is the list worth a call. &ldquo;Flag as test&rdquo; hides a row here and doesn&rsquo;t touch the Sales Pipeline.
       </p>
     </div>
   )
@@ -1239,6 +1250,7 @@ export default function SuperMetaAds() {
   const [registrationFunnel, setRegistrationFunnel] = useState(null)
   const [selectedClubs, setSelectedClubs] = useState(null)
   const [searchedClubs, setSearchedClubs] = useState(null)
+  const [seasonPageClubs, setSeasonPageClubs] = useState(null)
   const [busySelectionKey, setBusySelectionKey] = useState('')
   // One period and one scope for every on-site panel below the money. It opens on ALL traffic
   // for the last 7 days (a list going back to July is not a follow-up list); "This campaign"
@@ -1288,6 +1300,9 @@ export default function SuperMetaAds() {
     api.metaAdsRegistrationFunnel(Math.min(period, 90), scope).then((d) => { if (live) setRegistrationFunnel(d.funnel || []) }).catch(() => {})
     api.metaAdsSelectedClubs(period, scope).then((d) => { if (live) setSelectedClubs(d) }).catch(fail)
     api.metaAdsSearchedClubs(period, scope).then((d) => { if (live) setSearchedClubs(d) }).catch(fail)
+    // Its own failure note: the search and selection lists still stand without it.
+    api.metaAdsSeasonPageClubs(period, scope).then((d) => { if (live) setSeasonPageClubs(d) })
+      .catch(() => { if (live) setSeasonPageClubs({ clubs: [], hidden_clubs: [], failed: true }) })
     api.metaAdsOnsite(Math.min(period, 365), scope).then((d) => { if (live) setOnsite(d) }).catch(() => {})
     return () => { live = false }
   }, [period, scope, panelsNonce])
@@ -1298,6 +1313,7 @@ export default function SuperMetaAds() {
     call(c.key || c.name, period, scope)
       .then(setSelectedClubs)
       .then(() => api.metaAdsSearchedClubs(period, scope).then(setSearchedClubs))
+      .then(() => api.metaAdsSeasonPageClubs(period, scope).then(setSeasonPageClubs))
       .catch(() => {})
       .finally(() => setBusySelectionKey(''))
   }, [period, scope])
@@ -1740,6 +1756,7 @@ export default function SuperMetaAds() {
             <ClubsPanel
               selected={selectedClubs}
               searched={searchedClubs}
+              seasonPage={seasonPageClubs}
               scope={scope}
               onScope={setScope}
               period={period}
