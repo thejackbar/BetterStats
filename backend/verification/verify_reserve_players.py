@@ -22,6 +22,7 @@ What CA's total does with a reserve varies, and the correction must not subtract
   NULLP      named only, never judged                                        -> unchanged
   BIGSHEET   slot 13 of 14, CA left it out                                  -> 3
   INSIDEXI   off the card but 8th of 12: not a reserve                       -> unchanged
+  RAINLATE   named, nothing of their own, in a game abandoned after play started -> counts, never flagged
 
 Run:
   DATABASE_URL=postgresql+asyncpg://postgres@/betterstats_verify?host=/tmp&port=5439 \\
@@ -74,14 +75,16 @@ ORG, OPP = uuid.uuid4(), uuid.uuid4()
 SEASON, GRADE = uuid.uuid4(), uuid.uuid4()
 OUR_TEAM, THEIR_TEAM = str(uuid.uuid4()), str(uuid.uuid4())
 P = {k: uuid.uuid4() for k in ("JACK", "CASTLEY", "SULWAY", "STACKPOLE", "BAET", "SHAN", "FIELDER",
-                               "WASH", "NULLP", "BIGSHEET", "INSIDEXI")}
+                               "WASH", "NULLP", "BIGSHEET", "INSIDEXI", "RAINLATE")}
 NAMES = {"JACK": "Barendse, Jack", "CASTLEY": "Castley, Gibson", "SULWAY": "Sulway, Richard",
          "STACKPOLE": "Stackpole, Vince", "BAET": "Baetsen, Burt", "SHAN": "Shanmuganathan, Antonio",
-         "FIELDER": "Fielder, Flagged", "WASH": "Wash, Out", "NULLP": "Null, Player", "BIGSHEET": "Big, Sheet", "INSIDEXI": "Inside, Eleven"}
+         "FIELDER": "Fielder, Flagged", "WASH": "Wash, Out", "NULLP": "Null, Player", "BIGSHEET": "Big, Sheet", "INSIDEXI": "Inside, Eleven",
+         "RAINLATE": "Rainlate, Rhys"}
 CARDS: dict[uuid.UUID, dict | None] = {}   # what the CA stub serves for the backfill
 FETCHES: list[str] = []
 _day = 0
 RESERVE_GAMES: dict[str, list[uuid.UUID]] = {}   # player -> the games flagged TRUE
+RAINLATE_GAME: list[uuid.UUID] = []   # the one game abandoned after play started
 JUDGED: list[tuple[str, uuid.UUID, bool | None, int | None]] = []   # (player, game, flag, slot): what the sync/backfill writes
 
 
@@ -138,14 +141,17 @@ async def seed() -> None:
             await ex("INSERT INTO players (id, organisation_id, name, grassroots_id, status) "
                      "VALUES (:i, :o, :n, :g, 'active')", i=pid, o=ORG, n=NAMES[k], g=str(pid))
 
-        async def new_game(*, status="COMPLETED") -> uuid.UUID:
+        async def new_game(*, status="COMPLETED", scored=None) -> uuid.UUID:
             global _day
             _day += 7
             gid = uuid.uuid4()
             # `innings_totals` is what the sync writes; without a scored innings a game reads as unplayed.
             # An ABANDONED game is a washout with no play: no scored innings (and no batting or bowling line),
             # or `abandoned_without_play_sql` reads it as a match played (Applecross, 19 Oct 2025).
-            totals = None if status == "ABANDONED" else json.dumps([{"runs_scored": 146, "wickets": 9}])
+            # `scored=True` is an ABANDONED game where play started, which counts as a match played.
+            if scored is None:
+                scored = status != "ABANDONED"
+            totals = json.dumps([{"runs_scored": 146, "wickets": 9}]) if scored else None
             await ex("INSERT INTO games (id, grade_id, played_at, result, home_org_id, away_org_id, match_format, status, "
                      " innings_totals) VALUES (:i, :g, :d, 'WIN', :o, :x, 'Two Day', :st, CAST(:t AS jsonb))",
                      i=gid, g=GRADE, d=date(2016, 10, 1) + timedelta(days=_day), o=ORG, x=OPP, st=status, t=totals)
@@ -159,9 +165,10 @@ async def seed() -> None:
                 await ex("INSERT INTO batting_innings (game_id, player_id, innings_number, runs, balls, fours, sixes, not_out, "
                          " dismissal_type, did_not_bat) VALUES (:g, :p, 1, 20, 25, 1, 0, false, 'caught', false)", g=gid, p=player)
 
-        async def named(key: str, *, slot: int, size: int, shape: str, status="COMPLETED", fielding=False) -> uuid.UUID:
+        async def named(key: str, *, slot: int, size: int, shape: str, status="COMPLETED", fielding=False,
+                        scored=None) -> uuid.UUID:
             """A game the player is only NAMED in. `shape` says what CA's card looks like and so what the judgement is."""
-            gid = await new_game(status=status)
+            gid = await new_game(status=status, scored=scored)
             pl = P[key]
             await ex("INSERT INTO game_appearances (game_id, player_id) VALUES (:g, :p)", g=gid, p=pl)
             sh = sheet_with(pl, slot, size)
@@ -241,6 +248,15 @@ async def seed() -> None:
         await real(P["INSIDEXI"], 5)
         await named("INSIDEXI", slot=8, size=12, shape="inside")
         await ca("INSIDEXI", 6)
+        # RAINLATE: 4 real games and one abandoned after play started (146 for 9, then rain), named 7th of 12 with
+        # nothing of their own. The club played, so it counts (CA 5). CA's card says ABANDONED, not COMPLETED, so
+        # the backfill reads it and leaves it NULL: never flagged, still read as played.
+        await real(P["RAINLATE"], 4)
+        rgid = await named("RAINLATE", slot=7, size=12, shape="none", status="ABANDONED", scored=True)
+        sh_r = sheet_with(P["RAINLATE"], 7, 12)
+        CARDS[rgid] = card(sh_r, off_card(sh_r, P["RAINLATE"]), status="ABANDONED")
+        RAINLATE_GAME.append(rgid)
+        await ca("RAINLATE", 5)
         await s.commit()
 
 
@@ -290,9 +306,9 @@ async def board(key: str) -> int | None:
 
 # What each player's figure reads WITHOUT the flags (the control: the old behaviour) and WITH them.
 BEFORE = {"JACK": 4, "CASTLEY": 11, "SULWAY": 15, "STACKPOLE": 17, "BAET": 1, "SHAN": 17, "FIELDER": 6,
-          "WASH": 4, "NULLP": 5, "BIGSHEET": 4, "INSIDEXI": 6}
+          "WASH": 4, "NULLP": 5, "BIGSHEET": 4, "INSIDEXI": 6, "RAINLATE": 5}
 AFTER = {"JACK": 3, "CASTLEY": 10, "SULWAY": 13, "STACKPOLE": 16, "BAET": 0, "SHAN": 16, "FIELDER": 6,
-         "WASH": 4, "NULLP": 5, "BIGSHEET": 3, "INSIDEXI": 6}
+         "WASH": 4, "NULLP": 5, "BIGSHEET": 3, "INSIDEXI": 6, "RAINLATE": 5}
 
 
 async def main() -> None:
@@ -343,6 +359,9 @@ async def main() -> None:
     check("a flagged player with a catch keeps the match", await header("FIELDER") == 6 and await season_row("FIELDER") == 6)
     print("\n-- A GAME NOBODY PLAYED IS TAKEN ONCE --")
     check("a reserve in an abandoned game: the washout rule takes the one game, not two", await header("WASH") == 4)
+    check("a game abandoned after play started is a match played (Applecross, 19 Oct 2025): Rainlate reads 5 "
+          "on the header, season row and grid", await header("RAINLATE") == 5 and await season_row("RAINLATE") == 5
+          and await grid("RAINLATE") == 5, f"{await header('RAINLATE')} / {await season_row('RAINLATE')} / {await grid('RAINLATE')}")
     print("\n-- NOT JUDGED IS READ AS PLAYED --")
     check("a named-only game with no card is left alone", await header("NULLP") == 5)
 
@@ -367,6 +386,8 @@ async def main() -> None:
     check("a player named in a game our side never batted in is still charged", (rain, P["JACK"]) in charged)
     check("an appearance never judged is still charged",
           any(p == P["NULLP"] for g, p in charged))
+    check("a player named in a game abandoned after play started is still charged",
+          (RAINLATE_GAME[0], P["RAINLATE"]) in charged)
 
     print("\n-- THE SYNC WRITES THE FLAG, ONLY ONCE THE GAME IS OVER --")
     sh = sheet_with(P["JACK"], 12, 12)
@@ -402,6 +423,9 @@ async def main() -> None:
     check("a game CA has no card for is left NULL, not guessed", any("no card" in k for k in left), str(dict(left)))
     check("a reserve with a catch and a washout are never candidates (they have rows or were not played)",
           not any(r["player_id"] in (str(P["FIELDER"]), str(P["WASH"])) for r in rows_))
+    check("a game abandoned after play started is read (it was played) but left NULL: CA does not call it COMPLETED",
+          str(RAINLATE_GAME[0]) in FETCHES and not any(r["game_id"] == str(RAINLATE_GAME[0]) for r in rows_),
+          f"fetched={str(RAINLATE_GAME[0]) in FETCHES}")
     async with Session() as s:
         n_set = (await s.execute(text("SELECT COUNT(*) FROM game_appearances WHERE is_reserve IS NOT NULL"))).scalar()
     check("the dry run writes nothing", n_set == 0, str(n_set))
@@ -429,8 +453,10 @@ async def main() -> None:
 
     rows2, _ = await planned()
     check("a second run judges nothing new", rows2 == [], f"{len(rows2)} rows")
-    check("and asks CA only about the one game it holds no card for (left NULL, so tried again: one request)",
-          len(FETCHES) == 1 and uuid.UUID(FETCHES[0]) not in {g for _, g, _, _ in JUDGED}, str(FETCHES))
+    left_null = {g for g, c in CARDS.items() if c is None} | set(RAINLATE_GAME)
+    check("and asks CA only about the games it left NULL (the one with no card and the abandoned-after-play one: "
+          "two requests, never the washout)",
+          sorted(FETCHES) == sorted(str(g) for g in left_null) and len(left_null) == 2, str(FETCHES))
 
     await backfill.restore(audit[0]["id"], "Test Admin")
     async with Session() as s:
