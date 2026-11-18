@@ -13,7 +13,7 @@ import calendar
 import re
 import secrets
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from typing import Optional
 
@@ -272,6 +272,57 @@ def allow_maybe(club) -> bool:
 
 
 MAYBE_OFF = "Maybe is switched off for this club. Record Available or Unavailable."
+
+
+# ─── How far ahead a player may answer for themselves ───────────────────────
+# A club can stop players saying Available (or Maybe) more than N weeks out while
+# still letting them flag Unavailable further ahead (holidays, work). NULL is no
+# limit. Only the player's own page is bound: selectors record anything, and an
+# answer already stored past a window is kept and still shows. Taking an answer
+# back (NO_RESPONSE) is always allowed.
+
+WINDOW_MAX_WEEKS = 52
+# Which window binds which answer. Maybe is a soft yes, so it sits with Available.
+_WINDOW_FOR = {"AVAILABLE": "available", "MAYBE": "available", "UNAVAILABLE": "unavailable"}
+
+
+def clean_window_weeks(raw) -> Optional[int]:
+    """A stored window: None (no limit) or a whole number of weeks, 1 to 52."""
+    if raw is None or raw == "":
+        return None
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Weeks ahead must be a whole number, or blank for no limit.")
+    if n < 1 or n > WINDOW_MAX_WEEKS:
+        raise HTTPException(status_code=400, detail=f"Weeks ahead must be between 1 and {WINDOW_MAX_WEEKS}, or blank for no limit.")
+    return n
+
+
+def answer_window(club, today: date) -> dict:
+    """The club's windows as weeks and as the last date each answer can be given
+    for, counted from `today` (the player's local day). None means no limit."""
+    out = {}
+    for key, col in (("available", "availability_weeks_available"), ("unavailable", "availability_weeks_unavailable")):
+        weeks = getattr(club, col, None)
+        weeks = int(weeks) if weeks else None
+        out[f"{key}_weeks"] = weeks
+        out[f"{key}_until"] = (today + timedelta(days=7 * weeks)).isoformat() if weeks else None
+    return out
+
+
+def window_refusal(club, status: str, on: date, today: date) -> Optional[str]:
+    """Why the player may not give `status` for `on` yet, or None when they may."""
+    key = _WINDOW_FOR.get(status)
+    if key is None:
+        return None
+    weeks = getattr(club, f"availability_weeks_{key}", None)
+    if not weeks or on <= today + timedelta(days=7 * int(weeks)):
+        return None
+    opens = on - timedelta(days=7 * int(weeks))
+    word = "Unavailable" if key == "unavailable" else ("Maybe" if status == "MAYBE" else "Available")
+    return (f"Your club takes {word} answers up to {int(weeks)} week{'s' if int(weeks) != 1 else ''} ahead. "
+            f"You can answer for this date from {opens.strftime('%a %-d %b')}.")
 
 
 @router.get("/config", dependencies=[Depends(require_any_cap(*SELECT_ANY))])
@@ -918,6 +969,10 @@ class SelfServiceUpdate(BaseModel):
     require_pin: Optional[bool] = None
     show_squad: Optional[bool] = None
     allow_maybe: Optional[bool] = None
+    # How many weeks ahead players may answer on their own page. null clears the
+    # limit, so these are read through model_fields_set: not sent leaves it alone.
+    weeks_available: Optional[int] = None
+    weeks_unavailable: Optional[int] = None
     # Show a Player Page button on the club's public site.
     show_on_site: Optional[bool] = None
     # The modules on a player's own page, in order. An empty list is a real
@@ -933,6 +988,8 @@ async def _self_service_payload(db: AsyncSession, club: Organisation) -> dict:
         "require_pin": bool(club.availability_require_pin),
         "show_squad": bool(club.availability_show_squad),
         "allow_maybe": allow_maybe(club),
+        "weeks_available": club.availability_weeks_available,
+        "weeks_unavailable": club.availability_weeks_unavailable,
         "show_on_site": club.availability_show_on_site is not False,
         # Every module the page can show, with whether this club has it on and
         # why it cannot be (a missing module, or a switch it depends on).
@@ -972,6 +1029,11 @@ async def update_self_service(
         club.availability_allow_maybe = bool(body.allow_maybe)
     if body.show_on_site is not None:
         club.availability_show_on_site = bool(body.show_on_site)
+    sent = body.model_fields_set
+    if "weeks_available" in sent:
+        club.availability_weeks_available = clean_window_weeks(body.weeks_available)
+    if "weeks_unavailable" in sent:
+        club.availability_weeks_unavailable = clean_window_weeks(body.weeks_unavailable)
     if body.dashboard_modules is not None:
         club.player_dashboard_modules = player_dashboard.store(body.dashboard_modules)
     if body.enabled is not None:

@@ -4728,6 +4728,13 @@ async def lifespan(app: FastAPI):
         for _stmt in _AVAIL_MAYBE_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 390: how many weeks ahead players may answer for themselves.
+        # Same one-copy rule: this and alembic's 390 both run
+        # services/availability_window_ddl.STATEMENTS.
+        from app.services.availability_window_ddl import STATEMENTS as _AVAIL_WINDOW_DDL
+        for _stmt in _AVAIL_WINDOW_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 355: the Player Page button on the club's public site.
         # Same one-copy rule: this and alembic's 355 both run
         # services/availability_site_link_ddl.STATEMENTS.

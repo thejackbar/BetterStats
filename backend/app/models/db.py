@@ -550,6 +550,10 @@ class Organisation(Base):
     availability_show_squad = Column(Boolean, nullable=False, server_default="false", default=False)
     # False = the club records only Available / Unavailable (migration 340).
     availability_allow_maybe = Column(Boolean, nullable=False, server_default="true", default=True)
+    # How many weeks ahead a player may answer on their own page (migration 390).
+    # NULL = no limit. Available and Maybe share the first; Unavailable has its own.
+    availability_weeks_available = Column(Integer, nullable=True)
+    availability_weeks_unavailable = Column(Integer, nullable=True)
     # Whether the club's public site shows a "Player Page" button to the
     # self-service link (migration 355). On by default; only used when the link is on.
     availability_show_on_site = Column(Boolean, nullable=False, server_default="true", default=True)

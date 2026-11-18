@@ -126,6 +126,8 @@ SHARED_DDL_MODULES = (
     ("app.services.audit_ddl", "STATEMENTS"),
     # Migration 340. `organisations.availability_allow_maybe`, on the shared Organisation model.
     ("app.services.availability_maybe_ddl", "STATEMENTS"),
+    # Migration 390. `organisations.availability_weeks_available/_unavailable`, on the shared Organisation model.
+    ("app.services.availability_window_ddl", "STATEMENTS"),
     # Migration 355. `organisations.availability_show_on_site`, on the shared Organisation model.
     ("app.services.availability_site_link_ddl", "STATEMENTS"),
     # Migration 372. `organisations.player_dashboard_enabled`, on the shared Organisation model.

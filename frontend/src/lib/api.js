@@ -207,11 +207,12 @@ async function videoUpload(path, method, fields = {}, video = null, poster = nul
 // holds no per-club timezone, and fixtures carry a local start time, so the
 // availability reads send the browser's own to know which games have started.
 // Empty when the browser will not say, which leaves the server on date only.
+function browserTz() {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined } catch { return undefined }
+}
 function tzQuery() {
-  try {
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
-    return tz ? `?tz=${encodeURIComponent(tz)}` : ''
-  } catch { return '' }
+  const tz = browserTz()
+  return tz ? `?tz=${encodeURIComponent(tz)}` : ''
 }
 
 export const api = {
@@ -3566,7 +3567,7 @@ export const api = {
   availPublicRanks: (token) => request(`/public/availability/${token}/me/ranks`),
   availPublicLadder: (token) => request(`/public/availability/${token}/me/ladder`),
   availPublicSet: (token, data) =>
-    request(`/public/availability/${token}/me`, { method: 'POST', body: JSON.stringify(data) }),
+    request(`/public/availability/${token}/me`, { method: 'POST', body: JSON.stringify({ ...data, tz: browserTz() }) }),
   // The player's own contact details, for the Update details form. The save re-checks
   // the PIN and sends only the fields that changed ("" clears one).
   availPublicDetails: (token) => request(`/public/availability/${token}/me/details`),

@@ -50,10 +50,12 @@ from app.routers.availability import (
     MAYBE_OFF,
     active_self_service_players,
     allow_maybe,
+    answer_window,
     audit_availability,
     local_now,
     phone_last4,
     upcoming_fixtures_by_date,
+    window_refusal,
 )
 from app.services import fines as fines_svc, player_cards as cards_svc, player_dashboard, rate_limit, section_names, selection_rules as rules_svc, squad_sides
 from app.services import votes as vote_svc
@@ -94,6 +96,9 @@ class SetBody(BaseModel):
     date: date
     status: str
     note: Optional[str] = None
+    # The browser's IANA timezone, so the club's answer windows count from the
+    # player's own day. Absent keeps the server's day.
+    tz: Optional[str] = None
 
 
 def _client_ip(request: Request) -> str:
@@ -403,6 +408,9 @@ async def get_me(token: str, request: Request, tz: Optional[str] = None, db: Asy
         "club": _club_branding(club),
         "player": _player_card(player),
         "allow_maybe": allow_maybe(club),
+        # How far ahead each answer can be given, so the page greys out what the
+        # server would refuse and says when it opens.
+        "answer_window": answer_window(club, _local_today(tz)),
         "week_names": rules_svc.club_config(club)["week_names"],
         "dates": _grouped_dates(by_date),
         "availability": answers,
@@ -1006,6 +1014,12 @@ async def check_in_to_nets(token: str, session_id: str, request: Request, db: As
     return {"status": "ok", "added": 1 if row is not None else 0, "sessions": await _nets_for_player(db, club, player)}
 
 
+def _local_today(tz: Optional[str]) -> date:
+    """The player's own day (their browser's timezone), else the server's."""
+    now = local_now(tz)
+    return now.date() if now else date.today()
+
+
 @router.post("/{token}/me")
 async def set_me(token: str, body: SetBody, request: Request, db: AsyncSession = Depends(get_db)):
     """Upsert this player's own answer for a date. Validates the date is a real
@@ -1023,6 +1037,12 @@ async def set_me(token: str, body: SetBody, request: Request, db: AsyncSession =
     by_date = await upcoming_fixtures_by_date(db, club.id)
     if body.date.isoformat() not in by_date:
         raise HTTPException(status_code=400, detail="No upcoming fixture on that date")
+    # The club's answer windows. Judged on the later of the player's day and the
+    # server's, so a page that offered a button a moment ago is never refused for
+    # the server's clock being behind theirs.
+    refusal = window_refusal(club, status, body.date, max(_local_today(body.tz), date.today()))
+    if refusal:
+        raise HTTPException(status_code=400, detail=refusal)
 
     note = (body.note or "").strip() or None
     res = await db.execute(

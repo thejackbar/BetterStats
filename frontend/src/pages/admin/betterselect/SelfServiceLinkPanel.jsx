@@ -63,6 +63,24 @@ export function PageModules({ modules, canEdit, busy, onChange }) {
   )
 }
 
+// How many weeks ahead players may give an answer on their own page. Blank is no
+// limit. A stored value off the list (set another way) is still offered.
+const WEEK_CHOICES = [1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 16, 20, 26, 52]
+function WeeksAhead({ label, value, onChange, disabled, attr }) {
+  const opts = value && !WEEK_CHOICES.includes(value) ? [...WEEK_CHOICES, value].sort((a, b) => a - b) : WEEK_CHOICES
+  return (
+    <label className="flex items-center gap-2.5" data-weeks-setting={attr}>
+      <span className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint">{label}</span>
+      <select value={value || ''} disabled={disabled}
+        onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
+        className="bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent">
+        <option value="">No limit</option>
+        {opts.map((n) => <option key={n} value={n}>{n} week{n === 1 ? '' : 's'} ahead</option>)}
+      </select>
+    </label>
+  )
+}
+
 export default function SelfServiceLinkPanel() {
   const { hasCapability, canEditCap } = useAuth()
   const toast = useToast()
@@ -188,6 +206,23 @@ export default function SelfServiceLinkPanel() {
               </div>
             )}
           </div>
+          {enabled && (
+            <div data-answer-window>
+              <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+                <WeeksAhead attr="available" label={cfg.allow_maybe === false ? 'Say available' : 'Say available or maybe'}
+                  value={cfg.weeks_available} disabled={!canEdit || busy}
+                  onChange={(v) => update({ weeks_available: v })} />
+                <WeeksAhead attr="unavailable" label="Say unavailable"
+                  value={cfg.weeks_unavailable} disabled={!canEdit || busy}
+                  onChange={(v) => update({ weeks_unavailable: v })} />
+              </div>
+              <p className="text-[11.5px] text-pb-faintest mt-2" data-answer-window-note>
+                {cfg.weeks_available || cfg.weeks_unavailable
+                  ? 'Players can only answer this far ahead on their own page. Further out, the buttons are greyed and say when they open. Selectors can still record any answer, and answers already given stay.'
+                  : 'Players can answer for any upcoming game. Set a limit to stop players saying they are available too far out, while still letting them flag holidays early.'}
+              </p>
+            </div>
+          )}
           {cfg.allow_maybe === false && (
             <p className="text-[11.5px] text-pb-faintest -mt-2" data-maybe-off-note>
               Maybe is off: selectors and players can record only Available or Unavailable. Answers already recorded as Maybe still show.

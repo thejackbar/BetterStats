@@ -10,6 +10,42 @@ import { naturalCompare } from '../../lib/naturalSort'
 // The three answers a player can give (NO_RESPONSE is the absence of one).
 export const ALL_CHOICES = ['AVAILABLE', 'MAYBE', 'UNAVAILABLE']
 
+// How far ahead the club takes each answer (`me.answer_window`, from the server,
+// which refuses the same taps). Maybe sits with Available. Returns null when the
+// answer can be given for that date, else { weeks, opens } (opens is the ISO day
+// it becomes possible). Dates are ISO strings, so they compare as text.
+const WINDOW_KEY = { AVAILABLE: 'available', MAYBE: 'available', UNAVAILABLE: 'unavailable' }
+function addDaysIso(iso, n) {
+  const d = new Date(iso + 'T00:00:00Z')
+  d.setUTCDate(d.getUTCDate() + n)
+  return d.toISOString().slice(0, 10)
+}
+export function windowBlock(win, date, status) {
+  const key = WINDOW_KEY[status]
+  const until = key && win ? win[`${key}_until`] : null
+  if (!until || date <= until) return null
+  const weeks = win[`${key}_weeks`]
+  return { weeks, opens: addDaysIso(date, -7 * weeks) }
+}
+
+// One line under a date's buttons when the club's windows hold some back, so a
+// greyed button is never left unexplained.
+function windowNote(win, date, choices) {
+  const held = choices.map((s) => [s, windowBlock(win, date, s)]).filter(([, b]) => b)
+  if (!held.length) return ''
+  if (held.length === choices.length) {
+    const opens = held.map(([, b]) => b.opens).sort()[0]
+    return `Answers for this day open ${fmtShort(opens)}.`
+  }
+  // Available and Maybe share a window, so they share one sentence.
+  const groups = []
+  for (const [s, b] of held) {
+    const g = groups.find((x) => x.opens === b.opens)
+    if (g) g.words.push(AVAILABILITY[s].label); else groups.push({ ...b, words: [AVAILABILITY[s].label] })
+  }
+  return groups.map((g) => `${g.words.join(' and ')} open${g.words.length === 1 ? 's' : ''} ${fmtShort(g.opens)}. Your club takes ${g.words.length === 1 ? 'it' : 'them'} up to ${g.weeks} week${g.weeks === 1 ? '' : 's'} ahead.`).join(' ')
+}
+
 // Dates grouped into Monday to Sunday weeks, in order. The page opens on the
 // first week with games (a Tuesday T20 and the Saturday game sit together) and
 // reveals one more week per tap, so a long fixture list is not the first thing
@@ -141,6 +177,7 @@ function FixtureList({ fixtures, selectedIds }) {
 // away for week 2, or say Maybe); this is the quick way to say the usual things, so
 // it is one short row and a one-line status, not a card of its own to read.
 function BothWeeks({ pair, me, choices, onPick, busy }) {
+  const held = (statuses) => statuses.some((st, i) => windowBlock(me.answer_window, i === 0 ? pair.day1 : pair.day2, st))
   const weekNames = { ...DEFAULT_WEEK_NAMES, ...(me.week_names || {}) }
   const a = me.availability?.[pair.day1]?.status || 'NO_RESPONSE'
   const b = me.availability?.[pair.day2]?.status || 'NO_RESPONSE'
@@ -164,8 +201,9 @@ function BothWeeks({ pair, me, choices, onPick, busy }) {
       <div className="grid grid-cols-4 gap-1.5">
         {weekPatterns(weekNames).map((w) => (
           <button key={w.key} type="button" data-both={attr[w.key]} data-week-pattern={w.key}
-            onClick={() => onPick(pair, w.statuses)} disabled={busy}
-            className="py-2 rounded-lg text-[12.5px] font-semibold leading-tight transition disabled:opacity-60"
+            onClick={() => onPick(pair, w.statuses)} disabled={busy || held(w.statuses)}
+            data-held={held(w.statuses) ? 'yes' : undefined}
+            className="py-2 rounded-lg text-[12.5px] font-semibold leading-tight transition disabled:opacity-60 disabled:cursor-not-allowed"
             style={btn(AVAILABILITY[w.tone], pattern === w.key)}>
             {short[w.key] || w.title}
           </button>
@@ -177,7 +215,7 @@ function BothWeeks({ pair, me, choices, onPick, busy }) {
             ? `Both weeks: ${word(same)}`
             : `${weekNames.w1}: ${word(a)} · ${weekNames.w2}: ${word(b)}`}
         </span>
-        {choices.includes('MAYBE') && (
+        {choices.includes('MAYBE') && !held(['MAYBE', 'MAYBE']) && (
           <button type="button" data-both="MAYBE" onClick={() => onPick(pair, ['MAYBE', 'MAYBE'])} disabled={busy}
             className="shrink-0 underline disabled:opacity-60" style={{ color: same === 'MAYBE' ? AVAILABILITY.MAYBE.cssVar : 'var(--pb-faint)' }}>
             {AVAILABILITY.MAYBE.glyph} Maybe for both
@@ -192,8 +230,9 @@ function BothWeeks({ pair, me, choices, onPick, busy }) {
 // carry ten fixtures across the club; answering is the job, so they stay folded
 // until the player wants to see them. The buttons stay put when it opens (the games
 // open below them), and an answer is never blocked on looking.
-function DateCard({ d, cur, wk, choices, saving, saved, onAnswer, sel, selectedIds }) {
+function DateCard({ d, cur, wk, choices, saving, saved, onAnswer, sel, selectedIds, win }) {
   const [open, setOpen] = useState(false)
+  const note = windowNote(win, d.date, choices)
   const n = (d.fixtures || []).length
   const panel = `fixtures-${d.date}`
   return (
@@ -224,12 +263,15 @@ function DateCard({ d, cur, wk, choices, saving, saved, onAnswer, sel, selectedI
         {choices.map((s) => {
           const meta = AVAILABILITY[s]
           const active = cur === s
+          const held = !!windowBlock(win, d.date, s)
           return (
             <button
               key={s}
               onClick={() => onAnswer(d.date, s)}
-              disabled={saving}
-              className="py-2.5 rounded-lg text-sm font-semibold transition disabled:opacity-60"
+              disabled={saving || held}
+              data-answer={s}
+              data-held={held ? 'yes' : undefined}
+              className="py-2.5 rounded-lg text-sm font-semibold transition disabled:opacity-60 disabled:cursor-not-allowed"
               style={active
                 ? { background: meta.cssVar, color: 'var(--pb-bg)' }
                 : { background: `color-mix(in srgb, ${meta.cssVar} 12%, transparent)`, color: meta.cssVar, border: `1px solid color-mix(in srgb, ${meta.cssVar} 30%, transparent)` }}
@@ -239,6 +281,7 @@ function DateCard({ d, cur, wk, choices, saving, saved, onAnswer, sel, selectedI
           )
         })}
       </div>
+      {note && <p data-window-note className="mt-2 text-[12px] text-pb-faint">{note}</p>}
       {n > 0 && (
         <button type="button" data-fixtures-toggle onClick={() => setOpen((v) => !v)} aria-expanded={open} aria-controls={panel}
           className="mt-2.5 w-full flex items-center justify-center gap-1.5 py-1.5 text-[12.5px] text-pb-faint hover:text-pb-text">
@@ -292,7 +335,7 @@ export function AvailabilityEditor({ me, choices, savingDate, savedDate, onAnswe
                   {savedDate === pr.key && <span className="absolute right-3 bottom-2 font-mono text-[10px]" style={{ color: 'var(--pb-positive)' }}>SAVED ✓</span>}
                 </div>
               ))}
-              <DateCard d={d} cur={cur} wk={wk} choices={choices} saving={savingDate === d.date} saved={savedDate === d.date} onAnswer={onAnswer} sel={selectionFor(d)} selectedIds={selectedIds} />
+              <DateCard d={d} cur={cur} wk={wk} choices={choices} saving={savingDate === d.date} saved={savedDate === d.date} onAnswer={onAnswer} sel={selectionFor(d)} selectedIds={selectedIds} win={me.answer_window} />
             </Fragment>
           )
         })}
