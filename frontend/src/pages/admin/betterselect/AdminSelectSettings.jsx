@@ -332,7 +332,7 @@ export default function AdminSelectSettings() {
 
         <Card>
           <Head title="What the screens show" />
-          <Row label="Junior grades" hint="Junior grades are set in Manage Grades. This is remembered on this device and applies to the Selection board, the Whiteboard, Availability and Fixtures.">
+          <Row label="Junior grades" hint="Junior teams, and on the Selection board and the Whiteboard the players whose squads are all junior sides (Year 4, Under 13). Searching a name still finds a junior. Junior grades are set in Manage Grades. Remembered on this device; applies to the Selection board, the Whiteboard, Availability and Fixtures.">
             <Segmented sm value={showJuniors ? 'show' : 'hide'} onChange={(v) => setShowJuniors(v === 'show')}
               options={[{ value: 'hide', label: 'Hide' }, { value: 'show', label: 'Show' }]} />
           </Row>

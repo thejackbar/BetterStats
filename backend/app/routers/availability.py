@@ -592,10 +592,9 @@ async def _squad_meta(db: AsyncSession, club_id, sq_sides, names: list[str]) -> 
     out: dict[str, dict] = {}
     for name in names:
         sq = by_name.get(name)
-        probes = (sq_sides.grade_names(sq.id) if sq else []) or [name]
         out[name] = {
             "active": sq.is_active if sq else True,
-            "junior": any("junior" in categories_for_name(categories, g) for g in probes),
+            "junior": squad_sides.squad_is_junior(sq_sides, categories, name),
         }
     return out
 

@@ -73,6 +73,28 @@ def women_card() -> dict:
 WCARD = women_card()
 
 
+def opener_card() -> dict:
+    """An opener (Payne) retires at 30 with no wicket down, comes back at the end and is caught. Cricket
+    Australia writes her twice in the fall of wickets: the retirement as wicket 1 and her real wicket last."""
+    spec = [("Payne", 45, "Caught"), ("Hall", 20, "Bowled"), ("Bivens", 25, "Caught"), ("Sweet", 10, "Not Out"),
+            ("Cox", None, "Did Not Bat"), ("Menezes", None, "Did Not Bat"), ("Ito", None, "Did Not Bat"),
+            ("Lee", None, "Did Not Bat")]
+    ids = {"Bowled": 3, "Caught": 2, "Not Out": 1, "Did Not Bat": 0}
+    c = copy.deepcopy(F.CARD)
+    c["innings"][0]["batting"] = [
+        {"participantId": str(GUIDS[n]), "batOrder": i, "runsScored": r, "dismissalTypeId": ids[d],
+         "dismissalType": d, "playerShortName": f"{n[0]} {n}"} for i, (n, r, d) in enumerate(spec, 1)]
+    c["innings"][0]["runsScored"] = 120
+    c["innings"][0]["fallOfWickets"] = [
+        {"order": o, "runs": r, "participantId": str(GUIDS[n]), "playerShortName": f"{n[0]} {n}"}
+        for o, r, n in [(1, 30, "Payne"), (2, 50, "Hall"), (3, 80, "Bivens"), (4, 110, "Payne")]]
+    return c
+
+
+OCARD = opener_card()
+GAME_O = uuid.uuid4()
+
+
 def edit(rows, retirements=(), unbroken=False, unbroken_score=None):
     kw = {"rows": [F.game_fow.FowRowIn(wicket_number=w, score_at_fall=sc,
                                        participant_id=str(GUIDS[n]) if n else None) for w, sc, n in rows]}
@@ -140,8 +162,13 @@ async def main() -> None:
             " opp_club_name, result, home_org_id, away_org_id, venue, match_format, is_final) "
             "VALUES (:i, :g, :d, 'Our Club', 'Opp', 'Our Club', 'Opp', 'Opp', 'WIN', :ho, NULL, 'Oval', "
             " 'One Day', false)"), {"i": GAME_W, "g": F.G, "d": date(2026, 1, 10), "ho": F.OURS})
+        await s.execute(text(
+            "INSERT INTO games (id, grade_id, played_at, home_team, away_team, home_club, away_club, "
+            " opp_club_name, result, home_org_id, away_org_id, venue, match_format, is_final) "
+            "VALUES (:i, :g, :d, 'Our Club', 'Opp', 'Our Club', 'Opp', 'Opp', 'WIN', :ho, NULL, 'Oval', "
+            " 'One Day', false)"), {"i": GAME_O, "g": F.G, "d": date(2026, 1, 17), "ho": F.OURS})
         await s.commit()
-    F.gr.get_match_scorecard = F.fake_fetch({str(F.GAME): CARD, str(GAME_W): WCARD})
+    F.gr.get_match_scorecard = F.fake_fetch({str(F.GAME): CARD, str(GAME_W): WCARD, str(GAME_O): OCARD})
     user = await F.as_scorer()
     kw = dict(current_user=user, club=Organisation(id=F.OURS))
 
@@ -252,6 +279,32 @@ async def main() -> None:
     check("resets", err is None, str(err and err.detail))
     check("the typed retirements go too", await breaks_count(GAME_W) == 0, str(await breaks_count(GAME_W)))
     check("Cricket Australia's card is back (no stands)", await stands(GAME_W) == [], str(await stands(GAME_W)))
+
+    print("6. An opener retires before the first wicket, comes back and is out")
+    await store(GAME_O, OCARD)
+    res, err = await F.call(F.game_fow.fow_editor, game_id=str(GAME_O), **kw)
+    inn = ((res or {}).get("innings") or [{}])[0]
+    check("the editor opens with her first row as a retirement at 0 wickets down",
+          [(r["batter_name"], r["score"], r["after_wicket"]) for r in inn.get("retirements", [])]
+          == [("P Payne", 30, 0)], str(inn.get("retirements")))
+    check("and her real wicket last, the wickets numbered 1 to 3",
+          [(f["wicket_number"], f["score_at_fall"], f["batter_name"]) for f in inn.get("fow", [])]
+          == [(1, 50, "H Hall"), (2, 80, "B Bivens"), (3, 110, "P Payne")], str(inn.get("fow")))
+    # Saved exactly as the editor would send what it opened on.
+    rows = [(f["wicket_number"], f["score_at_fall"], next(n for n in NAMES if str(GUIDS[n]) == f["participant_id"]))
+            for f in inn.get("fow", [])]
+    rets = [(next(n for n in NAMES if str(GUIDS[n]) == r["participant_id"]), r["score"], r["after_wicket"])
+            for r in inn.get("retirements", [])]
+    res, err = await F.call(F.game_fow.save_fow, game_id=str(GAME_O), innings_number=1,
+                            data=edit(rows, retirements=rets), **kw)
+    check("saves", err is None, str(err and err.detail))
+    got = await stands(GAME_O)
+    check("four stands: 30* (ended by her retirement), 20, 30, and 30 when she came back",
+          got == [(1, 30, True), (1, 20, False), (2, 30, False), (3, 30, False)], str(got))
+    check("she bats with Hall, then comes back with Sweet",
+          (await pairs(GAME_O)) == [(1, frozenset({"P Payne", "H Hall"})), (1, frozenset({"H Hall", "B Bivens"})),
+                                    (2, frozenset({"B Bivens", "S Sweet"})), (3, frozenset({"S Sweet", "P Payne"}))],
+          str(await pairs(GAME_O)))
 
     print()
     print(f"{base.PASS} passed, {base.FAIL} failed")

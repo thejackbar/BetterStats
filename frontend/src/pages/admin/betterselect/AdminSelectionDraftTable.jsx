@@ -266,7 +266,7 @@ function TeamColumn({ col, density, listRef, ctx, drag }) {
 // ── The pool ────────────────────────────────────────────────────────────────
 function PoolColumn({ ctx, drag }) {
   const hovered = drag.hover === 'pool'
-  const { q, setQ, hideOut, setHideOut, squad, setSquad, gender, setGender } = ctx.filters
+  const { q, setQ, hideOut, setHideOut, squad, setSquad, gender, setGender, showJuniors, setShowJuniors, juniorCount } = ctx.filters
   const activeTeam = ctx.activeFid && ctx.cols[ctx.activeFid] ? ctx.shortTeam(ctx.cols[ctx.activeFid].fx) : null
   return (
     // Pinned to the left of the scrolling board (sticky, so the team columns slide
@@ -305,6 +305,13 @@ function PoolColumn({ ctx, drag }) {
           <label className="inline-flex items-center gap-1 text-[11.5px] text-pb-dim cursor-pointer">
             <input type="checkbox" checked={hideOut} onChange={(e) => setHideOut(e.target.checked)} />Hide unavailable
           </label>
+          {juniorCount > 0 && (
+            <label className="inline-flex items-center gap-1 text-[11.5px] text-pb-dim cursor-pointer"
+              title="Players whose squads are all junior sides. Also shows junior teams.">
+              <input type="checkbox" checked={showJuniors} onChange={(e) => setShowJuniors(e.target.checked)} />
+              Show juniors ({juniorCount})
+            </label>
+          )}
         </div>
         {ctx.canEdit && activeTeam && (ctx.touch
           ? (
@@ -502,7 +509,7 @@ export default function AdminSelectionDraftTable() {
   const [gender, setGender] = useState('')
   // The same remembered Show juniors choice Availability, Fixtures and Selection use.
   // Whether junior grades show is a Settings choice now, not a switch on this screen.
-  const [showJuniors] = usePersistedState('select.juniors', false, (v) => typeof v === 'boolean')
+  const [showJuniors, setShowJuniors] = usePersistedState('select.juniors', false, (v) => typeof v === 'boolean')
 
   const colsRef = useRef(cols)
   colsRef.current = cols
@@ -863,8 +870,13 @@ export default function AdminSelectionDraftTable() {
     .map((p) => (weekByPlayer[p.id] ? { ...p, availability: weekByPlayer[p.id][weekIdx]?.status || p.availability } : p)), [merged, named, weekByPlayer, weekIdx])
   // Offered only when the pool holds both: a control that can only answer "nobody" is worse than none.
   const showGender = useMemo(() => new Set(unnamed.map((p) => normGender(p.gender)).filter(Boolean)).size > 1, [unnamed])
+  // Players whose every squad is a junior side (Year 4, Under 13). Hidden unless the club shows juniors, the
+  // same switch that shows junior teams. Offered only when the pool holds any.
+  const juniorCount = useMemo(() => unnamed.filter((p) => p.is_junior).length, [unnamed])
   const pool = useMemo(() => {
     let list = unnamed
+    // A name typed into search is someone being looked for (a junior filling in), so it finds juniors too.
+    if (!showJuniors && !q.trim()) list = list.filter((p) => !p.is_junior)
     if (q.trim()) list = list.filter((p) => nameMatches(p.display_name, q))
     if (squad) list = list.filter((p) => (p.squads || []).includes(squad))
     if (gender) list = list.filter((p) => normGender(p.gender) === gender)
@@ -881,7 +893,7 @@ export default function AdminSelectionDraftTable() {
       rank(a) - rank(b)
       || (b.score ?? 0) - (a.score ?? 0)
       || (a.display_name || '').localeCompare(b.display_name || ''))
-  }, [unnamed, q, squad, gender, hideOut, years, weekByPlayer])
+  }, [unnamed, q, squad, gender, hideOut, years, weekByPlayer, showJuniors])
 
   // ── Confirm ───────────────────────────────────────────────────────────────
   const dirtyIds = order.filter((f) => cols?.[f] && isDirty(cols[f]))
@@ -1031,7 +1043,7 @@ export default function AdminSelectionDraftTable() {
     weekNames,
     cols, order, merged, status, conflicts, canEdit, busy, activeFid, setActiveFid,
     shortTeam: ctxShort, squadShort, squadOptions, pool, poolTotal: unnamed.length, showGender, weekByPlayer, day,
-    filters: { q, setQ, hideOut, setHideOut, squad, setSquad, gender, setGender },
+    filters: { q, setQ, hideOut, setHideOut, squad, setSquad, gender, setGender, showJuniors, setShowJuniors, juniorCount },
     tapPool, removeAt, toggleCap, toggleWk, confirmOne, discard, useTheirs, keepMine,
     phone, touch, openSlot: (col, idx) => setSheet({ col, idx }), moveTo,
   }

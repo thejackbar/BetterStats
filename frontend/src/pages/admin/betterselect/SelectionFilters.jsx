@@ -67,7 +67,7 @@ function Check({ label, checked, onChange, dot }) {
   )
 }
 
-export default function SelectionFilters({ filters, sort, setSort, squadOptions, showGender, count, total, inactiveHidden, flags, rules, teamDefault }) {
+export default function SelectionFilters({ filters, sort, setSort, squadOptions, showGender, count, total, inactiveHidden, flags, rules, teamDefault, juniors }) {
   const [open, setOpen] = useState(false)
   const root = useRef(null)
   const anchor = useRef(null)
@@ -277,7 +277,16 @@ export default function SelectionFilters({ filters, sort, setSort, squadOptions,
         </div>
       )}
 
-      <div className="text-[11.5px] text-pb-faint pb-num">{count} of {total} shown{inactiveHidden > 0 ? ` · ${inactiveHidden} inactive not shown` : ''}</div>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-pb-faint pb-num">
+        <span>{count} of {total} shown{inactiveHidden > 0 ? ` · ${inactiveHidden} inactive not shown` : ''}</span>
+        {/* Juniors: players whose squads are all junior sides. The same switch shows junior teams. */}
+        {juniors && juniors.count > 0 && (
+          <label className="inline-flex items-center gap-1 cursor-pointer text-pb-dim">
+            <input type="checkbox" checked={juniors.show} onChange={(e) => juniors.setShow(e.target.checked)} />
+            Show juniors ({juniors.count})
+          </label>
+        )}
+      </div>
     </div>
   )
 }

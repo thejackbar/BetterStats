@@ -353,7 +353,7 @@ export default function AdminSelection() {
 
   useEffect(() => { load() }, [load])
   // Junior grades stay out of the team switcher unless "Junior grades: Show" is on in Settings.
-  const [showJuniors] = usePersistedState('select.juniors', false, (v) => typeof v === 'boolean')
+  const [showJuniors, setShowJuniors] = usePersistedState('select.juniors', false, (v) => typeof v === 'boolean')
   useEffect(() => { api.bsSelectionOverview({ hideJuniors: !showJuniors }).then((d) => setAllFixtures(d.fixtures || [])).catch(() => {}) }, [showJuniors])
   useEffect(() => { setPrevXI(null); api.bsPreviousXI(fixtureId).then(setPrevXI).catch(() => setPrevXI(null)) }, [fixtureId])
 
@@ -457,8 +457,12 @@ export default function AdminSelection() {
   // Offered only when the pool holds both: a control that can only answer
   // "nobody" is worse than none.
   const showGender = useMemo(() => new Set(available.map((p) => normGender(p.gender)).filter(Boolean)).size > 1, [available])
+  // Players whose every squad is a junior side: hidden unless the club shows juniors (the switch that also
+  // shows junior teams). A name typed into search still finds them, for a junior filling in.
+  const juniorCount = useMemo(() => available.filter((p) => p.is_junior).length, [available])
   const pool = useMemo(() => {
     let list = available
+    if (!showJuniors && !search.trim()) list = list.filter((p) => !p.is_junior)
     if (search.trim()) list = list.filter((p) => nameMatches(p.display_name, search))
     if (values.role?.length) list = list.filter((p) => (p.skill_positions || []).some((r) => values.role.includes(r)))
     if (values.avail?.length) list = list.filter((p) => values.avail.includes(p.availability || 'NO_RESPONSE'))
@@ -503,7 +507,7 @@ export default function AdminSelection() {
       name: (a, b) => (a.display_name || '').localeCompare(b.display_name || ''),
     }
     return list.slice().sort(sorters[sort] || cmp)
-  }, [available, search, values, yearsF, sort, cmp, data, useDefault, teamDefault])
+  }, [available, search, values, yearsF, sort, cmp, data, useDefault, teamDefault, showJuniors])
 
   const filled = slots.filter(Boolean)
   const count = filled.length
@@ -961,7 +965,8 @@ export default function AdminSelection() {
     <SelectionFilters filters={filters} sort={sort} setSort={setSort} squadOptions={squadOptions} showGender={showGender}
       count={pool.length} total={available.length}
       teamDefault={teamDefault ? { summary: teamDefaultSummary(teamDefault), ignored: ignoreDefaults, toggle: () => setIgnoreDefaults((v) => !v) } : null}
-      inactiveHidden={inactiveHidden} flags={data?.flags} rules={data?.rules} />
+      inactiveHidden={inactiveHidden} flags={data?.flags} rules={data?.rules}
+      juniors={{ count: juniorCount, show: showJuniors, setShow: setShowJuniors }} />
   )
 
   const vm = {

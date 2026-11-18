@@ -444,7 +444,8 @@ export default function BetterSelectPlayers() {
   }
   const onBulkInactive = async (ids) => {
     try {
-      await Promise.all(ids.map((id) => api.bsUpdatePlayerProfile(id, { status: 'inactive' })))
+      // One request for the batch (players.bulk_player_status), same squad rule as one at a time.
+      await api.bulkPlayerStatus(ids, 'inactive')
       // Marking inactive clears their squad server-side, so drop it here too
       // rather than leaving the list claiming a squad they're no longer in.
       setPlayers((rows) => (rows || []).map((r) => ids.includes(r.id) ? { ...r, status: 'inactive', squad_team_id: null } : r))

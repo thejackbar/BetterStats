@@ -308,11 +308,15 @@ def suggested_breaks(inn: dict, fow: list[dict]) -> tuple[list[dict], list[dict]
     """
     dismissed = set(_dismissed_pids_grassroots(inn.get("batting") or []))
     batted_pids = {b["participantId"] for b in stand_breaks.batted(inn.get("batting") or [])}
+    ordered = sorted(fow, key=lambda f: f.get("order") or 99)
     wickets: list[dict] = []
     retired: list[dict] = []
-    for f in sorted(fow, key=lambda f: f.get("order") or 99):
+    for i, f in enumerate(ordered):
         pid = f.get("participantId")
-        if pid and pid in batted_pids and pid not in dismissed:
+        # A batter named again further down retired here and came back to be out later (an opener who
+        # retires at 0 down and returns at the end): the earlier row is the retirement, the last the wicket.
+        named_again = bool(pid) and any(g.get("participantId") == pid for g in ordered[i + 1:])
+        if pid and pid in batted_pids and (pid not in dismissed or named_again):
             retired.append({"kind": stand_breaks.RETIRED, "after_wicket": len(wickets), "score": f.get("runs"),
                             "participant_id": pid, "batter_name": f.get("playerShortName")})
         else:

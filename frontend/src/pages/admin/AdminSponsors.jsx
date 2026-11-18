@@ -614,8 +614,10 @@ export default function AdminSponsors() {
           <div className="pb-card px-4 py-4 mt-6" data-testid="card-sponsors">
             <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faintest uppercase mb-1">Sponsors on player cards</h2>
             <p className="text-pb-faintest text-[11px] mb-3">
-              Pick the sponsor shown on the player share card and on the Player Cards. With nothing picked, the card shows your
-              top sponsor that has a logo. Whoever shares a card can still choose a different sponsor, or none, for that share.
+              A card carries one sponsor. The two choices below are for two different places a card appears: the share
+              card a player posts, and the collectable Player Cards. Pick the same sponsor for both, or a different one for
+              each. With nothing picked, the card shows your top sponsor that has a logo. Whoever shares a card can still
+              choose any of your sponsors, or none, for that share.
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {cardPicks.surfaces.map(surface => (

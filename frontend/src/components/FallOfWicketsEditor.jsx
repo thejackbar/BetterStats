@@ -7,7 +7,8 @@ import { PbSpinner } from '../lib/presskit'
 // the synced ones for that innings and the partnerships are worked out from them on the server.
 
 const blankRow = () => ({ score: '', pid: '' })
-const blankRetirement = () => ({ score: '', pid: '', after: '' })
+// Wickets down starts at 0 (an opener retiring before the first wicket), so a left-alone box is not refused.
+const blankRetirement = () => ({ score: '', pid: '', after: '0' })
 const str = v => (v == null ? '' : String(v))
 
 function draftFrom(inn) {
@@ -161,7 +162,8 @@ function InningsEditor({ gameId, inn, onChanged }) {
         <p className="font-mono text-[10px] tracking-wide2 text-pb-faintest mb-1">RETIREMENTS</p>
         <p className="text-[11px] text-pb-faint mb-2">
           A batter who retired ends the partnership without a wicket. Enter the score when they retired and how many
-          wickets were down. A retired batter is taken to come back once everyone else has batted.
+          wickets were down (0 if no wicket had fallen). A retired batter is taken to come back once everyone else has
+          batted.
         </p>
         {extras.retirements.length > 0 && (
           <div className="grid grid-cols-[4.25rem_minmax(0,1fr)_4.25rem_1.25rem] gap-x-2 gap-y-2 items-center mb-2">

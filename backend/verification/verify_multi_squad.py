@@ -120,6 +120,7 @@ async def main():
     season_id = uuid.uuid4()
     # Grades linked to the ranked teams (name == team name, for auto-assign).
     G1, G2, G3, GW = (uuid.uuid4() for _ in range(4))
+    TY4, TY5, GY4 = (uuid.uuid4() for _ in range(3))
 
     async with Session() as db:
         db.add(Organisation(id=org_id, name="Verify CC", slug=f"verify-{org_id.hex[:8]}"))
@@ -133,6 +134,10 @@ async def main():
         db.add(Team(id=T3, organisation_id=org_id, name="3rd XI", sequence=3, grade_id=G3))
         db.add(Team(id=TC, organisation_id=org_id, name="Colts", sequence=0))
         db.add(Team(id=TW, organisation_id=org_id, name="Women's", sequence=1, grade_id=GW))
+        # Junior squads, as a club names them: "Year 4" / "Year 5" read as junior by Manage Grades' name rule.
+        db.add(Grade(id=GY4, season_id=season_id, name="Year 4"))
+        db.add(Team(id=TY4, organisation_id=org_id, name="Year 4", sequence=0, grade_id=GY4))
+        db.add(Team(id=TY5, organisation_id=org_id, name="Year 5", sequence=0))
         await db.commit()
 
     def mk_player(name, gender="male"):
@@ -278,6 +283,36 @@ async def main():
         check("woman for women's fixture: eligible", poolW[str(pWm)]["autofill_eligible"] is True)
     except Exception as e:
         check(f"assemble_selection ran (error: {str(e)[:120]})", False)
+
+    # ── 4b. Junior players on the board ──────────────────────────────────────
+    print("\n# junior players (assemble_selection is_junior)")
+    pJ, objJ = mk_player("Junior Year Four")         # Year 4 only (its grade reads junior)
+    pJ2, objJ2 = mk_player("Junior Both Years")      # Year 4 + Year 5 (Year 5 has no grade: its name reads junior)
+    pS, objS = mk_player("Senior Coach")             # 1st XI + Year 5: a senior who helps with juniors
+    async with Session() as db:
+        for obj in (objJ, objJ2, objS):
+            db.add(obj)
+        await db.commit()
+        await sm.add_squad_memberships(db, org_id, pJ, [TY4], user_id)
+        await sm.add_squad_memberships(db, org_id, pJ2, [TY4, TY5], user_id)
+        await sm.add_squad_memberships(db, org_id, pS, [T1, TY5], user_id)
+        # Recent games so the recency wall passes: the juniors in Year 4, the coach in the 1st XI. A junior who has
+        # played for the 1st XI is in that squad on the board, so is not junior (nothing to test with that).
+        for pid, gid, team in ((pJ, GY4, "Year 4"), (pJ2, GY4, "Year 4"), (pS, G1, "1st XI")):
+            g = Game(id=uuid.uuid4(), grade_id=gid, played_at=recent)
+            db.add(g); db.add(GameAppearance(game_id=g.id, player_id=pid, team_name=team))
+        await db.commit()
+    try:
+        poolJ = await pool_for(T1, G1)
+        flag = lambda pid: poolJ.get(str(pid), {}).get("is_junior")
+        check("a player in Year 4 only is junior", flag(pJ), True)
+        check("a player in Year 4 and Year 5 is junior", flag(pJ2), True)
+        check("a senior also in Year 5 is not junior", flag(pS), False)
+        check("a 1st and 2nd XI player is not junior", flag(pF), False)
+        check("juniors are still in the pool (the board hides them, the server does not)",
+              str(pJ) in poolJ and str(pJ2) in poolJ)
+    except Exception as e:
+        check(f"assemble_selection ran for juniors (error: {str(e)[:120]})", False)
 
     # ── 5. Profile update: multi-set + inactive clears all ───────────────────
     print("\n# profile update (shipped route body)")

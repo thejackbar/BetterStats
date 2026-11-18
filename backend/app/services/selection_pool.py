@@ -754,6 +754,17 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
     # gets the gender wall without also setting a fee format. A fixture with no
     # grade of its own reads the grade of its team.
     grade_categories = await org_grade_category_sets(db, club.id)
+    junior_squad: dict[str, bool] = {}   # squad name (lowercase) -> junior, filled as names are met
+
+    def _is_junior(names, cache) -> bool:
+        names = [n for n in names if n]
+        if not names:
+            return False
+        for n in names:
+            key = n.lower()
+            if key not in cache:
+                cache[key] = squad_sides.squad_is_junior(sq_sides, grade_categories, n)
+        return all(cache[n.lower()] for n in names)
     fx_grade_id = fx.grade_id or (fx_team_obj.grade_id if fx_team_obj else None)
     if fx_grade_id:
         fx_grade_obj = await db.get(Grade, fx_grade_id)
@@ -920,6 +931,10 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             # (tier, gender wall) is left as computed so BetterIQ still judges
             # a saved pick of them the way it always has.
             "squads": [] if manual_inactive else _ordered_squads(squads.get(pid, ()), active_teams),
+            # Every squad this player is in is a junior side (Year 4, Under 13): the board hides them unless the
+            # club shows juniors. A senior who also plays or coaches in a junior squad is not junior; a player
+            # in no squad is not junior (nothing says so).
+            "is_junior": _is_junior(squads.get(pid, ()), junior_squad),
             "squad_team_id": None if manual_inactive else sq_tid,
             "availability": avail.get(pid, "NO_RESPONSE"),
             "availability_reason": avail_reason.get(pid),

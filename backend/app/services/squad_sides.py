@@ -278,6 +278,16 @@ class SquadSides:
         return [s.grade_name for s in sq.sides] if sq else []
 
 
+def squad_is_junior(sides: "SquadSides", categories, name: str) -> bool:
+    """Whether a squad name is a junior side, by Manage Grades' answer: the squad's own grades first,
+    else the name itself ("Year 4", "Under 13" read as junior). Fails open: a name that does not read as
+    junior is not junior. The one rule for Availability's squad facet and the selection pool."""
+    from app.services.grade_labels import categories_for_name
+    sq = next((q for q in sides.squads.values() if (q.name or "").strip() == (name or "").strip()), None)
+    probes = (sides.grade_names(sq.id) if sq else []) or [name]
+    return any("junior" in categories_for_name(categories, g) for g in probes)
+
+
 async def load(db: AsyncSession, club_id) -> SquadSides:
     """Read a club's squads, their teams and the grade names fixtures are matched on."""
     team_rows = (await db.execute(

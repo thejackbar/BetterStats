@@ -3994,6 +3994,9 @@ export const api = {
 
   // ─── BetterSelect: Player profile ───────────────────────
   bsGetPlayerProfile: (id) => request(`/players/${id}/profile`),
+  // Mark many players active or inactive at once (Admin, Players). Returns { updated, unchanged, not_found }.
+  bulkPlayerStatus: (playerIds, status) =>
+    request('/players/bulk-status', { method: 'POST', body: JSON.stringify({ player_ids: playerIds, status }) }),
   bsUpdatePlayerProfile: (id, data) =>
     request(`/players/${id}/profile`, { method: 'PATCH', body: JSON.stringify(data) }),
   // A player held only because their name matches a person who asked to be

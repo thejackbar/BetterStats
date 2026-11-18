@@ -179,11 +179,17 @@ function ProfileModal({ playerId, teams, canEdit, index, total, onPrev, onNext, 
 // ---------------------------------------------------------------------------
 // Row
 // ---------------------------------------------------------------------------
-function PlayerRow({ p, squadName, canEdit, fmt, onOpen }) {
+function PlayerRow({ p, squadName, canEdit, fmt, onOpen, selected, onToggle }) {
   const inactive = p.status === 'inactive'
   const meta = metaLine(p)
   return (
     <div className="pl-row" style={{ opacity: inactive ? 0.62 : 1 }} onClick={onOpen}>
+      {onToggle && (
+        // Its own click target: ticking a player must not open their profile.
+        <input type="checkbox" checked={!!selected} aria-label={`Select ${p.display_name_override || p.name}`}
+          className="shrink-0 w-4 h-4 cursor-pointer"
+          onClick={(e) => e.stopPropagation()} onChange={() => onToggle(p.id)} />
+      )}
       <Avatar player={p} size={40} noLink />
       <div className="pl-row-main">
         <div className="pl-row-top">
@@ -231,6 +237,10 @@ export default function AdminPlayers() {
   const [creating, setCreating] = useState(false)
   const [createMsg, setCreateMsg] = useState('')
   const [editingId, setEditingId] = useState(null) // player id or null
+  // Bulk: who is ticked, and a "not played in N years" filter that finds the past players to tick.
+  const [selected, setSelected] = useState(() => new Set())
+  const [notPlayedYears, setNotPlayedYears] = useState(0)
+  const [bulkBusy, setBulkBusy] = useState(false)
 
   const scrollRef = useRef(null)
   const headerRefs = useRef({})
@@ -261,6 +271,11 @@ export default function AdminPlayers() {
       // — the one place those players are easy to find and put back.
       if (scope === 'hidden' && p.is_public !== false) return false
       const q = filter.trim()
+      if (!q && notPlayedYears) {
+        // Played before the cutoff. Somebody who has never played is left out: nothing says they are a past player.
+        const cut = new Date(); cut.setFullYear(cut.getFullYear() - notPlayedYears)
+        if (!p.last_played || p.last_played >= cut.toISOString().slice(0, 10)) return false
+      }
       if (!q) return !activeOnly || p.is_current !== false
       return (
         nameMatchesSearch(p.name, q) ||
@@ -269,7 +284,7 @@ export default function AdminPlayers() {
       )
     })
     return out.sort((a, b) => nameSortKey(nameOf(a)).localeCompare(nameSortKey(nameOf(b))))
-  }, [players, scope, filter, activeOnly])
+  }, [players, scope, filter, activeOnly, notPlayedYears])
 
   // Counts per range over the base set (drives the tab labels).
   const rangeCounts = useMemo(() => {
@@ -315,6 +330,33 @@ export default function AdminPlayers() {
     const next = ((i < 0 ? 0 : i) + d + shownIds.length) % shownIds.length
     setEditingId(shownIds[next])
   }, [shownIds, editingId])
+
+  const toggleSelected = useCallback((id) => setSelected((s) => {
+    const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n
+  }), [])
+  const allShownSelected = shown.length > 0 && shown.every((p) => selected.has(p.id))
+  const selectAllShown = (on) => setSelected((s) => {
+    const n = new Set(s); shown.forEach((p) => (on ? n.add(p.id) : n.delete(p.id))); return n
+  })
+  const bulkStatus = async (status) => {
+    const ids = [...selected]
+    if (!ids.length) return
+    if (status === 'inactive' && !window.confirm(
+      `Mark ${ids.length} player${ids.length === 1 ? '' : 's'} inactive? They leave availability, selection and every squad. `
+      + 'Their stats stay. You can mark them active again later.')) return
+    setBulkBusy(true)
+    try {
+      const r = await api.bulkPlayerStatus(ids, status)
+      setSelected(new Set())
+      loadPlayers()
+      setMsg(`${r.updated} marked ${status}`)
+      setTimeout(() => setMsg(''), 3500)
+    } catch (err) {
+      setMsg(err.message || 'That did not save')
+    } finally {
+      setBulkBusy(false)
+    }
+  }
 
   const handleModalSaved = useCallback((updated) => {
     if (!updated?.id) return
@@ -470,6 +512,14 @@ export default function AdminPlayers() {
             className={`rounded-lg border font-display font-semibold text-[13px] px-3 py-1.5 transition ${activeOnly ? 'border-pb-accent/50 bg-pb-accent/15 text-pb-accent' : 'border-pb-hairline bg-pb-surface2 text-pb-faint hover:text-pb-text'}`}>
             Active only
           </button>
+          <select value={notPlayedYears} onChange={(e) => setNotPlayedYears(Number(e.target.value))} aria-label="Not played in"
+            title="Players whose last game was before then. Players who have never played are left out."
+            className={`rounded-lg border font-display font-semibold text-[13px] px-2.5 py-1.5 bg-pb-surface2 ${notPlayedYears ? 'border-pb-accent/50 text-pb-accent' : 'border-pb-hairline text-pb-faint'}`}>
+            <option value={0} style={{ color: '#000' }}>Any last game</option>
+            {[1, 2, 3, 5, 10].map((y) => (
+              <option key={y} value={y} style={{ color: '#000' }}>Not played in {y} year{y === 1 ? '' : 's'}</option>
+            ))}
+          </select>
           {!searching && (
             <div className="pl-ranges">
               <button
@@ -489,6 +539,33 @@ export default function AdminPlayers() {
           <div className="pl-shown">{searching ? `${shown.length} match${shown.length === 1 ? '' : 'es'}` : `${shown.length} shown`}</div>
         </div>
 
+        {/* Bulk: tick players (or every one shown), then mark them inactive or active in one go. */}
+        {canEdit && shown.length > 0 && (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-2 px-1 text-[13px]" data-bulk-bar>
+            <label className="inline-flex items-center gap-2 text-pb-dim cursor-pointer">
+              <input type="checkbox" checked={allShownSelected} onChange={(e) => selectAllShown(e.target.checked)} />
+              Select all shown ({shown.length})
+            </label>
+            {selected.size > 0 && (
+              <>
+                <span className="font-semibold text-pb-text">{selected.size} selected</span>
+                <button type="button" disabled={bulkBusy} onClick={() => bulkStatus('inactive')}
+                  className="px-3 py-1.5 rounded-lg font-display font-semibold text-[13px] text-pb-bg disabled:opacity-50"
+                  style={{ background: 'var(--pb-accent)' }}>
+                  {bulkBusy ? 'Saving…' : 'Mark inactive'}
+                </button>
+                <button type="button" disabled={bulkBusy} onClick={() => bulkStatus('active')}
+                  className="px-3 py-1.5 rounded-lg font-display font-semibold text-[13px] border border-pb-hairline text-pb-text disabled:opacity-50">
+                  Mark active
+                </button>
+                <button type="button" onClick={() => setSelected(new Set())} className="text-pb-faint hover:text-pb-text underline underline-offset-2">
+                  Clear
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
         {/* List + jump rail */}
         <div className="pl-listwrap" style={{ height: 'calc(100vh - 320px)', minHeight: 360 }}>
           <div ref={scrollRef} className="pl-scroll bs-scroll sb-prominent">
@@ -501,7 +578,8 @@ export default function AdminPlayers() {
                   <span>{L}</span><i>{list.length}</i>
                 </div>
                 {list.map((p) => (
-                  <PlayerRow key={p.id} p={p} squadName={squadNameOf(p)} canEdit={canEdit} fmt={fmt} onOpen={() => setEditingId(p.id)} />
+                  <PlayerRow key={p.id} p={p} squadName={squadNameOf(p)} canEdit={canEdit} fmt={fmt} onOpen={() => setEditingId(p.id)}
+                    selected={selected.has(p.id)} onToggle={canEdit ? toggleSelected : null} />
                 ))}
               </section>
             ))}

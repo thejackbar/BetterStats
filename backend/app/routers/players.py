@@ -1,3 +1,4 @@
+import json
 import logging
 from contextvars import ContextVar
 
@@ -1468,6 +1469,60 @@ async def update_player_profile(
         player_cards.forget(player.organisation_id)
     await db.refresh(player)
     return await _full_profile(db, player)
+
+
+class BulkStatusIn(BaseModel):
+    player_ids: list[str]
+    status: str
+
+
+# A club's whole history is a few thousand players at most; one request takes them all.
+BULK_STATUS_MAX = 5000
+
+
+@router.post("/bulk-status")
+async def bulk_player_status(
+    body: BulkStatusIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_cap(MANAGE_PLAYERS)),
+    club: Organisation = Depends(get_current_club),
+):
+    """Mark many of the club's players active or inactive in one go (Admin, Players: select, then Mark
+    inactive). Same rule as one at a time (`update_player_profile`): going inactive takes a player out of
+    every squad in the same write, and going active puts nobody back in a squad. Ids that are not this
+    club's are ignored and counted. One audit row for the batch. Commits."""
+    if body.status not in ("active", "inactive"):
+        raise HTTPException(status_code=400, detail="status must be 'active' or 'inactive'")
+    if len(body.player_ids) > BULK_STATUS_MAX:
+        raise HTTPException(status_code=422, detail=f"Pick at most {BULK_STATUS_MAX} players at a time.")
+    ids: list[uuid.UUID] = []
+    for raw in body.player_ids:
+        try:
+            ids.append(uuid.UUID(str(raw)))
+        except (ValueError, TypeError):
+            continue
+    players = (await db.execute(
+        select(Player).where(Player.id.in_(ids), Player.organisation_id == club.id))).scalars().all() if ids else []
+    changed_ids: list[str] = []
+    for p in players:
+        if (p.status or "active") == body.status:
+            continue
+        p.status = body.status
+        changed_ids.append(str(p.id))
+        if body.status == "inactive":
+            await clear_all_squad_memberships(db, club.id, p.id)
+    changed = len(changed_ids)
+    if changed:
+        name = getattr(user, "display_name", None) or getattr(user, "username", None)
+        summary = f"{changed} player{'s' if changed != 1 else ''} marked {body.status}"
+        await db.execute(text("""
+            INSERT INTO audit_events (organisation_id, user_id, user_name, via, area, action, summary, detail)
+            VALUES (CAST(:o AS UUID), CAST(:u AS UUID), :un, 'admin', 'players', 'bulk_status', :s, CAST(:d AS JSONB))"""),
+            {"o": str(club.id), "u": str(user.id), "un": name, "s": summary,
+             # Exactly who changed, so the batch can be read back and put right.
+             "d": json.dumps({"status": body.status, "player_ids": changed_ids})})
+    await db.commit()
+    return {"updated": changed, "unchanged": len(players) - changed, "not_found": len(body.player_ids) - len(players)}
 
 
 @router.post("/{player_id}/privacy-release")
