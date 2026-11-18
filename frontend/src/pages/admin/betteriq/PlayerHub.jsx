@@ -655,10 +655,10 @@ function ExternalClubView({ club, initialPlayerName }) {
               })}
           </div>
         </div>
-        <div>
+        <div className="min-w-0">
           {selected
             ? <OppPlayerDetail entry={selected} enriched={enriched.get(sel)} opponentName={club.name} playerId={sel} tag={tags[sel]} onSaveTag={saveTag}
-                dossierBatting={dossier?.batting || []} dossierBowling={dossier?.bowling || []} orgGuid={orgGuid} />
+                dossierBatting={dossier?.batting || []} dossierBowling={dossier?.bowling || []} orgGuid={orgGuid} oppKey={club.opp_key} />
             : <div className="iq-card p-8"><Empty>Pick one of {club.name}'s players for their full profile: career, dismissal patterns and record against you.</Empty></div>}
         </div>
       </div>

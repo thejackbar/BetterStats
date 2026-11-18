@@ -35,7 +35,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SERVICES = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "app" / "services"
 FILES = ["iq.py", "iq_opponent.py", "iq_scout.py", "iq_trends.py", "iq_team.py", "iq_review.py", "iq_lineup.py",
-         "iq_players.py", "iq_selection.py", "iq_phrases.py", "iq_radar.py", "iq_phases.py", "scouting_intel.py", "iq_ask.py"]
+         "iq_players.py", "iq_selection.py", "iq_phrases.py", "iq_radar.py", "iq_phases.py", "scouting_intel.py", "iq_ask.py", "iq_vs_us.py"]
 
 GENDERED = re.compile(
     r"\b(he|him|his|himself|she|her|hers|herself|batsman|batsmen|bloke|gloveman|glovesman|bogey man|danger man|main man|go-to man)\b"

@@ -388,12 +388,12 @@ export default function OppositionPlayer() {
               </div>
             )}
 
-            {/* Profile */}
-            <div>
+            {/* Profile. min-w-0 lets its tab row scroll instead of widening the grid on a phone. */}
+            <div className="min-w-0">
               {selected
                 ? <OppPlayerDetail entry={selected} enriched={enriched.get(sel)} opponentName={club.name} playerId={sel} tag={tags[sel]} onSaveTag={saveTag}
                     dossierBatting={dossier?.batting || []} dossierBowling={dossier?.bowling || []}
-                    orgGuid={orgGuid} />
+                    orgGuid={orgGuid} oppKey={club.opp_key} />
                 : <div className="iq-card p-8"><Empty>Pick one of {club.name}'s players for their full profile — radar, scoring zones, form, season history, dismissal patterns and record vs us.</Empty></div>}
             </div>
           </div>

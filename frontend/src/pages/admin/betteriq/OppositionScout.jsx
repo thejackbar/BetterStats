@@ -703,7 +703,7 @@ function OppPlayerScout({ dossier, tags, onSaveTag, orgGuid }) {
         </Dropdown>
       </div>
       {selected
-        ? <div className="mt-4"><OppPlayerDetail entry={selected} enriched={enriched.get(sel)} opponentName={dossier.opponent?.name} playerId={sel} tag={tags?.[sel]} onSaveTag={onSaveTag} orgGuid={orgGuid} /></div>
+        ? <div className="mt-4"><OppPlayerDetail entry={selected} enriched={enriched.get(sel)} opponentName={dossier.opponent?.name} playerId={sel} tag={tags?.[sel]} onSaveTag={onSaveTag} orgGuid={orgGuid} oppKey={dossier.opponent?.opp_key} /></div>
         : <div className="text-pb-faintest text-[12px] mt-3">Pick a player for their season form, dismissal patterns, season history, scouting tags and full record against us.</div>}
     </Card>
   )

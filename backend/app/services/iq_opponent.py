@@ -937,7 +937,8 @@ async def _our_games_vs(session: AsyncSession, org_id: str, opp_key: str,
         text(
             f"""
             SELECT g.id::text AS id, g.played_at,
-                   COALESCE(gr.grassroots_id, g.grade_id::text) AS grade_id, g.venue
+                   COALESCE(gr.grassroots_id, g.grade_id::text) AS grade_id, g.venue,
+                   gr.name AS grade_name
             FROM v_effective_games g
             LEFT JOIN grades gr ON gr.id = g.grade_id
             WHERE g.organisation_id = CAST(:org AS UUID)

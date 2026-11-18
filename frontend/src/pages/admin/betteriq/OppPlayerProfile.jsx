@@ -30,6 +30,7 @@ import {
 } from './ui'
 import { Radar, WagonWheel, ZONE_LABELS, buildRadar, AreaChart } from './viz'
 import ScoutingCard from './ScoutingCard'
+import { PlayerLink } from './PlayerLink'
 
 const num = (v, dash = '—') => (v === null || v === undefined ? dash : v)
 
@@ -413,11 +414,209 @@ function CareerSnapshot({ career }) {
   )
 }
 
-/* ── Tabs ────────────────────────────────────────────────────────────────── */
+/* ── Against us (record vs OUR club, from the scorecards of our games) ───────
+   Who has dismissed them, who has caught them, which of our batters they have
+   dismissed, game by game. `vsUs` is the polled /iq/opposition/player-vs-us
+   payload. Names of our players link to their Player trends page. */
+const METHOD_LABEL = { 'c&b': 'caught & bowled', lbw: 'lbw', 'caught behind': 'caught behind' }
+const methodLabel = (m) => METHOD_LABEL[m] || m
 
-function OverviewTab({ entry, deep, career, dossierBatting, dossierBowling, isBowler, bat, bowl }) {
+function howOut(b) {
+  if (!b) return '—'
+  if (b.not_out) return 'not out'
+  const parts = [methodLabel(b.dismissal || 'out')]
+  const f = (b.fielders || []).map(x => x.name).join(' / ')
+  if (b.dismissal === 'run out') { if (f) parts.push(`(${f})`) }
+  else {
+    if (f) parts.push(`${b.dismissal === 'stumped' ? 'st' : 'c'} ${f}`)
+    if (b.bowler?.name) parts.push(`b ${b.bowler.name}`)
+  }
+  return parts.join(' ')
+}
+
+function MethodChips({ methods }) {
+  if (!methods?.length) return null
+  return (
+    <span className="flex flex-wrap gap-1 mt-1">
+      {methods.map(m => (
+        <span key={m.type} className="text-[11px] px-2 py-0.5" style={{ background: 'var(--pb-surface2)', borderRadius: 99 }}>
+          {methodLabel(m.type)}{m.count > 1 ? <span className="iq-num text-pb-faint"> ×{m.count}</span> : null}
+        </span>
+      ))}
+    </span>
+  )
+}
+
+/* A ranked list of our players with a count on the right. */
+function UsList({ eyebrow, title, rows, count, sub, empty, tone = 'var(--pb-text)' }) {
+  return (
+    <Card eyebrow={eyebrow} title={title}>
+      {rows?.length ? (
+        <div className="space-y-2.5">
+          {rows.slice(0, 8).map((r, i) => (
+            <div key={r.player_id || `${r.name}-${i}`} className="flex items-start justify-between gap-3" style={i ? { borderTop: '1px solid var(--pb-hairline)', paddingTop: 10 } : undefined}>
+              <div className="min-w-0">
+                <div className="font-medium text-[13.5px] truncate"><PlayerLink id={r.player_id}>{r.name}</PlayerLink></div>
+                {sub ? <div className="text-pb-faint text-[11.5px] iq-num mt-0.5">{sub(r)}</div> : null}
+                <MethodChips methods={r.methods} />
+              </div>
+              <div className="iq-headline iq-num shrink-0" style={{ fontSize: 24, color: tone }}>{count(r)}</div>
+            </div>
+          ))}
+        </div>
+      ) : <div className="text-pb-faint text-[13px]">{empty}</div>}
+    </Card>
+  )
+}
+
+function vsUsGate(vsUs, opponentName) {
+  if (!vsUs || vsUs.status === 'building') {
+    return <Card eyebrow="against us" title="Reading our games"><Building ms={20000}>Reading the scorecards of every game we've played {opponentName || 'them'}. Quick the first time, then cached for a week.</Building></Card>
+  }
+  if (vsUs.status === 'error') return <Card eyebrow="against us" title="Against us"><Note>Couldn't read our games against them just now. Try again shortly.</Note></Card>
+  if (vsUs.status === 'unavailable') return <Card eyebrow="against us" title="Against us"><Note>{vsUs.message || 'Not available for this player.'}</Note></Card>
+  return null
+}
+
+function vsUsEmptyText(v, opponentName) {
+  const us = v?.us?.name || 'us'
+  if (!v?.games_total) return `${us} has no games on record against ${opponentName || 'this club'}${v?.scope?.length ? ` under the current filters (${v.scope.join(', ')})` : ''}.`
+  return `This player hasn't appeared in any of the ${v.games_total} game${v.games_total === 1 ? '' : 's'} ${us} has played against ${opponentName || 'them'}.`
+}
+
+/* Overview headline: the few lines a coach needs before the toss. */
+function AgainstUsHeadline({ vsUs, opponentName, onOpen }) {
+  if (!vsUs || vsUs.status === 'building') return vsUsGate(vsUs, opponentName)
+  if (vsUs.status !== 'ready') return null
+  const us = vsUs.us?.name || 'us'
+  if (!vsUs.games_played) {
+    return <Card eyebrow="against us" title={`Against ${us}`}><div className="text-pb-faint text-[13px]">{vsUsEmptyText(vsUs, opponentName)}</div></Card>
+  }
+  const b = vsUs.batting
+  const w = vsUs.bowling
+  return (
+    <Card accent eyebrow={`${vsUs.games_played} game${vsUs.games_played === 1 ? '' : 's'} against us`} title={`Against ${us}`}
+      right={<Btn variant="soft" sm onClick={onOpen}>Full record</Btn>}>
+      <div className="grid gap-4 grid-cols-2 sm:grid-cols-4">
+        {b && <Stat label="Runs vs us" value={b.runs} />}
+        {b && <Stat label="Avg vs us" value={a2(b.average)} count={false} />}
+        {w && <Stat label="Wkts vs us" value={w.wickets} />}
+        {w && <Stat label="Bowl avg vs us" value={a2(w.average)} count={false} />}
+      </div>
+      {vsUs.lines?.length > 0 && (
+        <ul className="mt-4 space-y-1.5 text-[13.5px] leading-relaxed" style={{ color: 'var(--pb-accent)' }}>
+          {vsUs.lines.map((l, i) => <li key={i}>{l}</li>)}
+        </ul>
+      )}
+    </Card>
+  )
+}
+
+function AgainstUsTab({ vsUs, opponentName }) {
+  const gate = vsUsGate(vsUs, opponentName)
+  if (gate) return gate
+  const us = vsUs.us?.name || 'us'
+  if (!vsUs.games_played) {
+    return (
+      <div className="space-y-5">
+        <Card eyebrow="against us" title={`Against ${us}`}><div className="text-pb-faint text-[13px]">{vsUsEmptyText(vsUs, opponentName)}</div></Card>
+        {vsUs.notes?.length > 0 && <Note>{vsUs.notes.join(' ')}</Note>}
+      </div>
+    )
+  }
+  const b = vsUs.batting
+  const w = vsUs.bowling
+  const fieldCount = r => (r.catches || 0) + (r.stumpings || 0) + (r.run_outs || 0)
+  const fieldSub = r => [r.catches ? `${r.catches} ct` : null, r.stumpings ? `${r.stumpings} st` : null, r.run_outs ? `${r.run_outs} run out` : null].filter(Boolean).join(' · ')
   return (
     <div className="space-y-5">
+      {vsUs.lines?.length > 0 && (
+        <Card accent eyebrow="from the scorecards" title="The read">
+          <ul className="space-y-1.5 text-[14px] leading-relaxed" style={{ color: 'var(--pb-accent)' }}>
+            {vsUs.lines.map((l, i) => <li key={i}>{l}</li>)}
+          </ul>
+        </Card>
+      )}
+
+      <div className="grid gap-5 lg:grid-cols-2 items-start">
+        <Card eyebrow={`their batting against ${us}`} title="With the bat">
+          {b ? (
+            <>
+              <div className="grid grid-cols-3 gap-4">
+                <Stat label="Runs" value={b.runs} />
+                <Stat label="Average" value={a2(b.average)} count={false} />
+                <Stat label="High score" value={num(b.high_score)} count={false} />
+                <Stat label="Innings" value={b.innings} />
+                <Stat label="Strike rate" value={a2(b.strike_rate)} count={false} />
+                <Stat label="50s / 100s" value={`${b.fifties || 0}/${b.hundreds || 0}`} count={false} />
+              </div>
+              {b.dismissals?.length > 0 && <div className="mt-4"><StackedBar data={b.dismissals} /></div>}
+            </>
+          ) : <div className="text-pb-faint text-[13px]">They haven't batted against {us} in the games we hold.</div>}
+        </Card>
+        <Card eyebrow={`their bowling against ${us}`} title="With the ball">
+          {w ? (
+            <div className="grid grid-cols-3 gap-4">
+              <Stat label="Wickets" value={w.wickets} />
+              <Stat label="Average" value={a2(w.average)} count={false} />
+              <Stat label="Economy" value={a2(w.economy)} count={false} />
+              <Stat label="Best" value={num(w.best)} count={false} />
+              <Stat label="Overs" value={fmtOvers(w.overs)} count={false} />
+              <Stat label="Spells" value={w.spells} />
+            </div>
+          ) : <div className="text-pb-faint text-[13px]">They haven't bowled against {us} in the games we hold.</div>}
+        </Card>
+      </div>
+
+      <div className="grid gap-5 lg:grid-cols-2 items-start">
+        {b && (
+          <UsList eyebrow="our bowlers" title="Who has got them out" rows={vsUs.got_them_out}
+            count={r => r.count} tone="var(--pb-brand)"
+            empty={b.outs ? 'The scorecards name no bowler for their dismissals.' : `${us} hasn't dismissed them yet.`} />
+        )}
+        {b && (
+          <UsList eyebrow="our fielders" title="Who has caught or run them out" rows={vsUs.fielded_them}
+            count={fieldCount} sub={fieldSub} tone="var(--pb-brand)"
+            empty="None of their dismissals against us were caught, stumped or run out." />
+        )}
+        {w && (
+          <UsList eyebrow="our batters" title="Who they have got out" rows={vsUs.victims}
+            count={r => r.count} tone="var(--pb-red)"
+            sub={r => (r.runs?.length ? `scores when out: ${r.runs.join(', ')}` : null)}
+            empty={`They haven't taken a wicket against ${us}.`} />
+        )}
+        {vsUs.their_fielding?.length > 0 && (
+          <UsList eyebrow="our batters" title="Caught or run out by them" rows={vsUs.their_fielding}
+            count={fieldCount} sub={fieldSub} tone="var(--pb-red)" empty="" />
+        )}
+      </div>
+
+      <Card eyebrow="most recent first" title="Game by game">
+        <SeasonTable
+          rows={vsUs.games || []}
+          cols={[
+            { key: 'date', label: 'Date', faint: true, fmt: r => <span className="whitespace-nowrap">{r.date || '—'}</span> },
+            { key: 'grade', label: 'Grade', faint: true, fmt: r => r.grade || '—' },
+            { key: 'bat', label: 'Bat', align: 'right', strong: true, fmt: r => (r.bat ? `${r.bat.runs}${r.bat.not_out ? '*' : ''}${r.bat.balls ? ` (${r.bat.balls})` : ''}` : '—') },
+            { key: 'out', label: 'How out', faint: true, fmt: r => (r.bat ? howOut(r.bat) : '—') },
+            { key: 'bowl', label: 'Bowl', align: 'right', strong: true, fmt: r => (r.bowl ? `${r.bowl.wickets}/${r.bowl.runs}` : '—') },
+            { key: 'victims', label: 'Wickets / catches', faint: true, fmt: r => [...(r.bowl?.victims || []), ...((r.field?.victims || []).map(n => `${n} (field)`))].join(', ') || '—' },
+          ]}
+        />
+      </Card>
+
+      {vsUs.notes?.length > 0 && <Note>{vsUs.notes.join(' ')}</Note>}
+    </div>
+  )
+}
+
+/* ── Tabs ────────────────────────────────────────────────────────────────── */
+
+function OverviewTab({ entry, deep, career, dossierBatting, dossierBowling, isBowler, bat, bowl, vsUs, opponentName, onOpenVsUs }) {
+  const hasVsUs = vsUs?.status === 'ready' && vsUs.games_played > 0
+  return (
+    <div className="space-y-5">
+      <AgainstUsHeadline vsUs={vsUs} opponentName={opponentName} onOpen={onOpenVsUs} />
       {deep?.status === 'ready' && deep.summary && (
         <Card accent eyebrow="scouting read · recent seasons" title="How they play">
           <div className="text-[14px] leading-relaxed" style={{ color: 'var(--pb-accent)' }}>{deep.summary}</div>
@@ -427,7 +626,7 @@ function OverviewTab({ entry, deep, career, dossierBatting, dossierBowling, isBo
         <OppRadarCard entry={entry} batPeers={dossierBatting} bowlPeers={dossierBowling} prefer={isBowler ? 'bowl' : 'bat'} />
         <CareerSnapshot career={career} />
       </div>
-      <VsUsCard bat={bat} bowl={bowl} />
+      {!hasVsUs && <VsUsCard bat={bat} bowl={bowl} />}
     </div>
   )
 }
@@ -808,7 +1007,7 @@ function NotesTab({ playerId, name, tag, onSaveTag, enriched }) {
 }
 
 /* ── The full per-player profile (tabbed) ─────────────────────────────────── */
-export function OppPlayerDetail({ entry, enriched, opponentName, playerId, tag, onSaveTag, dossierBatting = [], dossierBowling = [], orgGuid = null }) {
+export function OppPlayerDetail({ entry, enriched, opponentName, playerId, tag, onSaveTag, dossierBatting = [], dossierBowling = [], orgGuid = null, oppKey = null }) {
   const [tab, setTab] = useState('overview')
   useEffect(() => { setTab('overview') }, [playerId])
 
@@ -826,6 +1025,15 @@ export function OppPlayerDetail({ entry, enriched, opponentName, playerId, tag, 
       ? api.iqPlayerDeep({ org: orgGuid, player: playerId, playerName: entry?.name, clubName: opponentName })
       : Promise.resolve({ status: 'unavailable' })),
     [orgGuid, playerId],
+  )
+  // Their record against OUR club (keyed by the opponent's opp_key, which may
+  // be a club name when we have no CA org GUID for them).
+  const vsKey = oppKey || orgGuid
+  const vsUs = usePolledScout(
+    () => ((vsKey && playerId)
+      ? api.iqPlayerVsUs({ oppKey: vsKey, player: playerId, playerName: entry?.name, clubName: opponentName })
+      : Promise.resolve({ status: 'unavailable', message: 'No club to compare against for this player.' })),
+    [vsKey, playerId],
   )
 
   if (!entry) return null
@@ -847,6 +1055,7 @@ export function OppPlayerDetail({ entry, enriched, opponentName, playerId, tag, 
 
   const tabs = [
     { value: 'overview', label: 'Overview' },
+    { value: 'vsus', label: 'Against us' },
     { value: 'batting', label: 'Batting' },
     { value: 'bowling', label: 'Bowling' },
     { value: 'fielding', label: 'Fielding' },
@@ -885,8 +1094,10 @@ export function OppPlayerDetail({ entry, enriched, opponentName, playerId, tag, 
       <div className="pt-1">
         {tab === 'overview' && (
           <OverviewTab entry={entry} deep={deep} career={career}
-            dossierBatting={dossierBatting} dossierBowling={dossierBowling} isBowler={isBowler} bat={bat} bowl={bowl} />
+            dossierBatting={dossierBatting} dossierBowling={dossierBowling} isBowler={isBowler} bat={bat} bowl={bowl}
+            vsUs={vsUs} opponentName={opponentName} onOpenVsUs={() => setTab('vsus')} />
         )}
+        {tab === 'vsus' && <AgainstUsTab vsUs={vsUs} opponentName={opponentName} />}
         {tab === 'batting' && (
           <BattingTab entry={entry} bat={bat} deep={deep} career={career} tag={tag} playerId={playerId} onSaveTag={onSaveTag}
             formColor={formColor} dism={dism} dismTotal={dismTotal} spark={spark} battingHand={battingHand}

@@ -4059,6 +4059,11 @@ export const api = {
   // conversion across the window). First build takes a minute or two; poll.
   iqPlayerDeep: ({ org, player, playerName, clubName } = {}) =>
     request(`/iq/opposition/player-deep?org=${encodeURIComponent(org)}&player=${encodeURIComponent(player)}${playerName ? `&player_name=${encodeURIComponent(playerName)}` : ''}${clubName ? `&club_name=${encodeURIComponent(clubName)}` : ''}`),
+  // One opposition player's record against OUR club, from the scorecards of
+  // every game we've played their club: who got them out, who caught them,
+  // which of our batters they dismissed. Poll while status === 'building'.
+  iqPlayerVsUs: ({ oppKey, player, playerName, clubName } = {}) =>
+    request(`/iq/opposition/player-vs-us?opponent=${encodeURIComponent(oppKey)}&player=${encodeURIComponent(player)}${playerName ? `&player_name=${encodeURIComponent(playerName)}` : ''}${clubName ? `&club_name=${encodeURIComponent(clubName)}` : ''}`),
   // Manual scouting tags for opponent players (handedness, bowler type, notes…).
   iqOpponentTags: () => request('/iq/opposition/player-tags'),
   iqSaveOpponentTag: (playerId, body) =>

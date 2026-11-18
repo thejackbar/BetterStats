@@ -33,6 +33,7 @@ from app.services import iq_selection
 from app.services import iq_team
 from app.services import iq_teammates
 from app.services import iq_trends
+from app.services import iq_vs_us
 
 async def apply_grade_scope(
     categories: str | None = Query(
@@ -358,6 +359,39 @@ async def opposition_player_deep(
     a minute or two; poll while ``building``, cached 7 days after."""
     return await iq_scout.get_or_start_player_deep(
         db, str(club.id), org, player, player_name=player_name, club_name=club_name
+    )
+
+
+@router.get("/opposition/player-vs-us")
+async def opposition_player_vs_us(
+    opponent: str = Query(..., description="the opponent's opp_key (org GUID or club name)"),
+    player: str = Query(..., description="the player's CA participant GUID"),
+    player_name: str | None = Query(None),
+    club_name: str | None = Query(None, description="the opponent club's display name"),
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """One opposition player's record against OUR club, read from the
+    scorecards of every game we have played their club: who has dismissed and
+    caught them, and which of our batters they have dismissed. Poll while
+    ``building``, cached 7 days after."""
+    return await iq_vs_us.get_or_start_player_vs_us(
+        db, str(club.id), club.name, opponent, player, player_name=player_name, opp_name=club_name,
+    )
+
+
+@router.post("/opposition/player-vs-us/refresh")
+async def refresh_opposition_player_vs_us(
+    opponent: str = Query(...),
+    player: str = Query(...),
+    player_name: str | None = Query(None),
+    club_name: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Force a rebuild of one player's record against us."""
+    return await iq_vs_us.get_or_start_player_vs_us(
+        db, str(club.id), club.name, opponent, player, player_name=player_name, opp_name=club_name, force=True,
     )
 
 

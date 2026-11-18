@@ -88,6 +88,8 @@
 42g. Player text never says he, him, his or she: we hold no gender for opposition players and sides are men's, women's, mixed and junior. Write "they" or no pronoun, "batter" not "batsman", no "danger man" or "main man". New pools in `iq_phrases.py` and new synthesis strings are covered by `verify_iq_neutral_pronouns.py`, which fails on a gendered literal; changing synthesis text means bumping `DOSSIER_VERSION` / `DEEP_VERSION`. The cheat sheet shows an all-rounder once (`ourEdgeRows`). Archive: grep `called every player`.
 42a. Ask IQ can ask back. `ask_user` (options 2 to 5, cleaned by `_clarify_from`) ends the turn with `{answer, clarify:{question, options[{label, value}]}}`; the page shows buttons and sends the pick's `value` as the next message. History turns carry `clarified`; the turn after one is not offered `ask_user`, so a thread asks at most once. The prompt limits it to choices that change the answer (grade, season, format, which club), using real options from the tools. Each pick is a normal ask against the 20 an hour limit.
 
+42h. An opposition player's record against us (`services/iq_vs_us.py`, `GET /iq/opposition/player-vs-us`, the Against us tab in `OppPlayerProfile.jsx`) reads the CA scorecard of each of our games against their club (`_our_games_vs`, newest first, capped at `MAX_VS_US_GAMES`), finds the player by GUID or else by a unique full name on their sheet, and resolves names in `dismissalText` through that innings' bowling and fielding rows, then the team sheet. Our CA GUIDs map to our own player ids through `players` scoped to our club. Cached under `pvsus::` keys with the scope signature; bump `VS_US_VERSION` on any shape change. Proof: `verify_iq_player_vs_us.py`, `verify-opp-player-vs-us.mjs`. Archive: grep `Against us tab`.
+
 ## Traps and failure signatures
 
 - Opposition player on our list, or their best batter credited as ours: missing `players.organisation_id` scope (rule 5).
@@ -118,6 +120,7 @@ The archive records no dedicated suites for BetterIQ. Check by hand against a re
 - `backend/verification/verify_iq_our_selected_xi.py` (own database, shipped `our_selected_xi`; the previous `iq_ask.py` is the control).
 - `backend/verification/verify_iq_ask_clarify.py` (no database, scripted model) and `frontend/scripts/verify-ask-iq-clarify.mjs` (real page, stubbed `/iq/ask`) for the clarify buttons.
 - `backend/verification/verify_iq_opponent_lineup.py` (real Postgres, stubbed match record; `SHOW=1` prints the generated text, read it) and `frontend/scripts/verify-opp-lineup.mjs` for the named XI.
+- `backend/verification/verify_iq_player_vs_us.py` (own database) and `frontend/scripts/verify-opp-player-vs-us.mjs` for the Against us tab.
 - Frontend: first visit defaults season to All; deep links; `CheatSheet` print layout.
 
 ## Operator commands and scripts
