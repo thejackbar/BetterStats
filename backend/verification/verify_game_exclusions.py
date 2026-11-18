@@ -77,6 +77,7 @@ P = {k: uuid.uuid4() for k in ("SPLIT", "ROY", "FILLER", "BATTED", "SWAP")}
 NAMES = {"SPLIT": "Split, Sam", "ROY": "Marsh, Roy", "FILLER": "Filler, Fred", "BATTED": "Batted, Ben",
          "SWAP": "Swap, Sid"}
 GAMES: dict[str, uuid.UUID] = {}
+SQUAD: list[uuid.UUID] = []
 _day = 0
 
 
@@ -161,6 +162,36 @@ async def seed() -> None:
         # Typed against the grade, as the Adjustments form offers. (A grade-less -1 does not lower the header
         # of a player CA has per-grade rows for: the grid ignores it and the header is raised to the grid.
         # That gap is older than this suite and is reported separately.)
+        # Big sheets: eleven squad players who batted, plus EXTRA (named only) on GF, the club's grand final.
+        for i in range(11):
+            SQUAD.append(uuid.uuid4())
+            await ex("INSERT INTO players (id, organisation_id, name, grassroots_id, status) VALUES (:i, :o, :n, :g, 'active')",
+                     i=SQUAD[-1], o=ORG, n=f"Squad, Player {i + 1:02d}", g=str(SQUAD[-1]))
+        for k in ("EXTRA", "EXTRA2"):
+            P[k] = uuid.uuid4()
+            await ex("INSERT INTO players (id, organisation_id, name, grassroots_id, status) VALUES (:i, :o, :n, :g, 'active')",
+                     i=P[k], o=ORG, n=f"{k.title()}, Ed", g=str(P[k]))
+
+        async def sheet(extra_reserve=False) -> uuid.UUID:
+            gid = await game(G["C"], d1415 + timedelta(days=150))
+            await ex("DELETE FROM game_appearances WHERE game_id = :g", g=gid)   # FILLER is not on these sheets
+            await ex("DELETE FROM batting_innings WHERE game_id = :g", g=gid)
+            for sp in SQUAD:
+                await ex("INSERT INTO game_appearances (game_id, player_id, team_name) VALUES (:g, :p, 'Piara Waters')", g=gid, p=sp)
+                await ex("INSERT INTO batting_innings (game_id, player_id, innings_number, runs, balls, fours, sixes, not_out, "
+                         " dismissal_type, did_not_bat) VALUES (:g, :p, 1, 10, 12, 1, 0, false, 'caught', false)", g=gid, p=sp)
+            await ex("INSERT INTO game_appearances (game_id, player_id, team_name, is_reserve, sheet_slot) "
+                     "VALUES (:g, :p, 'Piara Waters', :r, :sl)", g=gid, p=P["EXTRA"],
+                     r=True if extra_reserve else None, sl=12 if extra_reserve else None)
+            return gid
+
+        GAMES["gf"] = await sheet()
+        GAMES["sheet_reserve"] = await sheet(extra_reserve=True)
+        GAMES["sheet_checked"] = await sheet()
+        await ex("INSERT INTO player_achievements (org_id, player_id, player_name, season, category, subcategory, "
+                 " achievement, linked_game_id, auto_created) VALUES (:o, :p, 'Squad, Player 01', '2014/15', 'Premiership', "
+                 " 'One Day C', 'Premiership', :g, TRUE)", o=ORG, p=SQUAD[0], g=GAMES["gf"])
+
         await ex("INSERT INTO manual_season_adjustments (organisation_id, player_id, season_id, grade_id, games_played) "
                  "VALUES (:o, :p, :s, :g, -1)", o=ORG, p=P["SWAP"], s=S1415, g=G["C"])
         await s.commit()
@@ -214,6 +245,14 @@ async def main() -> None:
         for stmt in superseded_ddl.STATEMENTS:     # the lifespan re-applies these: production reads THESE views
             await conn.execute(text(stmt))
         for stmt in GX_DDL:
+            await conn.execute(text(stmt))
+        from app.services.premierships_ddl import STATEMENTS as PREM_DDL
+        await conn.execute(text("""CREATE TABLE IF NOT EXISTS player_achievements (
+            id SERIAL PRIMARY KEY, org_id UUID NOT NULL, player_id UUID, player_name TEXT NOT NULL, season TEXT,
+            category TEXT NOT NULL, subcategory TEXT, achievement TEXT NOT NULL, detail TEXT,
+            created_at TIMESTAMPTZ DEFAULT NOW())"""))
+        await conn.execute(text("ALTER TABLE player_achievements ADD COLUMN IF NOT EXISTS season_end TEXT"))
+        for stmt in PREM_DDL:
             await conn.execute(text(stmt))
     await seed()
 
@@ -356,6 +395,75 @@ async def main() -> None:
     await as_admin(gx_routes.dismiss, data=gx_routes.DismissIn(game_id=str(GAMES["swap"]), player_id=str(P["SWAP"])))
     sug = await as_admin(gx_routes.suggestions)
     check("after Keep as played it is not offered again", all(i["game_id"] != str(GAMES["swap"]) for i in sug["items"]))
+
+    big = getattr(gx_routes, "big_sheets", None)
+    print("\n-- 9. TEAM SHEETS WITH MORE THAN 11 STILL COUNTED --")
+    if big is None:
+        check("the team sheet list exists", False, "absent on this commit")
+    else:
+        items = {i["game_id"]: i for i in (await as_admin(big))["items"]}
+        check("a sheet of 11 who batted plus a named extra is listed (12 counted, 1 extra)",
+              items.get(str(GAMES["gf"]), {}).get("counted") == 12 and items[str(GAMES["gf"])]["extras"] == 1,
+              items.get(str(GAMES["gf"])))
+        check("a sheet whose extra the app already read as 12th man is not (11 counted)",
+              str(GAMES["sheet_reserve"]) not in items)
+        check("a sheet with 11 or fewer named is not listed (Roy's East Fremantle side)",
+              str(GAMES["east_freo"]) not in items)
+        await as_admin(gx_routes.check_sheet, data=gx_routes.SheetCheckIn(game_id=str(GAMES["sheet_checked"]),
+                                                                          team_name="Piara Waters"))
+        items = {i["game_id"]: i for i in (await as_admin(big))["items"]}
+        check("CHECKED takes a sheet off the list", str(GAMES["sheet_checked"]) not in items
+              and str(GAMES["gf"]) in items)
+        try:
+            await as_admin(gx_routes.check_sheet, data=gx_routes.SheetCheckIn(game_id=str(GAMES["gf"]), team_name="Nobody"))
+            check("a side the club does not have in the match is refused", False, "accepted")
+        except HTTPException as e:
+            check("a side the club does not have in the match is refused", e.status_code == 404, e.detail)
+
+    print("\n-- 10. 12TH MAN IN THE PREMIERS SQUAD TAKES THE MATCH OFF GAMES PLAYED --")
+    from app.routers import honours
+    if "user_id" not in honours.premierships.edit_squad.__code__.co_varnames:
+        check("the Premiers squad is linked to games played", False, "absent on this commit")
+    else:
+        async def squad(action, pid, role=None, on=True):
+            async with Session() as s:
+                return await honours.edit_premiership_squad(
+                    org_id=ORG, body=honours.SquadEdit(game_id=GAMES["gf"], action=action, player_id=pid, role=role, on=on),
+                    db=s, user=await s.get(User, USER), club=await s.get(Organisation, ORG))
+
+        async def gf_status(pid):
+            t = await as_admin(gx_routes.team_list, game_id=str(GAMES["gf"]))
+            return next((r for r in t["players"] if r["player_id"] == str(pid)), {})
+
+        before = await header("EXTRA")
+        out = await squad("add", P["EXTRA"], "12th Man")
+        st = await gf_status(P["EXTRA"])
+        check("adding the extra as 12th Man marks the match as not played, reason 12th man",
+              st.get("status") == "marked" and st.get("reason") == "twelfth_man" and st.get("source") == "premiers", st)
+        check("and says so in the reply", (out.get("games_played") or {}).get("changed") is True, out)
+        check("their games played drop by one", await header("EXTRA") == before - 1, (before, await header("EXTRA")))
+        items = {i["game_id"] for i in (await as_admin(big))["items"]}
+        check("so the grand final sheet leaves the big sheets list (11 counted)", str(GAMES["gf"]) not in items)
+        await squad("role", P["EXTRA"], "13th Man", True)
+        await squad("role", P["EXTRA"], "12th Man", False)
+        st = await gf_status(P["EXTRA"])
+        check("swapping 12th Man for 13th Man keeps the match off", st.get("status") == "marked", st)
+        await squad("remove", P["EXTRA"])
+        st = await gf_status(P["EXTRA"])
+        check("taking them off the card counts the match again", st.get("status") == "named"
+              and await header("EXTRA") == before, (st, await header("EXTRA"), before))
+        out = await squad("role", SQUAD[1], "12th Man", True)
+        check("12th Man on a player who batted leaves the match counted, and says why",
+              (out.get("games_played") or {}).get("changed") is False
+              and "still counts" in (out.get("games_played") or {}).get("message", ""), out)
+        # A mark the club made by hand is not touched by the Premiers role coming off.
+        await as_admin(gx_routes.mark_not_played, game_id=str(GAMES["gf"]),
+                       data=gx_routes.NotPlayedIn(player_id=str(P["EXTRA"]), reason="other"))
+        await squad("add", P["EXTRA"], "13th Man")
+        await squad("remove", P["EXTRA"])
+        st = await gf_status(P["EXTRA"])
+        check("a mark made on the match page survives the Premiers role coming off",
+              st.get("status") == "marked" and st.get("reason") == "other", st)
 
     await finish()
 

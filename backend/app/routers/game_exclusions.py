@@ -12,6 +12,8 @@ logged on the Manual entries audit trail, where each change can be undone.
     GET    /club-admin/game-exclusions/players/{player}/games every synced game the player was named in
     GET    /club-admin/game-exclusions/suggestions            the "Games to check" list
     POST   /club-admin/game-exclusions/suggestions/dismiss    keep a suggestion as played
+    GET    /club-admin/game-exclusions/sheets                 sides with more than 11 still counted
+    POST   /club-admin/game-exclusions/sheets/check           mark one of those sheets as looked over
 """
 from __future__ import annotations
 
@@ -40,6 +42,11 @@ class NotPlayedIn(BaseModel):
     note: Optional[str] = Field(default=None, max_length=300)
     # A season adjustment of -1 the club typed for this game before it could pick the game itself.
     swap_adjustment_id: Optional[int] = None
+
+
+class SheetCheckIn(BaseModel):
+    game_id: str
+    team_name: str = ""
 
 
 class DismissIn(BaseModel):
@@ -183,3 +190,28 @@ async def dismiss(
     await gx.dismiss(db, club.id, current_user.id, gid, pid)
     await db.commit()
     return {"dismissed": True}
+
+
+@router.get("/club-admin/game-exclusions/sheets")
+async def big_sheets(
+    current_user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    return await gx.big_sheets(db, club.id)
+
+
+@router.post("/club-admin/game-exclusions/sheets/check")
+async def check_sheet(
+    data: SheetCheckIn,
+    current_user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    gid = _uuid(data.game_id, "match")
+    team = [r for r in await gx.team_list(db, club.id, gid) if r["team_name"] == (data.team_name or "")]
+    if not team:
+        raise HTTPException(status_code=404, detail="That side is not one of this club's in that match.")
+    await gx.check_sheet(db, club.id, current_user.id, gid, data.team_name or "")
+    await db.commit()
+    return {"checked": True}

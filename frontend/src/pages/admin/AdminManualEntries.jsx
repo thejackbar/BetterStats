@@ -6,7 +6,7 @@ import Dropdown from '../../components/Dropdown'
 import { formatSeason } from '../../lib/cricketFormat'
 import { GRAND_FINAL_HELP, grandFinalMessage, withFinalTick, withGrandFinalTick } from '../../lib/grandFinal'
 import ManualGamesImportWizard from '../../components/admin/ManualGamesImportWizard'
-import { GamesToCheck, PlayerGamePicker } from '../../components/admin/GameExclusions'
+import { BigSheets, GamesToCheck, PlayerGamePicker } from '../../components/admin/GameExclusions'
 
 const INPUT_CLS = 'w-full bg-pb-surface2 border pb-hairline text-pb-text text-sm rounded px-3 py-2 focus:outline-none focus:border-pb-accent'
 const SMALL_INPUT = 'w-full bg-pb-surface2 border pb-hairline text-pb-text text-sm rounded px-2 py-1 focus:outline-none focus:border-pb-accent'
@@ -2121,6 +2121,7 @@ export default function AdminManualEntries() {
           <SeasonAdjustmentsTab key={tick + ':season'} players={players} seasons={seasons} grades={grades} refreshAll={refreshAll} onPending={onPending} onSeasonCreated={onSeasonCreated} onGradeCreated={onGradeCreated} />
         )}
         {activeTab === 'check' && <GamesToCheck key={tick + ':check'} />}
+        {activeTab === 'check' && <BigSheets key={tick + ':sheets'} />}
         {activeTab === 'game' && (
           <ManualGamesTab key={tick + ':game'} players={players} seasons={seasons} grades={grades} knownValues={knownValues} refreshAll={refreshAll} onPending={onPending} onNotice={setNotice} onSeasonCreated={onSeasonCreated} onGradeCreated={onGradeCreated} />
         )}

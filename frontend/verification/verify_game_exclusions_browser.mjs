@@ -57,7 +57,7 @@ async function open(url, { admin = true, width = 1280, postStatus = 200, waitFor
   const ctx = await browser.newContext({ viewport: { width, height: 1400 } })
   const page = await ctx.newPage()
   page.setDefaultTimeout(5000)
-  const seen = { posts: [], deletes: [], dismiss: [], teamList: 0, notPlayed: 0, playerGames: [], errors: [] }
+  const seen = { posts: [], deletes: [], dismiss: [], checked: [], teamList: 0, notPlayed: 0, playerGames: [], errors: [] }
   let marked = false
   page.on('pageerror', e => seen.errors.push(String(e)))
   await page.route(/\/api\//, async route => {
@@ -75,7 +75,12 @@ async function open(url, { admin = true, width = 1280, postStatus = 200, waitFor
       seen.notPlayed++
       return json({ players: marked ? [{ player_id: ROY, player_name: 'Marsh, Roy', reason: 'thirteenth_man', reason_label: '13th man' }] : [] })
     }
-    if (p === `/games/${GID}/team-list`) { seen.teamList++; return json({ game_id: GID, reasons: REASONS, players: [marked ? royMarked : royNamed, ben] }) }
+    if (p === `/games/${GID}/team-list`) {
+      seen.teamList++
+      return json({ game_id: GID, reasons: REASONS, players: [
+        { ...(marked ? royMarked : royNamed), team_name: 'Piara Waters' }, { ...ben, team_name: 'Piara Waters' },
+        { ...ben, player_id: 'other-side', player_name: 'Other, Olive', team_name: 'Piara Waters Thirds' }] })
+    }
     if (p === `/games/${GID}/not-played/${ROY}/adjustments`) {
       return json({ adjustments: [{ id: 7, matches: -1, season_name: 'Summer 2014/15', grade_name: '5th Grade' }] })
     }
@@ -102,6 +107,14 @@ async function open(url, { admin = true, width = 1280, postStatus = 200, waitFor
     if (p === '/club-admin/game-exclusions/suggestions') {
       return json({ truncated: false, reasons: REASONS, items: seen.dismiss.length ? [] : [
         { ...royNamed, our_season_total: 19, ca_season_total: 18 }] })
+    }
+    if (p === '/club-admin/game-exclusions/sheets') {
+      return json({ truncated: false, items: seen.checked.length ? [] : [{
+        game_id: GID, team_name: 'Piara Waters', named: 13, counted: 13, extras: 2, played_at: '2015-03-21',
+        home_team: 'Piara Waters', away_team: 'Willetton', grade_name: 'One Day C', season_name: 'Summer 2014/15' }] })
+    }
+    if (p === '/club-admin/game-exclusions/sheets/check') {
+      seen.checked.push(JSON.parse(req.postData() || '{}')); return json({ checked: true })
     }
     if (p === '/club-admin/game-exclusions/suggestions/dismiss') {
       seen.dismiss.push(JSON.parse(req.postData() || '{}')); return json({ dismissed: true })
@@ -144,7 +157,7 @@ const text = async (page, sel) => (await page.locator(sel).first().textContent()
 {
   const { ctx, page, seen } = await open(`/games/${GID}`, { waitFor: '[data-testid="team-list-panel"]' })
   const rows = page.getByTestId('game-row')
-  ck('admin: the team list shows both named players', await rows.count() === 2, String(await rows.count()))
+  ck('admin: the team list shows every named club player', await rows.count() === 3, String(await rows.count()))
   const royRow = rows.filter({ hasText: 'Marsh, Roy' })
   const benRow = rows.filter({ hasText: 'Batted, Ben' })
   ck("admin: Roy (nothing recorded) is offered DIDN'T PLAY", await royRow.getByTestId('mark-not-played').count() === 1)
@@ -233,6 +246,37 @@ const text = async (page, sel) => (await page.locator(sel).first().textContent()
   await page.setViewportSize({ width: 390, height: 1400 })
   await page.waitForTimeout(300)
   ck('390px Games to check: no sideways overflow', await overflow(page) <= 0, String(await overflow(page)))
+  await ctx.close()
+}
+
+// ── Team sheets with more than 11 names ──────────────────────────────────────
+{
+  const { ctx, page, seen } = await open('/admin/manual-entries#check', { waitFor: '[data-testid="big-sheets"]' })
+  const sheet = page.getByTestId('big-sheet')
+  ck('a sheet with 13 counted is listed with its 2 extras',
+     await sheet.count() === 1 && /13 players counted as playing, so at least 2 were extras/.test(await sheet.textContent().catch(() => '')),
+     await sheet.textContent().catch(() => ''))
+  await sheet.getByTestId('review-sheet').click().catch(() => {})
+  await page.waitForSelector('[data-testid="big-sheet-players"] [data-testid="game-row"]').catch(() => {})
+  const rows = page.getByTestId('big-sheet-players').getByTestId('game-row')
+  ck("REVIEW shows that side's names only (not the club's other side in the match)",
+     await rows.count() === 2 && !/Other, Olive/.test(await page.getByTestId('big-sheet-players').textContent().catch(() => '')),
+     String(await rows.count()))
+  await rows.filter({ hasText: 'Marsh, Roy' }).getByTestId('mark-not-played').click().catch(() => {})
+  await page.getByTestId('confirm-not-played').click().catch(() => {})
+  await page.waitForTimeout(600)
+  ck('marking an extra from the sheet sends that player', seen.posts.length === 1 && seen.posts[0].player_id === ROY,
+     JSON.stringify(seen.posts))
+  await page.screenshot({ path: `${SHOTS}/game_exclusions_sheets.png`, fullPage: true }).catch(() => {})
+  await sheet.getByTestId('sheet-checked').click().catch(() => {})
+  await page.waitForTimeout(600)
+  ck('CHECKED posts the game and the side', JSON.stringify(seen.checked) === JSON.stringify([{ game_id: GID, team_name: 'Piara Waters' }]),
+     JSON.stringify(seen.checked))
+  ck('and the list then says there are none', await page.getByTestId('big-sheets-empty').count() === 1)
+  await page.setViewportSize({ width: 390, height: 1400 })
+  await page.waitForTimeout(300)
+  ck('390px team sheets: no sideways overflow', await overflow(page) <= 0, String(await overflow(page)))
+  ck('team sheets: no script errors', seen.errors.length === 0, seen.errors.join(' | '))
   await ctx.close()
 }
 

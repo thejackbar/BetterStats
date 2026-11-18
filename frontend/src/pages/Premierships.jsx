@@ -96,6 +96,8 @@ function SquadEditor({ card, orgId, fmt, onChanged }) {
   const [error, setError] = useState(null)
   const [pick, setPick] = useState('')
   const [pickRole, setPickRole] = useState('')
+  // What a 12th Man or 13th Man change did to the player's games played, from the server.
+  const [gamesNote, setGamesNote] = useState(null)
 
   useEffect(() => {
     let live = true
@@ -106,7 +108,8 @@ function SquadEditor({ card, orgId, fmt, onChanged }) {
   const send = async (body) => {
     setBusy(true); setError(null)
     try {
-      await api.editPremiershipSquad(orgId, { game_id: card.game_id, ...body })
+      const out = await api.editPremiershipSquad(orgId, { game_id: card.game_id, ...body })
+      setGamesNote(out?.games_played?.message || null)
       await onChanged()
     } catch (e) {
       setError(e.message || 'That change could not be saved')
@@ -168,6 +171,7 @@ function SquadEditor({ card, orgId, fmt, onChanged }) {
           Add
         </button>
       </div>
+      {gamesNote && <p className="mt-2 text-[12px] text-pb-faint" role="status" data-testid="squad-games-note">{gamesNote}</p>}
       {error && <p className="mt-2 text-[12px] text-pb-red" role="alert">{error}</p>}
     </div>
   )

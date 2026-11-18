@@ -166,15 +166,20 @@ async def edit_premiership_squad(
     org_id: uuid.UUID,
     body: SquadEdit,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_cap(MANAGE_AWARDS)),
+    user: User = Depends(require_cap(MANAGE_AWARDS)),
     club: Organisation = Depends(get_current_club),
 ):
     """Mark Player of the Match / 12th Man / 13th Man on a premiership card, add a player the sheet missed,
-    or take one off. Only for a card linked to a scorecard (a grand final the club won)."""
+    or take one off. Only for a card linked to a scorecard (a grand final the club won). 12th Man and
+    13th Man also take the match off the player's games played (`games_played` in the reply says so)."""
     _same_club(club, org_id)
     try:
-        return await premierships.edit_squad(
+        out = await premierships.edit_squad(
             db, club, game_id=body.game_id, action=body.action, player_id=body.player_id,
-            role=body.role, on=body.on)
+            role=body.role, on=body.on, user_id=user.id)
     except premierships.SquadEditError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    if (out.get("games_played") or {}).get("changed"):
+        from app.routers.manual_entries import _recompute_milestones
+        await _recompute_milestones(db, club.id, [body.player_id])
+    return out

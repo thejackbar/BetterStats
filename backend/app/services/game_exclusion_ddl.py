@@ -18,6 +18,15 @@ drift. The lifespan re-runs the list on every boot, so every statement is idempo
     puts the app's own judgement back. ``swapped_adjustment_id`` is the season adjustment the club
     moved onto this game (a -1 typed before this existed), so undoing the mark restores it.
 
+    ``source`` is NULL for a mark made on the match page or the Adjustments screen, and ``premiers``
+    for one written by giving the player 12th Man or 13th Man in the Premiers squad editor, so taking
+    that role off takes the mark off and leaves a mark the club made by hand alone.
+
+``game_sheet_checks``
+    A side's team sheet with more than 11 names that the club has looked over (every such sheet named
+    at least one extra, often a sub fielder in older seasons and finals). Kept so the list does not
+    offer it again. ``team_name`` separates the two sides of a fixture between two of the club's teams.
+
 ``game_check_dismissals``
     A suggestion on the "Games to check" list the club looked at and kept as played. Kept so the
     list does not offer it again.
@@ -33,6 +42,7 @@ STATEMENTS: list[str] = [
         note TEXT,
         prior_is_reserve BOOLEAN,
         swapped_adjustment_id INTEGER,
+        source TEXT,
         entered_by UUID REFERENCES users(id) ON DELETE SET NULL,
         entered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         CONSTRAINT uq_game_exclusions UNIQUE (organisation_id, game_id, player_id)
@@ -48,6 +58,15 @@ STATEMENTS: list[str] = [
         dismissed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         CONSTRAINT uq_game_check_dismissals UNIQUE (organisation_id, game_id, player_id)
     )""",
+    """CREATE TABLE IF NOT EXISTS game_sheet_checks (
+        id SERIAL PRIMARY KEY,
+        organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+        game_id UUID NOT NULL,
+        team_name TEXT NOT NULL DEFAULT '',
+        checked_by UUID REFERENCES users(id) ON DELETE SET NULL,
+        checked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT uq_game_sheet_checks UNIQUE (organisation_id, game_id, team_name)
+    )""",
     # Self-heal on every boot: a club's mark is written onto the appearance again wherever a sync,
     # a rebuild or a backfill script has put the flag back. Touches only rows that need it.
     """UPDATE game_appearances ga SET is_reserve = TRUE
@@ -57,6 +76,7 @@ STATEMENTS: list[str] = [
 ]
 
 DOWNGRADE: list[str] = [
+    "DROP TABLE IF EXISTS game_sheet_checks",
     "DROP TABLE IF EXISTS game_check_dismissals",
     "DROP TABLE IF EXISTS game_exclusions",
 ]

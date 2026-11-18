@@ -361,6 +361,111 @@ export function GamesToCheck() {
   )
 }
 
+// One side's sheet with more than 11 still counted: the club marks the extras or calls it checked.
+function BigSheet({ sheet, onChanged }) {
+  const [open, setOpen] = useState(false)
+  const [state, setState] = useState({ loading: false, players: [], reasons: [], error: null })
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+
+  const load = () => {
+    setState(s => ({ ...s, loading: true, error: null }))
+    return api.getTeamList(sheet.game_id)
+      .then(d => setState({ loading: false, reasons: d.reasons || [], error: null,
+                            players: (d.players || []).filter(p => (p.team_name || '') === (sheet.team_name || '')) }))
+      .catch(e => setState({ loading: false, players: [], reasons: [], error: e.message }))
+  }
+
+  const toggle = () => { if (!open) load(); setOpen(o => !o) }
+
+  const checked = async () => {
+    setBusy(true); setError(null)
+    try {
+      await api.checkSheet({ game_id: sheet.game_id, team_name: sheet.team_name || '' })
+      onChanged(`Checked: ${matchLabel(sheet)}, ${dateLabel(sheet.played_at)}`)
+    } catch (e) { setError(e.message); setBusy(false) }
+  }
+
+  const counted = state.players.filter(p => p.counts).length
+  return (
+    <li className="py-2.5 border-b pb-hairline last:border-b-0" data-testid="big-sheet">
+      <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1.5">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm text-pb-text">
+            <Link to={`/games/${sheet.game_id}`} className="hover:text-pb-accent">{matchLabel(sheet)}</Link>
+            <span className="text-pb-faint text-xs"> {dateLabel(sheet.played_at)}{sheet.grade_name ? `, ${sheet.grade_name}` : ''}</span>
+          </p>
+          <p className="text-xs text-pb-faint">
+            {sheet.team_name ? `${sheet.team_name}: ` : ''}{sheet.counted} players counted as playing, so at least {sheet.extras} {sheet.extras === 1 ? 'was an extra' : 'were extras'}.
+          </p>
+          {error && <p className="text-pb-red text-xs mt-1" role="alert">{error}</p>}
+        </div>
+        <div className="flex gap-2 shrink-0">
+          <button type="button" className={BTN} onClick={toggle} aria-expanded={open} data-testid="review-sheet">
+            {open ? 'HIDE' : 'REVIEW'}
+          </button>
+          <button type="button" className={BTN} onClick={checked} disabled={busy} data-testid="sheet-checked">
+            CHECKED
+          </button>
+        </div>
+      </div>
+      {open && (
+        <div className="mt-2 pl-3 border-l pb-hairline" data-testid="big-sheet-players">
+          {state.loading && <PbSpinner />}
+          {state.error && <p className="text-pb-red text-xs">{state.error}</p>}
+          {!state.loading && !state.error && (
+            <p className="text-xs text-pb-faint mb-1">
+              {counted} of {state.players.length} named are counted. Mark anyone who was 12th man, 13th man or a sub fielder.
+            </p>
+          )}
+          <ul>
+            {state.players.map(r => (
+              <GameRow key={r.player_id} row={r} reasons={state.reasons} onChanged={() => load()} />
+            ))}
+          </ul>
+        </div>
+      )}
+    </li>
+  )
+}
+
+// Sides with more than 11 names still counted: every one named at least one extra.
+export function BigSheets() {
+  const [state, setState] = useState({ loading: true, items: [], truncated: false, error: null })
+  const [notice, setNotice] = useState(null)
+
+  const load = () => api.getBigSheets()
+    .then(d => setState({ loading: false, items: d.items || [], truncated: !!d.truncated, error: null }))
+    .catch(e => setState({ loading: false, items: [], truncated: false, error: e.message }))
+
+  useEffect(() => { load() }, [])
+
+  return (
+    <div className="pb-card p-5 mt-4" data-testid="big-sheets">
+      <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1">TEAM SHEETS WITH MORE THAN 11 NAMES</p>
+      <p className="text-xs text-pb-faint mb-3">
+        A side is eleven, so each of these sheets named at least one extra, such as a sub fielder who came
+        along or the 12th and 13th men in a final. Cricket Australia often counts them as games played, so the
+        list above can miss them. Review the sheet and mark the extras, or mark it checked if everyone named
+        did play. A sheet leaves the list once no more than 11 are counted.
+      </p>
+      {state.loading && <PbSpinner />}
+      {state.error && <p className="text-pb-red text-sm">{state.error}</p>}
+      {notice && <p className="text-xs text-pb-text mb-2" role="status">{notice}</p>}
+      {!state.loading && !state.error && !state.items.length && (
+        <p className="text-xs text-pb-faint" data-testid="big-sheets-empty">No team sheets with more than 11 players counted.</p>
+      )}
+      <ul>
+        {state.items.map(sh => (
+          <BigSheet key={`${sh.game_id}:${sh.team_name}`} sheet={sh}
+            onChanged={msg => { setNotice(msg); load() }} />
+        ))}
+      </ul>
+      {state.truncated && <p className="text-xs text-pb-faint mt-2">Showing the newest 200. Work through these and older ones will appear.</p>}
+    </div>
+  )
+}
+
 // Public match page: who the club marked as named but not playing.
 export function NotPlayedNote({ gameId, fmtName = n => n, refreshKey }) {
   const [players, setPlayers] = useState([])

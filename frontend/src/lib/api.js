@@ -521,6 +521,9 @@ export const api = {
     request(`/games/${gameId}/not-played/${playerId}`, { method: 'DELETE' }),
   getPlayerGamesForExclusion: (playerId) => request(`/club-admin/game-exclusions/players/${playerId}/games`),
   getGamesToCheck: () => request('/club-admin/game-exclusions/suggestions'),
+  getBigSheets: () => request('/club-admin/game-exclusions/sheets'),
+  checkSheet: (data) =>
+    request('/club-admin/game-exclusions/sheets/check', { method: 'POST', body: JSON.stringify(data) }),
   dismissGameToCheck: (data) =>
     request('/club-admin/game-exclusions/suggestions/dismiss', { method: 'POST', body: JSON.stringify(data) }),
   // A club types the fall of wickets Cricket Australia is missing for its own innings of a synced match.

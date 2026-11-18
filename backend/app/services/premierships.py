@@ -803,7 +803,7 @@ class SquadEditError(ValueError):
 
 
 async def edit_squad(db: AsyncSession, club: Organisation, *, game_id, action: str, player_id,
-                     role: Optional[str] = None, on: bool = True) -> dict:
+                     role: Optional[str] = None, on: bool = True, user_id=None) -> dict:
     """Change who is on one premiership card (a grand final the club won) and what each person did.
 
     Every change is a row in ``player_achievements`` linked to the game, so the card, the profile, the
@@ -894,5 +894,25 @@ async def edit_squad(db: AsyncSession, club: Organisation, *, game_id, action: s
               AND player_id = CAST(:p AS UUID)"""), {"org": org, "g": gid, "cat": CATEGORY, "p": pid})
     else:
         raise SquadEditError("Unknown change.")
+
+    # 12th Man and 13th Man did not play: the match comes off their games played as well
+    # (services/game_exclusions.py, source "premiers"). Read from what the card holds after the change,
+    # so taking 12th Man off a player who is still 13th Man keeps the match off. Never stops the honour.
+    games_played = None
+    if role_name in NON_PLAYING_ROLES or action == "remove":
+        from app.services import game_exclusions as gx
+        try:
+            left = [r for (r,) in (await db.execute(text("""
+                SELECT achievement FROM player_achievements
+                WHERE org_id = CAST(:org AS UUID) AND linked_game_id = CAST(:g AS UUID) AND category = :cat
+                  AND player_id = CAST(:p AS UUID)"""), {"org": org, "g": gid, "cat": CATEGORY, "p": pid})).all()
+                    if r in NON_PLAYING_ROLES]
+            if left:
+                games_played = await gx.premiers_role_set(db, org, user_id, gid, pid, sorted(left)[0])
+            else:
+                games_played = await gx.premiers_role_cleared(db, org, user_id, gid, pid)
+        except Exception:
+            logger.exception("premiership squad: games played link failed for %s in %s", pid, gid)
+            games_played = {"changed": False, "message": "The honour was saved, but games played could not be updated."}
     await db.commit()
-    return {"ok": True}
+    return {"ok": True, "games_played": games_played}

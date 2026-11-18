@@ -109,7 +109,7 @@ def _status(r) -> str:
 def _rows_sql(where: str) -> str:
     """Every appearance of one of the club's players in one of the club's synced games."""
     return f"""
-        SELECT ga.game_id, ga.player_id, ga.is_reserve, ga.sheet_slot,
+        SELECT ga.game_id, ga.player_id, ga.is_reserve, ga.sheet_slot, COALESCE(ga.team_name, '') AS team_name,
                p.name AS player_name, p.display_name_override,
                g.played_at, g.home_team, g.away_team,
                gr.name AS grade_name, s.name AS season_name, s.year AS season_year,
@@ -118,7 +118,7 @@ def _rows_sql(where: str) -> str:
                 OR EXISTS (SELECT 1 FROM fielding_stats f WHERE f.game_id = ga.game_id AND f.player_id = ga.player_id)
                ) AS has_row,
                {not_played_game_sql('rg')} AS not_played,
-               e.id AS exclusion_id, e.reason, e.note, e.entered_at
+               e.id AS exclusion_id, e.reason, e.note, e.entered_at, e.source
           FROM game_appearances ga
           JOIN players p ON p.id = ga.player_id AND p.organisation_id = CAST(:org AS UUID)
           JOIN v_effective_games g ON g.id = ga.game_id AND g.source = 'api'
@@ -138,6 +138,7 @@ def _row_out(r) -> dict:
         "game_id": str(r["game_id"]),
         "player_id": str(r["player_id"]),
         "player_name": r["display_name_override"] or r["player_name"],
+        "team_name": r["team_name"],
         "played_at": r["played_at"].isoformat() if r["played_at"] else None,
         "home_team": r["home_team"],
         "away_team": r["away_team"],
@@ -150,6 +151,7 @@ def _row_out(r) -> dict:
         "reason": r["reason"],
         "reason_label": REASONS.get(r["reason"]) if r["reason"] else None,
         "note": r["note"],
+        "source": r["source"],
     }
 
 
@@ -210,7 +212,8 @@ class MarkRefused(Exception):
 
 
 async def mark(db: AsyncSession, org_id, user_id, game_id, player_id, reason: str,
-               note: Optional[str] = None, swap_adjustment_id: Optional[int] = None) -> dict:
+               note: Optional[str] = None, swap_adjustment_id: Optional[int] = None,
+               source: Optional[str] = None) -> dict:
     """Mark one player as not having played one game. Returns the exclusion as stored.
 
     Does not commit. Raises `MarkRefused` with a reason a club admin can act on.
@@ -247,11 +250,11 @@ async def mark(db: AsyncSession, org_id, user_id, game_id, player_id, reason: st
 
     new_id = (await db.execute(text("""
         INSERT INTO game_exclusions (organisation_id, game_id, player_id, reason, note,
-                                     prior_is_reserve, swapped_adjustment_id, entered_by)
-        VALUES (CAST(:org AS UUID), CAST(:g AS UUID), CAST(:p AS UUID), :r, :n, :prior, :sw, CAST(:u AS UUID))
+                                     prior_is_reserve, swapped_adjustment_id, source, entered_by)
+        VALUES (CAST(:org AS UUID), CAST(:g AS UUID), CAST(:p AS UUID), :r, :n, :prior, :sw, :src, CAST(:u AS UUID))
         RETURNING id"""),
         {"org": str(org_id), "g": str(game_id), "p": str(player_id), "r": reason,
-         "n": (note or "").strip() or None, "prior": prior, "sw": swapped,
+         "n": (note or "").strip() or None, "prior": prior, "sw": swapped, "src": source,
          "u": str(user_id) if user_id else None})).scalar()
     await db.execute(text(
         "UPDATE game_appearances SET is_reserve = TRUE WHERE game_id = CAST(:g AS UUID) AND player_id = CAST(:p AS UUID)"),
@@ -297,7 +300,8 @@ async def restore(db: AsyncSession, org_id, snap: dict) -> Optional[dict]:
         return None
     return await mark(db, org_id, snap.get("entered_by"), snap["game_id"], snap["player_id"],
                       snap["reason"], snap.get("note"),
-                      snap.get("swapped_adjustment_id") if snap.get("swapped_adjustment_id") else None)
+                      snap.get("swapped_adjustment_id") if snap.get("swapped_adjustment_id") else None,
+                      snap.get("source"))
 
 
 async def find(db: AsyncSession, org_id, game_id, player_id) -> Optional[int]:
@@ -406,3 +410,135 @@ async def public_marks(db: AsyncSession, game_id, org_id=None) -> list[dict]:
                     "player_name": r["display_name_override"] or r["name"],
                     "reason": r["reason"], "reason_label": REASONS.get(r["reason"], "Did not play")})
     return out
+
+
+# ── Team sheets with more than 11 names ──────────────────────────────────────
+
+XI = 11
+
+
+async def big_sheets(db: AsyncSession, org_id, limit: int = 200) -> dict:
+    """The club's sides in synced games with more than 11 players still counted as having played.
+
+    A side is eleven, so every one of these named at least one extra: a substitute fielder named
+    because they turned up (common in older seasons), the 12th and 13th men of a final. Cricket
+    Australia counts them as often as not, so `suggestions` (ours above CA's total) misses most of
+    them. The club looks over the sheet and marks the extras, or marks the sheet checked. A sheet
+    drops off on its own once no more than 11 still count. Newest first.
+    """
+    res = await db.execute(text(f"""
+        WITH ap AS (
+            SELECT ga.game_id, COALESCE(ga.team_name, '') AS team_name, ga.player_id, ga.is_reserve,
+                   (EXISTS (SELECT 1 FROM batting_innings b WHERE b.game_id = ga.game_id AND b.player_id = ga.player_id)
+                    OR EXISTS (SELECT 1 FROM bowling_spells w WHERE w.game_id = ga.game_id AND w.player_id = ga.player_id)
+                    OR EXISTS (SELECT 1 FROM fielding_stats f WHERE f.game_id = ga.game_id AND f.player_id = ga.player_id)
+                   ) AS has_row,
+                   {not_played_game_sql('rg')} AS not_played
+              FROM game_appearances ga
+              JOIN players p ON p.id = ga.player_id AND p.organisation_id = CAST(:org AS UUID)
+              JOIN v_effective_games g ON g.id = ga.game_id AND g.source = 'api'
+              JOIN games rg ON rg.id = ga.game_id
+             WHERE {club_game_sql('g', 'org')}
+        ),
+        sides AS (
+            SELECT game_id, team_name, COUNT(*) AS named,
+                   COUNT(*) FILTER (WHERE has_row OR (NOT not_played AND is_reserve IS NOT TRUE)) AS counted
+              FROM ap GROUP BY 1, 2
+        )
+        SELECT sd.game_id, sd.team_name, sd.named, sd.counted,
+               rg.played_at, rg.home_team, rg.away_team, gr.name AS grade_name, s.name AS season_name
+          FROM sides sd
+          JOIN games rg ON rg.id = sd.game_id
+          LEFT JOIN grades gr ON gr.id = rg.grade_id
+          LEFT JOIN seasons s ON s.id = gr.season_id
+         WHERE sd.counted > {XI}
+           AND NOT EXISTS (SELECT 1 FROM game_sheet_checks c
+                            WHERE c.organisation_id = CAST(:org AS UUID)
+                              AND c.game_id = sd.game_id AND c.team_name = sd.team_name)
+         ORDER BY rg.played_at DESC NULLS LAST, sd.game_id
+         LIMIT :lim
+    """), {"org": str(org_id), "lim": limit + 1})
+    rows = list(res.mappings())
+    out = [{
+        "game_id": str(r["game_id"]), "team_name": r["team_name"], "named": int(r["named"]),
+        "counted": int(r["counted"]), "extras": int(r["counted"]) - XI,
+        "played_at": r["played_at"].isoformat() if r["played_at"] else None,
+        "home_team": r["home_team"], "away_team": r["away_team"],
+        "grade_name": r["grade_name"], "season_name": r["season_name"],
+    } for r in rows[:limit]]
+    return {"items": out, "truncated": len(rows) > limit}
+
+
+async def check_sheet(db: AsyncSession, org_id, user_id, game_id, team_name: str) -> None:
+    await db.execute(text("""
+        INSERT INTO game_sheet_checks (organisation_id, game_id, team_name, checked_by)
+        SELECT CAST(:org AS UUID), CAST(:g AS UUID), :t, CAST(:u AS UUID)
+         WHERE NOT EXISTS (SELECT 1 FROM game_sheet_checks
+                            WHERE organisation_id = CAST(:org AS UUID)
+                              AND game_id = CAST(:g AS UUID) AND team_name = :t)"""),
+        {"org": str(org_id), "g": str(game_id), "t": team_name or "", "u": str(user_id) if user_id else None})
+
+
+# ── The Premiers squad editor's 12th Man and 13th Man ────────────────────────
+
+PREMIERS = "premiers"
+_ROLE_REASON = {"12th Man": "twelfth_man", "13th Man": "thirteenth_man"}
+
+
+async def log_edit(db: AsyncSession, org_id, user_id, action: str, exclusion_id: int, summary: str,
+                   before: Optional[dict], after: Optional[dict]) -> None:
+    """The same audit row the match page writes, so the Audit tab can undo it."""
+    from app.models.db import ManualEditLog
+    as_uuid = lambda v: v if v is None or isinstance(v, uuid.UUID) else uuid.UUID(str(v))  # noqa: E731
+    db.add(ManualEditLog(organisation_id=as_uuid(org_id), user_id=as_uuid(user_id), action=action, target_table="game_exclusions",
+                         target_id=str(exclusion_id), summary=summary, before_json=before, after_json=after))
+    await db.flush()
+
+
+async def premiers_role_set(db: AsyncSession, org_id, user_id, game_id, player_id, role_name: str) -> dict:
+    """12th Man or 13th Man given on a premiership card: take the game off the player's games played.
+
+    Returns ``{"changed": bool, "message": str}``. Never raises: the honour is saved either way.
+    """
+    reason = _ROLE_REASON.get(role_name)
+    if reason is None:
+        return {"changed": False, "message": ""}
+    row = await one(db, org_id, game_id, player_id)
+    if row is None:
+        return {"changed": False, "message": "Games played were not changed: this premiership is not a synced "
+                                             "match with this player on its team sheet."}
+    name = row["player_name"]
+    if row["status"] == PLAYED:
+        return {"changed": False, "message": f"{name} has a batting, bowling or fielding line in this match, "
+                                             "so it still counts as a game played."}
+    if row["status"] == MARKED:
+        return {"changed": False, "message": f"{name} was already marked as not having played this match."}
+    if row["status"] != NAMED:
+        return {"changed": False, "message": f"This match already does not count as a game played for {name}."}
+    try:
+        async with db.begin_nested():
+            snap = await mark(db, org_id, user_id, game_id, player_id, reason, source=PREMIERS)
+    except MarkRefused as e:
+        return {"changed": False, "message": str(e)}
+    msg = f"{name}: this match no longer counts as a game played ({role_name})."
+    await log_edit(db, org_id, user_id, "create", snap["id"],
+                   f"{name} marked as {role_name.lower()} from the Premiers squad: "
+                   f"{row.get('home_team') or ''} v {row.get('away_team') or ''}".strip(), None, snap)
+    return {"changed": True, "message": msg}
+
+
+async def premiers_role_cleared(db: AsyncSession, org_id, user_id, game_id, player_id) -> dict:
+    """The role came off (or the player came off the card): take off the mark it wrote, and only that."""
+    ex = (await db.execute(text("""
+        SELECT id FROM game_exclusions
+         WHERE organisation_id = CAST(:org AS UUID) AND game_id = CAST(:g AS UUID)
+           AND player_id = CAST(:p AS UUID) AND source = :src"""),
+        {"org": str(org_id), "g": str(game_id), "p": str(player_id), "src": PREMIERS})).scalar()
+    if ex is None:
+        return {"changed": False, "message": ""}
+    row = await one(db, org_id, game_id, player_id)
+    snap = await unmark(db, org_id, ex)
+    name = (row or {}).get("player_name") or "The player"
+    await log_edit(db, org_id, user_id, "delete", ex,
+                   f"{name} counted as playing again (role removed in the Premiers squad)", snap, None)
+    return {"changed": True, "message": f"{name}: this match counts as a game played again."}
