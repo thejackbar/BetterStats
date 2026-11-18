@@ -23,6 +23,7 @@ Run:
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 import uuid
@@ -61,9 +62,9 @@ def check(label: str, ok: bool, detail: str = "") -> None:
 ORG, OPP = uuid.uuid4(), uuid.uuid4()
 SEASON = uuid.uuid4()
 GRADE_D, GRADE_F = uuid.uuid4(), uuid.uuid4()
-P = {k: uuid.uuid4() for k in ("COUNTED", "NOTCOUNTED", "CLEAN", "TWOGRADE", "CANCELLED")}
+P = {k: uuid.uuid4() for k in ("COUNTED", "NOTCOUNTED", "CLEAN", "TWOGRADE", "CANCELLED", "RAINLATE")}
 NAMES = {"COUNTED": "Bissett, Wilbur", "NOTCOUNTED": "Notcounted, Nat", "CLEAN": "Clean, Carl",
-         "TWOGRADE": "Twograde, Tom", "CANCELLED": "Cancelled, Cal"}
+         "TWOGRADE": "Twograde, Tom", "CANCELLED": "Cancelled, Cal", "RAINLATE": "Rainlate, Rhys"}
 _day = 0
 
 
@@ -83,16 +84,20 @@ async def seed() -> None:
             await ex("INSERT INTO players (id, organisation_id, name, grassroots_id, status) VALUES (:i, :o, :n, :g, 'active')",
                      i=pid, o=ORG, n=NAMES[k], g=str(pid))
 
-        async def game(grade, status="COMPLETED") -> uuid.UUID:
+        async def game(grade, status="COMPLETED", scored=None) -> uuid.UUID:
+            """A fixture. A played game carries a scored innings, as the sync writes it. A called-off one carries
+            none unless `scored` says play started: since Applecross (19 Oct 2025) `abandoned_without_play_sql`
+            reads an ABANDONED game with a scored innings, a batting line or a bowling spell as a match played."""
             global _day
             _day += 7
             gid = uuid.uuid4()
-            # One scored innings, as the abandoned round 1 game had: play started, then rain.
+            if scored is None:
+                scored = status == "COMPLETED"
+            totals = json.dumps([{"runs_scored": 90, "wickets": 3}]) if scored else None
             await ex("INSERT INTO games (id, grade_id, played_at, result, home_org_id, away_org_id, match_format, status, "
-                     " innings_totals) VALUES (:i, :g, :d, :r, :o, :x, 'One Day', :st, "
-                     " jsonb_build_array(jsonb_build_object('runs_scored', 90, 'wickets', 3)))",
+                     " innings_totals) VALUES (:i, :g, :d, :r, :o, :x, 'One Day', :st, CAST(:t AS jsonb))",
                      i=gid, g=grade, d=date(2025, 10, 4) + timedelta(days=_day), r=None if status != "COMPLETED" else "WIN",
-                     o=ORG, x=OPP, st=status)
+                     o=ORG, x=OPP, st=status, t=totals)
             return gid
 
         async def real(key, grade, n):
@@ -102,8 +107,9 @@ async def seed() -> None:
                 await ex("INSERT INTO batting_innings (game_id, player_id, innings_number, runs, balls, fours, sixes, not_out, "
                          " dismissal_type, did_not_bat) VALUES (:g, :p, 1, 20, 25, 1, 0, false, 'caught', false)", g=gid, p=P[key])
 
-        async def washed(key, grade, status="ABANDONED"):
-            gid = await game(grade, status)
+        async def washed(key, grade, status="ABANDONED", scored=False):
+            """Named on the sheet and nothing of their own. `scored=True` is a game abandoned after play started."""
+            gid = await game(grade, status, scored=scored)
             await ex("INSERT INTO game_appearances (game_id, player_id) VALUES (:g, :p)", g=gid, p=P[key])
 
         async def ca(key, season_total, claims):
@@ -133,6 +139,11 @@ async def seed() -> None:
         await real("CANCELLED", GRADE_D, 2)
         await washed("CANCELLED", GRADE_D, status="CANCELLED")
         await ca("CANCELLED", 3, {GRADE_D: 3})
+        # RAINLATE: 3 real D Grade games and one abandoned after play started (90 for 3, then rain). The player was
+        # named and recorded nothing, but the club turned up and played: CA counts it (4, D Grade 4) and so do we.
+        await real("RAINLATE", GRADE_D, 3)
+        await washed("RAINLATE", GRADE_D, scored=True)
+        await ca("RAINLATE", 4, {GRADE_D: 4})
         await s.commit()
 
 
@@ -200,6 +211,13 @@ async def main() -> None:
     check("CA counts 3, one cancelled: the grid and header read 2",
           (await grid("CANCELLED"))["grid_matches"] == 2 and await header("CANCELLED") == 2,
           f"{(await grid('CANCELLED'))['grid_matches']} / {await header('CANCELLED')}")
+
+    print("\n-- A GAME ABANDONED AFTER PLAY STARTED IS A MATCH PLAYED (Applecross, 19 Oct 2025) --")
+    g3 = await grid("RAINLATE")
+    check("CA counts 4, one abandoned at 90 for 3: the season table, grid and header all read 4",
+          await season_row("RAINLATE") == 4 and g3["grid_matches"] == 4 and g3["season_rows"][0]["grades"] == {"D Grade": 4}
+          and await header("RAINLATE") == 4,
+          f"{await season_row('RAINLATE')} / {g3['grid_matches']} {g3['season_rows'][0]['grades']} / {await header('RAINLATE')}")
 
     await engine.dispose()
     print(f"\n{PASS} passed, {FAIL} failed")

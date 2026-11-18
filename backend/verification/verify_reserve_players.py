@@ -143,10 +143,12 @@ async def seed() -> None:
             _day += 7
             gid = uuid.uuid4()
             # `innings_totals` is what the sync writes; without a scored innings a game reads as unplayed.
+            # An ABANDONED game is a washout with no play: no scored innings (and no batting or bowling line),
+            # or `abandoned_without_play_sql` reads it as a match played (Applecross, 19 Oct 2025).
+            totals = None if status == "ABANDONED" else json.dumps([{"runs_scored": 146, "wickets": 9}])
             await ex("INSERT INTO games (id, grade_id, played_at, result, home_org_id, away_org_id, match_format, status, "
-                     " innings_totals) VALUES (:i, :g, :d, 'WIN', :o, :x, 'Two Day', :st, "
-                     " jsonb_build_array(jsonb_build_object('runs_scored', 146, 'wickets', 9)))",
-                     i=gid, g=GRADE, d=date(2016, 10, 1) + timedelta(days=_day), o=ORG, x=OPP, st=status)
+                     " innings_totals) VALUES (:i, :g, :d, 'WIN', :o, :x, 'Two Day', :st, CAST(:t AS jsonb))",
+                     i=gid, g=GRADE, d=date(2016, 10, 1) + timedelta(days=_day), o=ORG, x=OPP, st=status, t=totals)
             return gid
 
         async def real(player: uuid.UUID, n: int) -> None:
