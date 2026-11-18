@@ -42,6 +42,15 @@ start from the newest definition and diff it.
 """
 from __future__ import annotations
 
+from app.services.game_exclusion_ddl import STATEMENTS as _GX_STATEMENTS  # noqa: E402
+
+_GX_TABLE = _GX_STATEMENTS[0]
+# A SUBSTITUTE FIELDER the club marked as not having played (services/game_exclusions.py): their
+# catch, stumping or run out in that game is a sub's ("c sub") and is not theirs, so the row leaves
+# the fielding view, and with it the game from every count that reads a fielding line as played.
+_NOT_A_SUB = ("NOT EXISTS (SELECT 1 FROM game_exclusions _gx "
+              "WHERE _gx.game_id = {t}.game_id AND _gx.player_id = {t}.player_id)")
+
 STATEMENTS: tuple[str, ...] = (
     # A RESERVE: named on the team sheet and only that, a 12th man or substitute fielder who
     # did not play. Judged from the shape of CA's scorecard (services/reserve_players.py) by
@@ -54,6 +63,11 @@ STATEMENTS: tuple[str, ...] = (
     "ALTER TABLE game_appearances ADD COLUMN IF NOT EXISTS sheet_slot INTEGER",
     "CREATE INDEX IF NOT EXISTS ix_game_appearances_reserve "
     "ON game_appearances (player_id) WHERE is_reserve IS TRUE",
+    # A club's mark that a named player did not play a synced game (migration 391,
+    # services/game_exclusion_ddl). Created here as well because the fielding view below reads
+    # it, and migrations 287 to 389 replay this list before 391 exists. Same statement, so the
+    # two cannot drift; idempotent.
+    _GX_TABLE,
     # Left in place and read by nothing since the per-match pairing replaced
     # it; kept so a club's own earlier choice is not silently destroyed.
     "ALTER TABLE seasons ADD COLUMN IF NOT EXISTS stats_source TEXT",
@@ -238,6 +252,7 @@ STATEMENTS: tuple[str, ...] = (
           AND NOT EXISTS (
               SELECT 1 FROM fielding_stats fs
               WHERE fs.game_id = ga.game_id AND fs.player_id = ga.player_id
+                AND """ + _NOT_A_SUB.format(t="fs") + """
           )
         GROUP BY ga.player_id, gr.season_id
     ) unplayed
@@ -277,6 +292,7 @@ STATEMENTS: tuple[str, ...] = (
                         UNION ALL
                         SELECT fs.game_id, TRUE FROM fielding_stats fs
                          WHERE fs.player_id = pss.player_id
+                           AND """ + _NOT_A_SUB.format(t="fs") + """
                         UNION ALL
                         SELECT ga2.game_id, FALSE FROM game_appearances ga2
                          WHERE ga2.player_id = pss.player_id AND ga2.is_reserve IS NOT TRUE
@@ -312,6 +328,7 @@ STATEMENTS: tuple[str, ...] = (
               AND NOT EXISTS (
                   SELECT 1 FROM fielding_stats fs
                   WHERE fs.game_id = ga.game_id AND fs.player_id = ga.player_id
+                    AND """ + _NOT_A_SUB.format(t="fs") + """
               )
         ) r
         JOIN seasons rs ON rs.id = pss.season_id
@@ -974,7 +991,7 @@ _MANUAL_SOURCE_JOIN = """
 
 def _per_innings(view: str, synced_table: str, manual_table: str,
                  synced_cols: str, manual_cols: str, *,
-                 filtered: bool = True) -> str:
+                 filtered: bool = True, synced_where: str = "") -> str:
     """One per-innings view, with the source rule or without it.
 
     `filtered=False` is what DOWNGRADE emits — the same column list with the
@@ -982,6 +999,8 @@ def _per_innings(view: str, synced_table: str, manual_table: str,
     and the column can actually be dropped.
     """
     synced_tail = _SYNCED_SOURCE_JOIN.format(t="t") if filtered else "\n"
+    if filtered and synced_where:
+        synced_tail = synced_tail.rstrip("\n") + f"\n      AND {synced_where}\n"
     manual_tail = _MANUAL_SOURCE_JOIN.format(t="t") if filtered else "\n"
     return (
         f"CREATE OR REPLACE VIEW {view} AS\n"
@@ -1060,7 +1079,8 @@ _PER_INNINGS_SPECS = (
 )
 
 PER_INNINGS_VIEWS: tuple[str, ...] = tuple(
-    _per_innings(*spec) for spec in _PER_INNINGS_SPECS)
+    _per_innings(*spec, synced_where=_NOT_A_SUB.format(t="t") if spec[0] == "v_effective_fielding_stats" else "")
+    for spec in _PER_INNINGS_SPECS)
 PER_INNINGS_ORIGINALS: tuple[str, ...] = tuple(
     _per_innings(*spec, filtered=False) for spec in _PER_INNINGS_SPECS)
 

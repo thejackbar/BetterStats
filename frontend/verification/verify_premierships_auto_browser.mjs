@@ -63,6 +63,12 @@ async function stub(page, state, { signedIn = false } = {}) {
       if (b.action === 'role' && pl) pl.roles = b.on ? [...pl.roles, b.role] : pl.roles.filter(r => r !== b.role)
       if (b.action === 'add') { card.players.push({ player_id: b.player_id, name: 'Dan Day', photo_url: null, roles: b.role ? [b.role] : [], detail: null }); card.player_count += 1 }
       if (b.action === 'remove') { card.players = card.players.filter(x => x.player_id !== b.player_id); card.player_count -= 1 }
+      // 12th Man and 13th Man also take the match off games played (v9.146.0); the reply says what happened.
+      if (b.role === '12th Man' || b.role === '13th Man') {
+        return json({ ok: true, games_played: b.on === false
+          ? { changed: true, message: 'Bell, Bob: this match counts as a game played again.' }
+          : { changed: true, message: `Bell, Bob: this match no longer counts as a game played (${b.role}).` } })
+      }
       return json({ ok: true })
     }
     if (p === `/honours/${CLUB.id}/premierships`) return json(state.squad || PREMS)
@@ -201,11 +207,16 @@ for (const width of [1280, 390]) {
   await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="squad-editor"] li')]
     .find(li => li.innerText.includes('Bell, Bob'))?.querySelector('button[aria-pressed="true"]'))
   ck('and the button shows it is on once the card reloads', true)
+  ck('the editor says the match came off their games played',
+    /no longer counts as a game played \(12th Man\)/.test(await page.locator('[data-testid="squad-games-note"]').innerText().catch(() => '')),
+    await page.locator('[data-testid="squad-games-note"]').innerText().catch(() => '(no note)'))
   await bob.getByRole('button', { name: '12th Man' }).click()
   await page.waitForFunction(() => ![...document.querySelectorAll('[data-testid="squad-editor"] li')]
     .find(li => li.innerText.includes('Bell, Bob'))?.querySelector('button[aria-pressed="true"]'))
   ck('pressing it again unmarks it', JSON.stringify(state.squadPosts.at(-1)) ===
     JSON.stringify({ game_id: GF, action: 'role', player_id: 'p2', role: '12th Man', on: false }))
+  ck('and says the match counts again',
+    /counts as a game played again/.test(await page.locator('[data-testid="squad-games-note"]').innerText().catch(() => '')))
 
   await page.getByLabel('Player to add').selectOption('p9')
   await page.getByLabel('Their part').selectOption('12th Man')

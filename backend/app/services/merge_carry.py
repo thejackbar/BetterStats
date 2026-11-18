@@ -50,6 +50,11 @@ CARRIED: tuple[tuple[str, str, str, Optional[tuple[str, ...]]], ...] = (
     ("manual_partnership_records", "batter1_id", "int", None),
     ("manual_partnership_records", "batter2_id", "int", None),
     ("manual_season_adjustments", "player_id", "int", ("season_id", "grade_id")),
+    # A club's mark that the player was named for a synced game and did not play it (migration
+    # 391), and a "Games to check" suggestion it kept as played. Both are a person's decision about
+    # a game the player was in. The keeper's appearance takes the mark back (`game_exclusions.reapply`).
+    ("game_exclusions", "player_id", "int", ("organisation_id", "game_id")),
+    ("game_check_dismissals", "player_id", "int", ("organisation_id", "game_id")),
     ("manual_career_adjustments", "player_id", "int", ("organisation_id",)),
     # No foreign key at all, so an honour is ORPHANED rather than deleted —
     # quieter, and just as lost, since every read joins `players`.

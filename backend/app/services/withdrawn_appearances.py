@@ -102,7 +102,10 @@ async def mark_withdrawn(
         await db.execute(text(
             "UPDATE game_appearances SET is_reserve = NULL "
             "WHERE game_id = :g AND player_id = ANY(CAST(:p AS uuid[])) "
-            "AND is_reserve IS TRUE AND sheet_slot IS NULL"),
+            "AND is_reserve IS TRUE AND sheet_slot IS NULL "
+            # A club's own mark (services/game_exclusions.py) is a person's decision: never cleared here.
+            "AND NOT EXISTS (SELECT 1 FROM game_exclusions e "
+            "WHERE e.game_id = game_appearances.game_id AND e.player_id = game_appearances.player_id)"),
             {"g": gid, "p": [str(p) for p in back]})
     details = {"by": "sync", "game_id": str(gid),
                "changes": [{"game_id": str(gid), "player_id": str(p), "is_reserve": True, "slot": None}

@@ -772,8 +772,12 @@ async def _stat_line_appearances(session, game_ids) -> list:
         SELECT game_id, player_id FROM bowling_spells
          WHERE game_id = ANY(:ids) AND player_id IS NOT NULL
         UNION
-        SELECT game_id, player_id FROM fielding_stats
-         WHERE game_id = ANY(:ids) AND player_id IS NOT NULL
+        SELECT fs.game_id, fs.player_id FROM fielding_stats fs
+         WHERE fs.game_id = ANY(:ids) AND fs.player_id IS NOT NULL
+           -- A substitute fielder the club marked as not having played (services/game_exclusions.py):
+           -- their catch is a sub's, not a match day.
+           AND NOT EXISTS (SELECT 1 FROM game_exclusions gx
+                            WHERE gx.game_id = fs.game_id AND gx.player_id = fs.player_id)
     """), {"ids": list(game_ids)})
     from types import SimpleNamespace
     return [SimpleNamespace(game_id=r[0], player_id=r[1]) for r in rows.fetchall()]
