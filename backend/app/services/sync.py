@@ -3193,6 +3193,12 @@ async def sync_grassroots_game_level_data(
                     await fow_overrides.apply_in_sync(
                         session, org_uuid, match_uuid, scorecard,
                         lambda g: _team_pid(_parse_uuid(g)))
+                # A player the club marked as not having played this game (12th man, late
+                # withdrawal) was just re-stored with the app's own judgement; put the mark back.
+                if appear_count:
+                    from app.services import game_exclusions
+                    await session.flush()
+                    await game_exclusions.reapply(session, game_id=match_uuid)
 
                 if bat_count == 0 and bowl_count == 0 and appear_count == 0:
                     stats["gr_games_skipped_no_data"] += 1

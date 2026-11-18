@@ -2307,7 +2307,30 @@ async def undo_edit(
         f = (await db.execute(select(ManualFieldingStat.player_id).where(ManualFieldingStat.manual_game_id == gid))).scalars().all()
         return {pid for pid in (list(b) + list(o) + list(f)) if pid}
 
-    if action == "create":
+    if table == "game_exclusions" and action in ("create", "delete"):
+        # A player marked as named for a synced game but not having played it
+        # (services/game_exclusions.py). Undoing the mark counts the game again;
+        # undoing its removal marks it again, unless the player has since got a
+        # line on the card or been marked by someone else.
+        from app.services import game_exclusions as _gx
+        if action == "create":
+            snap = await _gx.unmark(db, club.id, int(target_id))
+            if snap is None:
+                raise HTTPException(status_code=409, detail="That mark has already been taken off.")
+        else:
+            snap = dict(log.before_json or {})
+            if not snap.get("game_id"):
+                raise HTTPException(status_code=400, detail="No snapshot available for this entry")
+            try:
+                restored = await _gx.restore(db, club.id, snap)
+            except _gx.MarkRefused as e:
+                raise HTTPException(status_code=409, detail=str(e))
+            if restored is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="The player now has a line on the card for that game, or is already marked, so there is nothing to put back.")
+        undo_player_ids.add(uuid.UUID(str(snap["player_id"])))
+    elif action == "create":
         # Undo create → delete the row
         if table == "manual_season_adjustments":
             row = await db.get(ManualSeasonAdjustment, int(target_id))

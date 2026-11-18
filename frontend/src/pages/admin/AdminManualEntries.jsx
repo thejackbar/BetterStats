@@ -6,6 +6,7 @@ import Dropdown from '../../components/Dropdown'
 import { formatSeason } from '../../lib/cricketFormat'
 import { GRAND_FINAL_HELP, grandFinalMessage, withFinalTick, withGrandFinalTick } from '../../lib/grandFinal'
 import ManualGamesImportWizard from '../../components/admin/ManualGamesImportWizard'
+import { GamesToCheck, PlayerGamePicker } from '../../components/admin/GameExclusions'
 
 const INPUT_CLS = 'w-full bg-pb-surface2 border pb-hairline text-pb-text text-sm rounded px-3 py-2 focus:outline-none focus:border-pb-accent'
 const SMALL_INPUT = 'w-full bg-pb-surface2 border pb-hairline text-pb-text text-sm rounded px-2 py-1 focus:outline-none focus:border-pb-accent'
@@ -16,6 +17,7 @@ const BTN_DANGER = 'inline-flex items-center px-3 py-1.5 border border-red-400/4
 
 const TABS = [
   { key: 'season', label: 'Adjustments', hint: 'Add or correct a player\'s totals. Leave season blank to apply as a career-only adjustment.' },
+  { key: 'check', label: 'Games to Check', hint: 'Players counted for a game they may not have played, such as 12th man' },
   { key: 'game', label: 'Manual Games', hint: 'Add full or partial historical scorecards' },
   { key: 'import', label: 'Import Scorecards', hint: 'Bring a whole history in from a spreadsheet, creating the seasons, grades and players it needs' },
   { key: 'audit', label: 'Audit & Undo', hint: 'Reverse any previous change' },
@@ -2113,8 +2115,12 @@ export default function AdminManualEntries() {
         )}
 
         {activeTab === 'season' && (
+          <PlayerGamePicker key={tick + ':picker'} players={players} />
+        )}
+        {activeTab === 'season' && (
           <SeasonAdjustmentsTab key={tick + ':season'} players={players} seasons={seasons} grades={grades} refreshAll={refreshAll} onPending={onPending} onSeasonCreated={onSeasonCreated} onGradeCreated={onGradeCreated} />
         )}
+        {activeTab === 'check' && <GamesToCheck key={tick + ':check'} />}
         {activeTab === 'game' && (
           <ManualGamesTab key={tick + ':game'} players={players} seasons={seasons} grades={grades} knownValues={knownValues} refreshAll={refreshAll} onPending={onPending} onNotice={setNotice} onSeasonCreated={onSeasonCreated} onGradeCreated={onGradeCreated} />
         )}

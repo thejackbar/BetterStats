@@ -617,6 +617,9 @@ async def _merge_players_core(
         # the removal below DELETED them outright — a merge silently destroyed
         # the removed record's whole imported career. See services/merge_carry.
         carried = await merge_carry.carry_rows(db, keep_id, remove_id, org_id)
+        # A game the club marked as not played for the removed record is now the keeper's mark.
+        from app.services import game_exclusions
+        await game_exclusions.reapply(db, player_ids=[keep_id])
 
         # The person's own profile (photos, contact details, date of birth,
         # squad) is on the row about to be deleted. Fill what the keeper lacks.

@@ -13,6 +13,7 @@ import PremiershipBanner from '../components/PremiershipBanner'
 import PremiersTick from '../components/PremiersTick'
 import TeamBadge from '../components/TeamBadge'
 import FallOfWicketsEditor from '../components/FallOfWicketsEditor'
+import { NotPlayedNote, TeamListPanel } from '../components/admin/GameExclusions'
 
 // Cricket overs are base-6: 3.4 + 2.3 = 6.1 (3 ov 4 balls + 2 ov 3 balls = 6 ov 1 ball)
 function sumOversBalls(bowlingRows) {
@@ -950,6 +951,7 @@ export default function MatchScorecard() {
   // edited from Manual entries).
   const canEditFow = hasCapability(CAP.MANAGE_MANUAL_ENTRIES)
   const [editingFow, setEditingFow] = useState(false)
+  const [notPlayedKey, setNotPlayedKey] = useState(0)
   const [premiersKey, setPremiersKey] = useState(0)
   const [claimTarget, setClaimTarget] = useState(null)
   const [existingPlayers, setExistingPlayers] = useState([])
@@ -1103,6 +1105,11 @@ export default function MatchScorecard() {
           onEdit={canEditFow && !game.is_manual ? () => setEditingFow(true) : null}
         />
         <PartnershipsSection partnerships={game.partnerships ?? []} fmtName={fmtName} />
+        <NotPlayedNote gameId={gameId} fmtName={fmtName} refreshKey={notPlayedKey} />
+        {/* A club admin marks a player named for this match who did not play it (synced match only). */}
+        {canEditFow && !game.is_manual && (
+          <TeamListPanel gameId={gameId} onChanged={() => setNotPlayedKey(k => k + 1)} />
+        )}
       </main>
 
       {editingFow && (

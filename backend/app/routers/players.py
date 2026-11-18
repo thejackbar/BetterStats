@@ -35,6 +35,7 @@ from app.services.aggregations import (
     get_player_batting_innings, get_player_bowling_spells,
     get_dismissal_breakdown, get_batting_by_position, get_batting_by_grade,
     get_bowling_by_grade, get_player_team_breakdown, raise_games_to_grid_total,
+    raise_season_rows_to_grid,
     get_bowling_dismissal_breakdown, get_bowling_by_batter_position,
     get_season_by_season, get_player_milestones, get_player_partnerships,
     get_player_activity, get_upcoming_milestones_for_org,
@@ -717,7 +718,19 @@ async def get_player_seasons(
         auto_widen=bool(org.stats_auto_show_played_grades) if org else True,
         hidden_grade_ids=_hidden_grades(),
     )
-    return await get_season_by_season(db, player_id, include_prior=True, scope=scope)
+    rows = await get_season_by_season(db, player_id, include_prior=True, scope=scope)
+    # The header is raised to the Analysis grid's total, so each season row is raised to the
+    # grid's row for that season, or the table adds up to less than the header (Roy Marsh: 297
+    # in the header, 295 down the table). Raise-only. A failure leaves the rows as they were.
+    if player.organisation_id:
+        try:
+            rows = await raise_season_rows_to_grid(
+                db, player_id, str(player.organisation_id), scope, rows)
+        except Exception:
+            await rollback_keeping(db, player, org)
+            logging.getLogger(__name__).exception(
+                "grid season raise failed for player %s", player_id)
+    return rows
 
 
 @router.get("/{player_id}/milestones")

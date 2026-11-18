@@ -2768,6 +2768,44 @@ async def raise_games_to_grid_total(
     return grid_total
 
 
+async def raise_season_rows_to_grid(
+    session: AsyncSession,
+    player_id: str,
+    org_id: str,
+    scope: Optional[GradeScope],
+    rows: list[dict],
+) -> list[dict]:
+    """Lift each season table row's matches to that season's figure on the Analysis grid.
+
+    The header is raised to the grid's total (`raise_games_to_grid_total`), so a season table
+    that stayed on CA's season totals could add up to less than the header beside it. Roy Marsh
+    (Piara Waters) read 297 in the header and 295 down the table: in 2012/13 and 2015/16 CA's
+    per-grade rows count a game we hold no scorecard for, and the season view's reserve rule
+    (`LEAST(R, CA - N)`) took that game off CA's season total as if it were his 12th man game.
+    The grid, working per grade, kept it. Raising each row to the grid's row for the same season
+    makes the table add up to the header.
+
+    Raise-only, for the same reason as the header. Matched on the grid's folded season id, which
+    is the id the season table folds onto too; a row the grid has no season for (a prior-seasons
+    lump, another club's year) is left as it was. Sets ``matches_from_grid`` on a raised row.
+    """
+    if not rows or not org_id:
+        return rows
+    breakdown = await get_player_team_breakdown(session, player_id, org_id, None, scope=scope)
+    by_id = {str(s.get("season_id")): _n(s.get("matches"))
+             for s in breakdown.get("season_rows") or [] if s.get("season_id")}
+    by_name = {(s.get("year"), s.get("season_name")): _n(s.get("matches"))
+               for s in breakdown.get("season_rows") or []}
+    for row in rows:
+        grid = by_id.get(str(row.get("season_id")))
+        if grid is None:
+            grid = by_name.get((row.get("year"), row.get("season_name")))
+        if grid is not None and grid > _n(row.get("matches")):
+            row["matches"] = grid
+            row["matches_from_grid"] = True
+    return rows
+
+
 # ── Folding a real season back into one row ──────────────────────────────────
 # A club's real-world season can be split across several `seasons` rows, and a
 # player's rows can land on ANOTHER CLUB'S row entirely. A fixture between two

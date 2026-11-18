@@ -511,6 +511,18 @@ export const api = {
   // page needs to be told whose side to read it from.
   getScorecard: (gameId, org) =>
     request(`/games/${gameId}/scorecard${org ? `?org=${encodeURIComponent(org)}` : ''}`),
+  // A player named for a synced match who did not play it (12th man, 13th man, late withdrawal).
+  getNotPlayed: (gameId) => request(`/games/${gameId}/not-played`),
+  getTeamList: (gameId) => request(`/games/${gameId}/team-list`),
+  getNotPlayedAdjustments: (gameId, playerId) => request(`/games/${gameId}/not-played/${playerId}/adjustments`),
+  markNotPlayed: (gameId, data) =>
+    request(`/games/${gameId}/not-played`, { method: 'POST', body: JSON.stringify(data) }),
+  unmarkNotPlayed: (gameId, playerId) =>
+    request(`/games/${gameId}/not-played/${playerId}`, { method: 'DELETE' }),
+  getPlayerGamesForExclusion: (playerId) => request(`/club-admin/game-exclusions/players/${playerId}/games`),
+  getGamesToCheck: () => request('/club-admin/game-exclusions/suggestions'),
+  dismissGameToCheck: (data) =>
+    request('/club-admin/game-exclusions/suggestions/dismiss', { method: 'POST', body: JSON.stringify(data) }),
   // A club types the fall of wickets Cricket Australia is missing for its own innings of a synced match.
   getFowEditor: (gameId) => request(`/games/${gameId}/fall-of-wickets/editor`),
   // extras: { retirements: [{ participant_id, score, after_wicket }], unbroken, unbroken_score }

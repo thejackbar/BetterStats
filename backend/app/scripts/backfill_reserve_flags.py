@@ -174,7 +174,10 @@ async def restore(audit_id: int, by: str | None) -> None:
             # Only a row still carrying the value this run wrote: a flag set since is somebody else's.
             res = await s.execute(text(
                 "UPDATE game_appearances SET is_reserve = NULL, sheet_slot = NULL "
-                "WHERE game_id = CAST(:g AS UUID) AND player_id = CAST(:p AS UUID) AND is_reserve = :v"),
+                "WHERE game_id = CAST(:g AS UUID) AND player_id = CAST(:p AS UUID) AND is_reserve = :v "
+                # A club's own mark (services/game_exclusions.py) is a person's decision: never cleared here.
+                "AND NOT EXISTS (SELECT 1 FROM game_exclusions e "
+                "WHERE e.game_id = game_appearances.game_id AND e.player_id = game_appearances.player_id)"),
                 {"g": c["game_id"], "p": c["player_id"], "v": c["is_reserve"]})
             done += res.rowcount
         details["restored_at"] = (await s.execute(text("SELECT NOW()::text"))).scalar()
