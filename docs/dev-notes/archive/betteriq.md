@@ -375,3 +375,13 @@ Asked for by a club scouting a Western Suburbs batter they had met twice in a ye
 - Frontend: an Against us tab (second), and an Against <club> headline at the top of Overview that replaces the old totals card when the new record has games. `OppPlayerDetail` takes `oppKey` (all three callers pass it).
 - 390px: the profile column in `OppositionPlayer` and `PlayerHub` now has `min-w-0`. Before this change the page was already 417px wide on a phone; the extra tab pushed it to 514px.
 - Proof: `backend/verification/verify_iq_player_vs_us.py` (22 checks; the previous commit fails 20, the two that pass are the "not counted" checks) and `frontend/scripts/verify-opp-player-vs-us.mjs` (17 checks, wire request, links, 390px). `verify_iq_neutral_pronouns.py` now covers `iq_vs_us.py`.
+
+## Ask BetterIQ: an opposition player by name, against us (v9.145.2)
+
+Reported: "what is Sahil Bhayana and Tushar Sachdeva's records against Applecross?" got "the tools I have give me how OUR players go against a given opponent, not how a named opposition player has gone against us". No tool took an opposition player's name.
+
+- New tool `opposition_player_vs_us(name, opponent?)` in `iq_ask.py`, backed by `iq_vs_us.find_and_read`. With a club, it reads our games against that club and finds the player on their sheets by name. Without one it looks for candidates in order: this club's cached `opposition_dossiers` payloads (dossier squads, club careers, deep and vs-us scans: name plus GUID), then `bowler_wickets` batter names (club, no GUID), then, only if both are empty, the opposition team sheets of our last 80 games from the last two years (`FIND_SCAN_GAMES`, `FIND_SCAN_DAYS`). At most `MAX_FIND_CLUBS` clubs are read in full; only clubs where the player actually appears are returned.
+- `player_vs_us_now` builds the record inline (reusing a fresh `pvsus::` cache row, writing one when it finds the player) so the model gets an answer in one turn rather than `building`. `_build` now fetches cards six at a time.
+- `_find_player_in_team` falls back to `name_matches` (surname must agree, first name equal or an initial; "Bhayana, Sahil" reads as "Sahil Bhayana") when the GUID and the exact name miss, and only a single matching player counts.
+- Prompt: an opposition name goes to this tool; never answer that the tools only cover our players.
+- Proof: `verify_iq_player_vs_us.py` now 35 checks; against v9.145.1 the 13 Ask IQ checks fail (`unknown tool`). The harness gained `org_merge_logs`, copied from the lifespan DDL.

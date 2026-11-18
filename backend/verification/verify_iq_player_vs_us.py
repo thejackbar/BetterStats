@@ -138,6 +138,22 @@ async def build_schema() -> None:
                 canonical_season_id UUID NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
                 alias_season_id UUID NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
                 undone_at TIMESTAMPTZ)"""))
+        # Copied column for column from the main.py lifespan (list_opponents reads it).
+        await conn.execute(text("""CREATE TABLE IF NOT EXISTS org_merge_logs (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                source_org_id UUID REFERENCES organisations(id) ON DELETE SET NULL,
+                source_org_name TEXT NOT NULL,
+                target_org_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                performed_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                performed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                seasons_moved INTEGER NOT NULL DEFAULT 0,
+                seasons_merged INTEGER NOT NULL DEFAULT 0,
+                grades_moved INTEGER NOT NULL DEFAULT 0,
+                grades_merged INTEGER NOT NULL DEFAULT 0,
+                games_repointed INTEGER NOT NULL DEFAULT 0,
+                players_moved INTEGER NOT NULL DEFAULT 0,
+                players_merged INTEGER NOT NULL DEFAULT 0
+            )"""))
         json_cols = (await conn.execute(text(
             "SELECT table_name, column_name FROM information_schema.columns "
             "WHERE table_schema = 'public' AND data_type = 'json'"))).all()
@@ -255,6 +271,48 @@ async def main() -> int:
     gr_client.get_match_scorecard = _fake_scorecard
     await build_schema()
     await seed()
+
+    from app.services import iq_ask
+
+    async def ask(args):
+        return await iq_ask._run_tool(str(US), "opposition_player_vs_us", args)
+
+    print("\n-- Ask IQ: an opposition player by name, no club given (nothing cached yet) --")
+    check("the tool is offered to the model",
+          any(t["name"] == "opposition_player_vs_us" for t in iq_ask.TOOLS), "")
+    check("the prompt sends opposition names to it", "opposition_player_vs_us" in iq_ask._SYSTEM, "")
+    a = await ask({"name": "Max Mate"})
+    ps = a.get("players") or []
+    mate = next((p for p in ps if p.get("club") == "Western Suburbs CC"), {})
+    check("found by reading our recent team sheets", a.get("status") == "ready" and bool(mate), str(a)[:300])
+    check("their club is named", mate.get("club") == "Western Suburbs CC", str(mate.get("club")))
+    check("games against us: 4", mate.get("games_against_us") == 4, str(mate.get("games_against_us")))
+    check("our bowlers who got them out are named",
+          {r["name"] for r in mate.get("got_them_out") or []} == {"Pat White", "Tom Smith"}, str(mate.get("got_them_out")))
+    check("our batter they dismissed is named", [r["name"] for r in mate.get("victims") or []] == ["Sam Lee"],
+          str(mate.get("victims")))
+    a = await ask({"name": "Adam Barwood"})
+    clubs = sorted(p.get("club") or "" for p in a.get("players") or [])
+    check("a name at two clubs we played comes back for both, each with its club",
+          clubs == ["Other CC", "Western Suburbs CC"], str(clubs))
+
+    print("\n-- Ask IQ: short name with the club given --")
+    a = await ask({"name": "A Barwood", "opponent": "Western Suburbs"})
+    ps = a.get("players") or []
+    b0 = (ps[0] if ps else {}).get("batting_vs_us") or {}
+    check("one player, 3 games, 61 runs against us", len(ps) == 1 and ps[0].get("games_against_us") == 3
+          and b0.get("runs") == 61, str(a)[:300])
+    check("Tom Smith heads who got them out",
+          ((ps[0].get("got_them_out") or [{}])[0] if ps else {}).get("name") == "Tom Smith", str(ps[0].get("got_them_out") if ps else None))
+    check("Ryan Jones is the catcher", any(r["name"] == "Ryan Jones" and r.get("catches") == 2
+          for r in (ps[0].get("fielded_them") if ps else []) or []), "")
+    check("the game log says how they were out",
+          ((ps[0].get("games") or [{}])[0].get("batting") or {}).get("bowler") == "Pat White" if ps else False, "")
+
+    print("\n-- Ask IQ: a name nobody we played carries --")
+    a = await ask({"name": "Nobody Here"})
+    check("not_found, and says where it looked", a.get("status") == "not_found" and "team sheets" in (a.get("note") or ""),
+          str(a))
 
     print("\n-- Barwood against Applecross --")
     d = await vs_us(BARWOOD, "Adam Barwood")

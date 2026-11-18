@@ -22,6 +22,7 @@ head-to-head) and keeps only the rows that involve this one player.
 """
 from __future__ import annotations
 
+import asyncio
 import re
 from collections import Counter
 from datetime import date, datetime, timezone
@@ -31,18 +32,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services import grassroots_scores_client as gr
 from app.services.iq_opponent import (
+    TTL,
     _DISMISSAL_SHORT,
     _NOT_AN_INNINGS,
     _balls_to_overs,
     _find_opponent_team,
     _is_redacted_name,
     _is_uuid,
+    _load_row,
     _match_date,
     _norm,
     _our_games_vs,
     _overs_to_balls,
     _scope_labels,
     _scope_sig,
+    _upsert,
 )
 from app.services.iq_scout import _get_or_start
 from app.services.sync import (
@@ -104,13 +108,48 @@ def _find_player_in_team(team: dict, pid_l: str, player_name: str | None) -> str
     exactly one player on their sheet carries it (CA can issue a different GUID
     on a different route). Returns the lowercased id used on this card."""
     pids = _team_pids(team)
-    if pid_l in pids:
+    if pid_l and pid_l in pids:
         return pid_l
     want = _key(player_name)
     if not want or _is_redacted_name(player_name):
         return None
     hits = [p for p, nm in pids.items() if _key(nm) == want]
-    return hits[0] if len(hits) == 1 else None
+    if hits:
+        return hits[0] if len(hits) == 1 else None
+    # Looser: "S Bhayana" for "Sahil Bhayana", "Bhayana, Sahil", or a surname
+    # alone, against every name the sheet gives a player. Only a single player
+    # may match; two players fitting the name match neither.
+    loose = {
+        (pl.get("participantId") or pl.get("id") or "").lower()
+        for pl in ((team.get("players") or []) + (team.get("nonPlayingMembers") or []))
+        if (pl.get("participantId") or pl.get("id"))
+        and any(name_matches(player_name, pl.get(k)) for k in ("displayName", "name", "playerShortName"))
+    }
+    return next(iter(loose)) if len(loose) == 1 else None
+
+
+def _name_tokens(name: str | None) -> list[str]:
+    """'Bhayana, Sahil' and 'Sahil Bhayana' both -> ['sahil', 'bhayana']."""
+    n = _key(name)
+    if "," in n:
+        last, _, first = n.partition(",")
+        n = f"{first} {last}"
+    return [t for t in re.split(r"[^a-z0-9']+", n) if t]
+
+
+def name_matches(query: str | None, candidate: str | None) -> bool:
+    """Does a typed name fit a recorded one? Surnames must agree; first names
+    must agree or one must be the other's initial. A surname alone matches on
+    the surname."""
+    q, c = _name_tokens(query), _name_tokens(candidate)
+    if not q or not c or _is_redacted_name(candidate):
+        return False
+    if q[-1] != c[-1]:
+        return False
+    if len(q) == 1 or len(c) == 1:
+        return True
+    a, b = q[0], c[0]
+    return a == b or (len(a) == 1 and b.startswith(a)) or (len(b) == 1 and a.startswith(b))
 
 
 def _resolve(name: str | None, *maps: dict[str, str]) -> str | None:
@@ -195,7 +234,7 @@ async def _build(
     player_id: str, player_name: str | None, games: list[dict], ours: dict[str, dict],
     scope: list[str],
 ) -> dict:
-    pid_l = player_id.strip().lower()
+    pid_l = (player_id or "").strip().lower()
     checked = 0
     no_card = 0
     played: list[dict] = []
@@ -216,8 +255,11 @@ async def _build(
             return None
         return {"player_id": (rec or {}).get("id"), "name": name}
 
-    for g in games[:MAX_VS_US_GAMES]:
-        sc = await gr.get_match_scorecard(g["id"])
+    todo = games[:MAX_VS_US_GAMES]
+    cards = await _fetch_cards([g["id"] for g in todo])
+    seen_pid = None
+    for g in todo:
+        sc = cards.get(g["id"])
         if not sc:
             no_card += 1
             continue
@@ -234,6 +276,7 @@ async def _build(
         their_pids = _team_pids(their)
         our_pids = _team_pids(us)
         seen_name = seen_name or their_pids.get(me)
+        seen_pid = seen_pid or me
         our_names = _team_short_names(us)
         their_names = _team_short_names(their)
         when = _match_date(sc) or g.get("played_at")
@@ -337,11 +380,26 @@ async def _build(
         played.append(game)
 
     return _assemble(
-        our_name=our_name, opp_key=opp_key, opp_name=opp_name, player_id=player_id,
+        our_name=our_name, opp_key=opp_key, opp_name=opp_name, player_id=player_id or seen_pid,
         player_name=seen_name, games_total=len(games), checked=checked, no_card=no_card,
         played=played, bat_inns=bat_inns, spells=spells, got_them_out=got_them_out,
         fielded_them=fielded_them, victims=victims, their_fielding=their_fielding, scope=scope,
     )
+
+
+_CARD_SEMAPHORE = asyncio.Semaphore(6)
+
+
+async def _fetch_cards(match_ids: list[str]) -> dict[str, dict | None]:
+    """Scorecards for several games at once, six at a time (the shared cache
+    makes a repeat instant). A failed fetch reads as no card."""
+    async def one(mid):
+        async with _CARD_SEMAPHORE:
+            try:
+                return mid, await gr.get_match_scorecard(mid)
+            except Exception:
+                return mid, None
+    return dict(await asyncio.gather(*(one(m) for m in match_ids)))
 
 
 def _plural(n: int, one: str, many: str | None = None) -> str:
@@ -488,3 +546,169 @@ async def get_or_start_player_vs_us(
                        games, ours, scope),
         name=player_name, force=force,
     )
+
+
+# ─── Ask IQ: find an opposition player by name, then their record vs us ──────
+
+FIND_SCAN_GAMES = 80      # our most recent games scanned when no club is named
+FIND_SCAN_DAYS = 730      # ...from the last two years
+MAX_FIND_CLUBS = 4        # candidate clubs read in full for one name
+
+
+async def _cached_candidates(session: AsyncSession, org_id: str, name: str) -> list[dict]:
+    """Opposition players we already hold a name and GUID for, from the cached
+    dossiers, club careers and player scans of this club (opposition_dossiers)."""
+    surname = (_name_tokens(name) or [""])[-1]
+    if len(surname) < 2:
+        return []
+    res = await session.execute(
+        text(
+            """
+            SELECT opp_key, opp_name, payload FROM opposition_dossiers
+            WHERE organisation_id = CAST(:org AS UUID) AND status = 'ready'
+              AND payload::text ILIKE :q
+            ORDER BY built_at DESC NULLS LAST
+            LIMIT 40
+            """
+        ),
+        {"org": org_id, "q": f"%{surname}%"},
+    )
+    out: list[dict] = []
+    for r in res.mappings():
+        p = r["payload"] or {}
+        opp = p.get("opponent") or {}
+        org = p.get("org") or {}
+        club_key = opp.get("opp_key") or org.get("id")
+        club_name = opp.get("name") or org.get("name") or r["opp_name"]
+        if not club_key:
+            continue
+        # Dossiers carry batting/bowling lists, careers a players list, the
+        # deep and vs-us scans one player (their batting there is a summary).
+        people = [x for k in ("batting", "bowling", "players") if isinstance(p.get(k), list)
+                  for x in p[k] if isinstance(x, dict)]
+        if isinstance(p.get("player"), dict):
+            people.append(p["player"])
+        for pl in people:
+            if pl.get("player_id") and name_matches(name, pl.get("name")):
+                out.append({"opp_key": club_key, "club_name": club_name,
+                            "player_id": pl["player_id"], "name": pl.get("name")})
+    return out
+
+
+async def _wicket_candidates(session: AsyncSession, org_id: str, name: str) -> list[dict]:
+    """Batters our bowlers have dismissed (bowler_wickets holds their name and
+    club, not their GUID)."""
+    from app.services import iq as iq_service
+    surname = (_name_tokens(name) or [""])[-1]
+    if len(surname) < 2:
+        return []
+    rows = await iq_service.search_opponent_players(session, org_id, surname)
+    return [{"opp_key": r["opp_key"], "club_name": r["club_name"], "player_id": None, "name": r["name"]}
+            for r in rows if name_matches(name, r["name"])]
+
+
+async def _scan_candidates(session: AsyncSession, org_id: str, name: str) -> list[dict]:
+    """Last resort: read the opposition team sheets of our recent games for the
+    name. Bounded to FIND_SCAN_GAMES cards from the last FIND_SCAN_DAYS."""
+    res = await session.execute(
+        text(
+            f"""
+            SELECT g.id::text AS id, g.opp_org_id, g.opp_club_name,
+                   COALESCE(g.opp_org_id, g.opp_club_name) AS opp_key
+            FROM v_effective_games g
+            WHERE g.organisation_id = CAST(:org AS UUID)
+              AND g.played_at >= CURRENT_DATE - {FIND_SCAN_DAYS}
+              AND COALESCE(g.opp_org_id, g.opp_club_name) IS NOT NULL
+            ORDER BY g.played_at DESC
+            LIMIT {FIND_SCAN_GAMES}
+            """
+        ),
+        {"org": org_id},
+    )
+    games = [dict(r) for r in res.mappings()]
+    cards = await _fetch_cards([g["id"] for g in games])
+    out: list[dict] = []
+    for g in games:
+        sc = cards.get(g["id"])
+        if not sc:
+            continue
+        their = _find_opponent_team(sc, our_org_id=org_id, opp_org_id=g["opp_org_id"], opp_name=g["opp_club_name"])
+        if not their:
+            continue
+        for pl in ((their.get("players") or []) + (their.get("nonPlayingMembers") or [])):
+            pid = pl.get("participantId") or pl.get("id")
+            if pid and any(name_matches(name, pl.get(k)) for k in ("displayName", "name", "playerShortName")):
+                out.append({"opp_key": g["opp_key"], "club_name": g["opp_club_name"], "player_id": pid,
+                            "name": pl.get("displayName") or pl.get("name") or pl.get("playerShortName")})
+    return out
+
+
+def _dedupe(cands: list[dict]) -> list[dict]:
+    """One candidate per club; a GUID beats a name-only row."""
+    by_club: dict[str, dict] = {}
+    for c in cands:
+        k = (c["opp_key"] or "").lower()
+        cur = by_club.get(k)
+        if cur is None or (not cur.get("player_id") and c.get("player_id")):
+            by_club[k] = c
+    return list(by_club.values())
+
+
+async def player_vs_us_now(
+    session: AsyncSession, our_org_id: str, our_name: str | None, opp_key: str,
+    player_id: str | None, *, player_name: str | None = None, opp_name: str | None = None,
+) -> dict:
+    """The same record as the polled route, built inline for Ask IQ (a fresh
+    cache row is reused). A name-only player is found on their team sheets."""
+    if player_id:
+        row = await _load_row(session, our_org_id, _cache_key(opp_key, player_id))
+        if (row and row.status == "ready" and (row.payload or {}).get("schema_v") == VS_US_VERSION
+                and row.built_at and datetime.now(timezone.utc) - row.built_at < TTL):
+            return {"status": "ready", **row.payload}
+    opp_org_id = opp_key if _is_uuid(opp_key) else None
+    games = await _our_games_vs(session, our_org_id, opp_key)
+    ours = await _our_player_ids(session, our_org_id) if games else {}
+    games = [
+        {**g, "played_at": g["played_at"].isoformat() if isinstance(g.get("played_at"), (date, datetime)) else g.get("played_at")}
+        for g in games
+    ]
+    payload = await _build(our_org_id, our_name, opp_key, opp_org_id, opp_name, player_id, player_name,
+                           games, ours, _scope_labels())
+    found = (payload.get("player") or {}).get("player_id")
+    if found and payload.get("games_played"):
+        await _upsert(session, our_org_id, _cache_key(opp_key, found), opp_name=player_name,
+                      status="ready", payload=payload, built_at=datetime.now(timezone.utc), error=None)
+    return {"status": "ready", **payload}
+
+
+async def find_and_read(
+    session: AsyncSession, our_org_id: str, our_name: str | None, name: str,
+    *, opp_key: str | None = None, opp_name: str | None = None,
+) -> dict:
+    """Ask IQ's entry point: find an opposition player by name (in one club
+    when given, else across the clubs we have played) and read each match's
+    record against us. Returns {found: [...records...], searched: '...'}."""
+    name = (name or "").strip()
+    if len(_name_tokens(name)) == 0:
+        return {"found": [], "searched": "no name given"}
+    if opp_key:
+        cands = [c for c in await _cached_candidates(session, our_org_id, name)
+                 if (c["opp_key"] or "").lower() == opp_key.lower()]
+        cands = _dedupe(cands) or [{"opp_key": opp_key, "club_name": opp_name, "player_id": None, "name": name}]
+        searched = f"our games against {opp_name or opp_key}"
+    else:
+        cands = _dedupe(await _cached_candidates(session, our_org_id, name)
+                        + await _wicket_candidates(session, our_org_id, name))
+        searched = "the opposition players we have scouted or dismissed"
+        if not cands:
+            cands = _dedupe(await _scan_candidates(session, our_org_id, name))
+            searched = f"the team sheets of our last {FIND_SCAN_GAMES} games"
+    found = []
+    for c in cands[:MAX_FIND_CLUBS]:
+        rec = await player_vs_us_now(
+            session, our_org_id, our_name, c["opp_key"], c.get("player_id"),
+            player_name=c.get("name") if c.get("player_id") else name, opp_name=c.get("club_name") or opp_name,
+        )
+        if rec.get("games_played"):
+            found.append(rec)
+    return {"found": found, "searched": searched, "clubs_checked": len(cands[:MAX_FIND_CLUBS])}

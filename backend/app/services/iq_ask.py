@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.settings import settings
 from app.models.db import async_session_maker
-from app.services import iq_lineup, iq_opponent, iq_players, iq_review, iq_team, iq_trends
+from app.services import iq_lineup, iq_opponent, iq_players, iq_review, iq_team, iq_trends, iq_vs_us
 from app.services import iq as iq_service
 from app.services.aggregations import get_player_by_opposition
 from app.services.bowling_style import bowling_class, bowling_label
@@ -133,6 +133,15 @@ _SYSTEM = (
     "present. A player whose figures are from 'their other "
     "grades and formats' is not a read on this grade, so say so. If they have not "
     "named a side, say that and offer the opposition_report instead.\n"
+    "- For an OPPOSITION player's record against us ('how has X gone against us', "
+    "'who gets X out', 'X and Y's records against <our club>'), call "
+    "opposition_player_vs_us once per player, with their club when the user gave it. "
+    "If find_players does not know a name, the player is probably opposition: use "
+    "this tool, never say you only cover our own players. Lead with the games and "
+    "their figures against us, then name which of our bowlers have got them out and "
+    "which of our fielders have caught them, and for a bowler which of our batters "
+    "they have dismissed. Say how many games it comes from; one or two games is a "
+    "small sample. If the name fits players at two clubs, give both and say so.\n"
     "- If a fixture's opponent has no linked history (has_history false), say the "
     "club can be linked via 'Match club' on the BetterIQ Opposition page to unlock "
     "the head-to-head.\n"
@@ -353,6 +362,18 @@ TOOLS = [
             "type": "object",
             "properties": {"fixture_id": {"type": "string", "description": "fixture id from upcoming_fixtures"}},
             "required": ["fixture_id"],
+        },
+    },
+    {
+        "name": "opposition_player_vs_us",
+        "description": "ONE OPPOSITION player's record against OUR club, found by name. Pass their name as the user wrote it, and their club when known (otherwise it searches the clubs we have played). Read from the scorecards of our games against their club: games against us, their batting against us (runs, average, high score, how they get out), their bowling against us (wickets, average, economy, best), which of OUR bowlers have dismissed them (got_them_out), which of OUR fielders have caught, stumped or run them out (fielded_them), which of OUR batters they have dismissed (victims, with scores when out) or caught or run out (their_fielding), a game-by-game log and ready-made 'lines'. If the name fits players at more than one club, every match is returned with its club. Call once per player. Use it for 'how has X gone against us', 'who gets X out', 'X's record against <our club>'.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "the opposition player's name, e.g. 'Sahil Bhayana' or 'S Bhayana'"},
+                "opponent": {"type": "string", "description": "optional: their club name (or opp_key), when known"},
+            },
+            "required": ["name"],
         },
     },
 ]
@@ -1060,6 +1081,71 @@ async def _tool_match_performances(session, org_id, *, game_id=None):
     return d
 
 
+async def _tool_opposition_player_vs_us(session, org_id, *, name=None, opponent=None):
+    if not (name or "").strip():
+        return {"error": "Pass the opposition player's name."}
+    opp_key = opp_name = None
+    if opponent:
+        opp_key, opp_name = await _resolve_opp_arg(session, org_id, opponent)
+        opp_name = opp_name or opponent
+    org = (await session.execute(
+        text("SELECT name FROM organisations WHERE id = CAST(:o AS UUID)"), {"o": org_id}
+    )).mappings().first()
+    res = await iq_vs_us.find_and_read(
+        session, org_id, org["name"] if org else None, name, opp_key=opp_key, opp_name=opp_name,
+    )
+    if not res["found"]:
+        return {
+            "status": "not_found",
+            "note": (f"No player matching '{name}' appears in {res['searched']}. They may not have "
+                     "played us in a game with a Cricket Australia scorecard, or their name is spelt "
+                     "differently. Ask the user for their club if none was given."),
+        }
+
+    def _people(rows, n=5, keep=("count", "wickets", "catches", "stumpings", "run_outs", "runs")):
+        return [{"name": r.get("name"), **{k: r[k] for k in keep if r.get(k)},
+                 "how": [m["type"] for m in (r.get("methods") or [])]} for r in (rows or [])[:n]]
+
+    def _game(gm):
+        b, w = gm.get("bat"), gm.get("bowl")
+        return {
+            "date": gm.get("date"), "grade": gm.get("grade"),
+            "batting": None if not b else {
+                "runs": b.get("runs"), "balls": b.get("balls"), "not_out": b.get("not_out"),
+                "how_out": b.get("dismissal"), "bowler": (b.get("bowler") or {}).get("name"),
+                "fielders": [f.get("name") for f in b.get("fielders") or []],
+            },
+            "bowling": None if not w else {"wickets": w.get("wickets"), "runs": w.get("runs"),
+                                            "overs": iq_vs_us._balls_to_overs(w.get("balls") or 0),
+                                            "dismissed": w.get("victims")},
+            "fielding_dismissed": (gm.get("field") or {}).get("victims"),
+        }
+
+    players = []
+    for r in res["found"]:
+        players.append({
+            "player": (r.get("player") or {}).get("name"),
+            "club": (r.get("opponent") or {}).get("name"),
+            "games_against_us": r.get("games_played"),
+            "our_games_against_their_club": r.get("games_total"),
+            "batting_vs_us": r.get("batting"),
+            "bowling_vs_us": r.get("bowling"),
+            "got_them_out": _people(r.get("got_them_out")),
+            "fielded_them": _people(r.get("fielded_them")),
+            "victims": _people(r.get("victims")),
+            "their_fielding": _people(r.get("their_fielding")),
+            "games": [_game(g) for g in (r.get("games") or [])[:10]],
+            "lines": r.get("lines"),
+            "notes": r.get("notes"),
+        })
+    return {
+        "status": "ready",
+        "scope": _scope_echo(basis="every game we hold against their club"),
+        "players": players,
+        "where_to_look": "The Against us tab on their BetterIQ Opposition player page has the full record.",
+    }
+
+
 _DISPATCH = {
     "find_players": _tool_find_players,
     "player_detail": _tool_player_detail,
@@ -1076,6 +1162,7 @@ _DISPATCH = {
     "our_selected_xi": _tool_our_selected_xi,
     "recent_games": _tool_recent_games,
     "match_performances": _tool_match_performances,
+    "opposition_player_vs_us": _tool_opposition_player_vs_us,
 }
 
 
