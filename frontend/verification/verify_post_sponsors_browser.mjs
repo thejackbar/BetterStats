@@ -10,7 +10,8 @@
 // changes what the post starts with, that picking sponsors in the panel resizes
 // the grid and takes it over from the defaults, that taking the last sponsor off
 // asks first (and a "no" leaves it), that the grid is in the exported node, that
-// a layout with sponsor slots of its own gets no second grid, and the exact PUT
+// the scorecards carry the grid in their sponsor bar (any number, both squares
+// too), and the exact PUT
 // the admin screen sends when a sponsor is pinned to a grade.
 import { existsSync } from 'node:fs'
 import { chromium } from 'playwright'
@@ -177,8 +178,7 @@ const WITH_PIN = (team, grade) => (grade === 'A Grade' ? { sponsor_ids: ['silver
   await ctx.close()
 }
 
-// 4. Roundups reserve a slot for the grid and carry exactly one in it; only the
-// scorecards still draw sponsor slots of their own and so get no second grid.
+// 4. Roundups reserve a slot for the grid and carry exactly one in it.
 {
   const { page, ctx } = await openEditor('/admin/social-post?type=results', { answer: DEFAULT })
   await waitEditor(page)
@@ -188,11 +188,71 @@ const WITH_PIN = (team, grade) => (grade === 'A Grade' ? { sponsor_ids: ['silver
   ck('a results post carries one grid, in its reserved slot', n >= 1 && n <= 2 && (await gridAlts(page)).length > 0, `grids: ${n}`)
   await ctx.close()
 }
-{
-  const { page, ctx } = await openEditor('/admin/social-post?type=scorecard', { answer: DEFAULT })
+// 4b. The scorecards (SC1 to SC3) carry the same grid, in their sponsor bar, with
+// any number of sponsors. Until v9.145.4 they drew two logo slots of their own, so
+// a club could only ever put two sponsors on a scorecard.
+const SIX = [
+  sp('major', 'Big Major', 'major'), sp('gold', 'Gold Co', 'gold'), sp('silver', 'Silver Co', 'silver'),
+  sp('s4', 'Fourth Co', 'silver'), sp('s5', 'Fifth Co', 'bronze'), sp('s6', 'Sixth Co', 'bronze'),
+]
+const NAMES = SIX.map((x) => x.name)
+// Every sponsor logo on the canvas that is NOT in a sponsor grid: what the old
+// scorecard footer drew. Read off the live canvas box.
+const strayLogos = (page, names) => page.evaluate((names) => {
+  const canvas = document.querySelector('[data-testid=post-blocks]')?.closest('[style*="scale("]') || document.body
+  return [...canvas.querySelectorAll('img')].filter((i) => names.includes(i.getAttribute('alt')) && !i.closest('[data-sponsor-grid]')).map((i) => i.getAttribute('alt'))
+}, names)
+for (const tpl of ['SC1', 'SC2', 'SC3']) {
+  const { page, ctx, errors } = await openEditor(`/admin/social-post?template=${tpl}`, { answer: DEFAULT, sponsors: SIX })
   await waitEditor(page)
-  await page.waitForTimeout(1200)
-  ck('a scorecard uses its own sponsor slots, so no extra grid', await page.locator('[data-sponsor-grid]').count() === 0)
+  let alts = await readAlts(page)
+  ck(`${tpl}: a new scorecard carries the club default sponsors in a grid`, JSON.stringify(alts) === '["Big Major","Gold Co"]', JSON.stringify(alts))
+  // Where the grid sits: in the bar along the foot of the 1920x1080 sheet, left of the credit.
+  const geo = await page.evaluate(() => {
+    const g = document.querySelector('[data-testid=post-blocks]')?.querySelector('[data-sponsor-grid]')
+    if (!g) return null
+    const w = g.parentElement
+    // The wrapper carries the place, the grid its own size (both in canvas pixels).
+    return { top: parseFloat(w.style.top), left: parseFloat(w.style.left), w: parseFloat(g.style.width), h: parseFloat(g.style.height) }
+  })
+  ck(`${tpl}: the grid sits in the sponsor bar at the foot of the sheet`, !!geo && geo.top >= 1000 && geo.top + geo.h <= 1066 && geo.left >= 32 && geo.left + geo.w <= 1888 - 22 - 44, JSON.stringify(geo))
+  ck(`${tpl}: the layout draws no sponsor logos of its own`, (await strayLogos(page, NAMES)).length === 0, JSON.stringify(await strayLogos(page, NAMES)))
+  await rail(page, 'Sponsors')
+  const panel = await page.getByTestId('sponsors-panel').innerText({ timeout: 3000 }).catch(() => '')
+  ck(`${tpl}: the Sponsors panel offers a tick per sponsor`, (await page.getByLabel(/^Put .* on this post$/).count()) === 6, panel.slice(0, 120))
+  for (const n of ['Silver Co', 'Fourth Co', 'Fifth Co', 'Sixth Co']) {
+    await page.getByLabel(`Put ${n} on this post`).check({ timeout: 3000 }).catch(() => {})
+    await page.waitForTimeout(150)
+  }
+  await page.waitForTimeout(300)
+  alts = await gridAlts(page)
+  ck(`${tpl}: ticking four more puts all six sponsors on the scorecard`, alts.length === 6 && NAMES.every((n) => alts.includes(n)), JSON.stringify(alts))
+  const rows = await page.evaluate(() => {
+    const imgs = [...(document.querySelector('[data-testid=post-blocks]')?.querySelectorAll('[data-sponsor-grid] img') || [])]
+    return new Set(imgs.map((i) => Math.round(i.getBoundingClientRect().top / 4))).size
+  })
+  ck(`${tpl}: six logos sit in one row in the bar`, alts.length === 6 && rows === 1, String(rows))
+  ck(`${tpl}: the export copy carries the grid too`, (await page.locator('[data-sponsor-grid]').count()) >= 2)
+  if (tpl === 'SC1') {
+    await rail(page, 'Content')
+    ck('SC1: the Content panel has no upload boxes for two sponsor logos', (await page.getByText(/^(Upload [12]|✓ Set)$/).count()) === 0)
+    ck('SC1: the Content panel points at the Sponsors panel instead', (await page.getByTestId('sc-sponsors-note').count()) === 1)
+  }
+  // The Instagram squares: each square carries the same six, in its own bar.
+  await rail(page, 'Content')
+  await page.getByRole('button', { name: '2 Instagram squares' }).click({ timeout: 3000 }).catch(() => {})
+  await page.waitForTimeout(600)
+  const sq = await page.evaluate(() => [...document.querySelectorAll('[data-testid=sc-square-sponsors]')].map((c) => {
+    const g = c.querySelector('[data-sponsor-grid]')
+    return g ? { n: g.querySelectorAll('img').length, top: parseFloat(g.parentElement.style.top), right: parseFloat(g.parentElement.style.left) + parseFloat(g.style.width) } : null
+  }))
+  // The canvas plus the two export pages.
+  ck(`${tpl}: both squares (and the canvas) carry all six sponsors`, sq.length === 3 && sq.every((x) => x && x.n === 6), JSON.stringify(sq))
+  ck(`${tpl}: on a square the grid sits in the square's own bar`, sq.length > 0 && sq.every((x) => x && x.top >= 1000 && x.right <= 1048 - 22 - 44), JSON.stringify(sq))
+  await rail(page, 'Sponsors')
+  ck(`${tpl}: the Sponsors panel says the squares keep the logos in their bar`, (await page.getByTestId('sponsors-squares-note').count()) === 1)
+  ck(`${tpl}: no page errors`, errors.length === 0, errors.join(' | '))
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/scorecard-${tpl}-sponsors.png` })
   await ctx.close()
 }
 

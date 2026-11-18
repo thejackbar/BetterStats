@@ -1,11 +1,15 @@
 // SPONSOR-SLOT VARIANT of shoot_templates.mjs. Same driving, but the club has
-// sponsors with logos (SPONSORS=1|2|3 of them, default 2), so the editor puts the
+// sponsors with logos (SPONSORS=1 to 6 of them, default 2), so the editor puts the
 // sponsor grid on every post, and each shot is checked for anything that sits
 // UNDER the grid (text or a picture that is not the grid itself). Prints
 // `OVERLAP` lines per shot; a clean layout prints none.
 //
 //   npx vite --port 5199 &
 //   SPONSORS=2 node frontend/verification/shoot_sponsor_slots.mjs /tmp/slots T2 C4
+//
+// SPLIT=1 puts a scorecard (SC1 to SC3) on its two Instagram squares and shoots
+// both pages (`<id>-sq1.png`, `<id>-sq2.png`). The scorecards take no post size,
+// so run them with SIZES=square.
 //
 // Screenshots every BetterPosts template at every post size, by driving the
 // REAL editor — so each layout gets the exact props the app builds for it
@@ -53,15 +57,19 @@ const PLAYERS = Array.from({ length: 13 }, (_, i) => ({
   status: 'active', photo_url: `/api/images/players/p${i + 1}/photo`,
 }))
 
-const NSPONSORS = Math.max(1, Math.min(3, +(process.env.SPONSORS || 2)))
+const NSPONSORS = Math.max(1, Math.min(6, +(process.env.SPONSORS || 2)))
+const SPLIT = process.env.SPLIT === '1'
 const SPONSOR_LIST = [
   { id: 'sp1', name: 'Bradford Legal', tier: 'major', logo_url: 'x', sort_order: 1 },
   { id: 'sp2', name: 'retraVision', tier: 'gold', logo_url: 'x', sort_order: 2 },
   { id: 'sp3', name: 'Forno 47', tier: 'silver', logo_url: 'x', sort_order: 3 },
+  { id: 'sp4', name: 'Coastline Tyres', tier: 'silver', logo_url: 'x', sort_order: 4 },
+  { id: 'sp5', name: 'Hilltop IGA', tier: 'bronze', logo_url: 'x', sort_order: 5 },
+  { id: 'sp6', name: 'Pinnacle Physio', tier: 'bronze', logo_url: 'x', sort_order: 6 },
 ]
 // Wide logos with a coloured field and dark type, so a sponsor panel left off
 // still reads, and so a logo sits visibly against whatever it lands on.
-const LOGO = (i) => Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="600" height="200" viewBox="0 0 600 200"><rect width="600" height="200" rx="14" fill="${['#ffffff', '#e4002b', '#1d6b3a'][i]}"/><text x="300" y="118" font-family="Arial" font-weight="800" font-size="64" text-anchor="middle" fill="${['#1d6b3a', '#ffffff', '#ffffff'][i]}">${['BRADFORD', 'retraVision', 'FORNO 47'][i]}</text></svg>`)
+const LOGO = (i) => Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="600" height="200" viewBox="0 0 600 200"><rect width="600" height="200" rx="14" fill="${['#ffffff', '#e4002b', '#1d6b3a', '#1b4fa0', '#f2a900', '#6b2c91'][i]}"/><text x="300" y="118" font-family="Arial" font-weight="800" font-size="64" text-anchor="middle" fill="${['#1d6b3a', '#ffffff', '#ffffff', '#ffffff', '#111111', '#ffffff'][i]}">${['BRADFORD', 'retraVision', 'FORNO 47', 'COASTLINE', 'HILLTOP', 'PINNACLE'][i]}</text></svg>`)
 const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR42mP8z8BQz0AEYBxVSF+FABJADveWkH6oAAAAAElFTkSuQmCC',
   'base64',
@@ -70,8 +78,9 @@ const PNG = Buffer.from(
 const browser = await chromium.launch(existsSync(EXECUTABLE) ? { executablePath: EXECUTABLE } : {})
 // Tall enough that a 1080×1920 story fits the clip — a clip past the bottom of
 // the viewport comes back short, which reads as a broken layout rather than a
-// framing mistake. Wide enough to stay out of the editor's mobile shell.
-const ctx = await browser.newContext({ viewport: { width: 1600, height: 1980 } })
+// framing mistake. Wide enough to stay out of the editor's mobile shell, and
+// for a whole 1920 scorecard (a 1600 viewport cut its right edge off).
+const ctx = await browser.newContext({ viewport: { width: 1940, height: 1980 } })
 
 const json = (body) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
 await ctx.route('**/api/**', async (route) => {
@@ -151,6 +160,11 @@ for (const id of IDS) {
     await page.getByRole('button', { name: /DOWNLOAD PNG|SLIDES/ }).first().waitFor({ timeout: 15000 })
   } catch { /* the node check below decides */ }
   await fillLineup()
+  if (SPLIT) {
+    const sq = page.getByRole('button', { name: '2 Instagram squares' })
+    if (await sq.count()) await sq.first().click().catch(() => {})
+    await page.waitForTimeout(500)
+  }
 
   for (const size of SIZES) {
     const before = errors.length
@@ -160,7 +174,8 @@ for (const id of IDS) {
     // The off-screen export node is what the PNG is really captured from, so it
     // is what gets shot — moved on screen first, because an element screenshot
     // of something at left:-9999px silently captures the page instead.
-    const moved = await page.evaluate(() => {
+    for (let pageIdx = 0; pageIdx < (SPLIT ? 2 : 1); pageIdx++) {
+    const moved = await page.evaluate((pageIdx) => {
       const holder = [...document.querySelectorAll('div')].find(
         (d) => d.style.left === '-9999px' && d.style.position === 'absolute',
       )
@@ -171,19 +186,21 @@ for (const id of IDS) {
       holder.style.position = 'fixed'
       holder.style.zIndex = '2147483647'
       holder.style.background = '#101010'
-      const first = holder.firstElementChild
+      const first = holder.children[pageIdx]
       if (!first) return null
+      // Only the page being shot: hide the others so they do not stack in the clip.
+      ;[...holder.children].forEach((c, i) => { c.style.display = i === pageIdx ? '' : 'none' })
       const r = first.getBoundingClientRect()
       // What sits under the sponsor grid: any element with its own text, or any
       // picture, whose box crosses the grid's. Big pictures are reported as bg.
-      const grid = holder.querySelector('[data-sponsor-grid]')
+      const grid = first.querySelector('[data-sponsor-grid]')
       const overlaps = []
       let gridBox = null
       if (grid) {
         const g = grid.getBoundingClientRect()
         gridBox = { x: Math.round(g.left - r.left), y: Math.round(g.top - r.top), w: Math.round(g.width), h: Math.round(g.height) }
         const box = grid.parentElement
-        for (const el of holder.querySelectorAll('*')) {
+        for (const el of first.querySelectorAll('*')) {
           if (grid.contains(el) || el.contains(grid)) continue
           const own = [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())
           const pic = el.tagName === 'IMG'
@@ -197,10 +214,11 @@ for (const id of IDS) {
           }
         }
       }
-      return { w: Math.round(r.width), h: Math.round(r.height), grid: gridBox, overlaps }
-    })
+      const logos = grid ? grid.querySelectorAll('img').length : 0
+      return { w: Math.round(r.width), h: Math.round(r.height), grid: gridBox, logos, overlaps }
+    }, pageIdx)
 
-    const file = `${OUT}/${id}-${size}.png`
+    const file = SPLIT ? `${OUT}/${id}-sq${pageIdx + 1}.png` : `${OUT}/${id}-${size}.png`
     // Page.screenshot takes a clip; Locator.screenshot does not, and passing one
     // there is how the first cut of this stalled with no output at all.
     if (moved) {
@@ -219,13 +237,15 @@ for (const id of IDS) {
         h.style.position = 'absolute'
         h.style.zIndex = '-1'
         h.style.background = ''
+        ;[...h.children].forEach((c) => { c.style.display = '' })
         delete h.dataset.shot
       })
     }
     const errs = errors.slice(before)
     shots.push({ id, size, ok: !!moved, box: moved, errors: errs.length, err: errs[0] || null })
-    console.log(`${id.padEnd(5)} ${size.padEnd(9)} ${moved ? `${moved.w}x${moved.h}` : 'NO NODE'} grid=${moved?.grid ? JSON.stringify(moved.grid) : 'NONE'}${errs.length ? `  ERR ${errs[0].slice(0, 90)}` : ''}`)
+    console.log(`${id.padEnd(5)} ${(SPLIT ? `sq${pageIdx + 1}` : size).padEnd(9)} ${moved ? `${moved.w}x${moved.h}` : 'NO NODE'} grid=${moved?.grid ? JSON.stringify(moved.grid) : 'NONE'} logos=${moved?.logos ?? 0}${errs.length ? `  ERR ${errs[0].slice(0, 90)}` : ''}`)
     for (const o of moved?.overlaps || []) console.log(`   OVERLAP ${o.bg ? '(bg photo) ' : ''}${o.tag} "${o.text}" @${o.x},${o.y} ${o.w}x${o.h}`)
+    }
   }
 }
 
@@ -238,7 +258,7 @@ for (let b = 0; b * BATCH < IDS.length; b++) {
   const html = `<body style="margin:0;background:#181818;font:11px monospace;color:#ddd">
   ${rows.map((id) => `<div style="display:flex;gap:8px;align-items:flex-start;padding:8px">
     <div style="width:60px">${id}</div>
-    ${SIZES.map((s) => `<div><div>${s}</div><img src="file://${OUT}/${id}-${s}.png" style="height:300px;display:block"></div>`).join('')}
+    ${(SPLIT ? ['sq1', 'sq2'] : SIZES).map((s) => `<div><div>${s}</div><img src="file://${OUT}/${id}-${s}.png" style="height:300px;display:block"></div>`).join('')}
   </div>`).join('')}
   </body>`
   await sheet.setContent(html)

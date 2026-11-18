@@ -11,7 +11,7 @@
 //   block              the post's sponsor block, or null when it has none
 //   defaultInfo        { ids, source } what a post like this one starts with
 //   context            { team, grade } what this post is about (for the pin buttons)
-//   native             true on a layout with sponsor slots of its own
+//   squares            true on a scorecard split into Instagram squares
 //   onPick(ids)        set the block's sponsors (creates the block if absent)
 //   onPanel(style)     'light' | 'dark' | 'none'
 //   onUseDefault()     put the block back on the default sponsors
@@ -41,7 +41,7 @@ const Seg = ({ active, onClick, children, title }) => (
 )
 
 export default function SponsorsPanel({
-  sponsors = [], block, defaultInfo, context = {}, native = false,
+  sponsors = [], block, defaultInfo, context = {}, squares = false,
   onPick, onPanel, onUseDefault, onEditOnPost, onRemove, onPin, pinState,
 }) {
   const usable = sponsors.filter((s) => s.url)
@@ -50,17 +50,6 @@ export default function SponsorsPanel({
   const toggle = (id) => {
     const next = picked.has(id) ? [...picked].filter((x) => x !== id) : [...picked, id]
     onPick(next)
-  }
-
-  if (native) {
-    return (
-      <div className="flex flex-col gap-2" data-testid="sponsors-panel">
-        <p className="text-[12px] leading-relaxed text-pb-dim">
-          This layout has sponsor slots of its own. They start with your default sponsors. Change them
-          under Sponsor logos in the Content panel.
-        </p>
-      </div>
-    )
   }
 
   if (!sponsors.length) {
@@ -82,6 +71,12 @@ export default function SponsorsPanel({
       <p className="text-[11px] leading-relaxed text-pb-faint">
         Every post carries a sponsor. This one starts with {SOURCE_TEXT[defaultInfo?.source || 'none']}.
       </p>
+      {squares && (
+        <p className="text-[11px] leading-relaxed text-pb-faint" data-testid="sponsors-squares-note">
+          On the Instagram squares the logos sit in each square's sponsor bar. Moving or resizing them
+          only changes the wide post.
+        </p>
+      )}
 
       <div className="flex flex-col gap-1.5">
         {usable.map((s) => (
