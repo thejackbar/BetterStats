@@ -79,7 +79,8 @@ async function open(url, { admin = true, width = 1280, postStatus = 200, waitFor
       seen.teamList++
       return json({ game_id: GID, reasons: REASONS, players: [
         { ...(marked ? royMarked : royNamed), team_name: 'Piara Waters' }, { ...ben, team_name: 'Piara Waters' },
-        { ...ben, player_id: 'other-side', player_name: 'Other, Olive', team_name: 'Piara Waters Thirds' }] })
+        { ...ben, player_id: 'other-side', player_name: 'Other, Olive', team_name: 'Piara Waters Thirds' },
+        { ...royNamed, player_id: 'sub-sam', player_name: 'Sub, Sam', status: 'fielded', team_name: 'Piara Waters Thirds' }] })
     }
     if (p === `/games/${GID}/not-played/${ROY}/adjustments`) {
       return json({ adjustments: [{ id: 7, matches: -1, season_name: 'Summer 2014/15', grade_name: '5th Grade' }] })
@@ -157,7 +158,7 @@ const text = async (page, sel) => (await page.locator(sel).first().textContent()
 {
   const { ctx, page, seen } = await open(`/games/${GID}`, { waitFor: '[data-testid="team-list-panel"]' })
   const rows = page.getByTestId('game-row')
-  ck('admin: the team list shows every named club player', await rows.count() === 3, String(await rows.count()))
+  ck('admin: the team list shows every named club player', await rows.count() === 4, String(await rows.count()))
   const royRow = rows.filter({ hasText: 'Marsh, Roy' })
   const benRow = rows.filter({ hasText: 'Batted, Ben' })
   ck("admin: Roy (nothing recorded) is offered DIDN'T PLAY", await royRow.getByTestId('mark-not-played').count() === 1)
@@ -184,6 +185,13 @@ const text = async (page, sel) => (await page.locator(sel).first().textContent()
   await page.getByTestId('unmark-not-played').click().catch(() => {})
   await page.waitForTimeout(600)
   ck('COUNT AGAIN sends a DELETE for that player and game', seen.deletes.length === 1, JSON.stringify(seen.deletes))
+  const subRow = rows.filter({ hasText: 'Sub, Sam' })
+  ck('a player who only fielded is offered DIDN\'T PLAY', await subRow.getByTestId('mark-not-played').count() === 1)
+  await subRow.getByTestId('mark-not-played').click().catch(() => {})
+  await page.waitForSelector('[data-testid="sub-fielder-note"]').catch(() => {})
+  ck('and the dialog says the catch comes off their figures too',
+     /taken as a sub, so it comes off their fielding figures/.test(await page.getByTestId('sub-fielder-note').textContent().catch(() => '')))
+  await page.getByRole('button', { name: 'CANCEL' }).click().catch(() => {})
   ck('admin: no script errors', seen.errors.length === 0, seen.errors.join(' | '))
   await ctx.close()
 }

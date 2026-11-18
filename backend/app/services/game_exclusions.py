@@ -29,8 +29,12 @@ withdrawal writers leave a marked appearance alone.
 
 WHAT IT REFUSES
 ---------------
-A player with a batting, bowling or fielding line in the game played it (a substitute fielder's
-catch is a line), so the mark is refused for them. Only a synced game of this club can be marked:
+A player who batted or bowled in the game played it, so the mark is refused for them. A player
+whose only line is fielding CAN be marked: a substitute fielder takes catches, and a catch taken as
+a sub ("c sub") is not the player's. The mark takes that fielding line off their figures with the
+game: `v_effective_fielding_stats` leaves the row out (services/superseded_ddl.py), so every count
+that reads a fielding line as a match played follows, and so do the season view's reserve rule
+and fees. The scorecard itself still shows the catch. Only a synced game of this club can be marked:
 an uploaded or imported card is edited from Manual entries.
 """
 from __future__ import annotations
@@ -56,14 +60,17 @@ REASONS: dict[str, str] = {
 }
 
 # What a player's place in one game reads as. Ordered by precedence in `_status`.
-PLAYED = "played"                 # a batting, bowling or fielding line: the game counts, cannot be marked
+PLAYED = "played"                 # a batting or bowling line: the game counts, cannot be marked
+FIELDED = "fielded"               # a fielding line only (a catch, stumping or run out): counts, CAN be marked,
+                                  # because a substitute fielder takes catches too ("c sub"). The mark takes
+                                  # the fielding line off the player's figures with the game (the fielding view).
 MARKED = "marked"                 # the club marked it: does not count
 GAME_NOT_PLAYED = "game_not_played"  # the fixture was called off or never started: does not count
 AUTO_RESERVE = "auto_reserve"     # the app read the player as 12th man (slot 12 or later)
 AUTO_WITHDRAWN = "auto_withdrawn"  # the app read the player as dropped from the final sheet
 NAMED = "named"                   # named, nothing recorded, counted: the club can mark it
 
-COUNTS = {PLAYED, NAMED}
+COUNTS = {PLAYED, FIELDED, NAMED}
 
 _REAPPLY = """
     UPDATE game_appearances ga SET is_reserve = TRUE
@@ -95,10 +102,12 @@ async def reapply(db: AsyncSession, game_id=None, player_ids: Optional[list] = N
 
 
 def _status(r) -> str:
-    if r["has_row"]:
+    if r["has_bat_bowl"]:
         return PLAYED
     if r["exclusion_id"] is not None:
         return MARKED
+    if r["has_field"]:
+        return FIELDED
     if r["not_played"]:
         return GAME_NOT_PLAYED
     if r["is_reserve"] is True:
@@ -115,8 +124,9 @@ def _rows_sql(where: str) -> str:
                gr.name AS grade_name, s.name AS season_name, s.year AS season_year,
                (EXISTS (SELECT 1 FROM batting_innings b WHERE b.game_id = ga.game_id AND b.player_id = ga.player_id)
                 OR EXISTS (SELECT 1 FROM bowling_spells w WHERE w.game_id = ga.game_id AND w.player_id = ga.player_id)
-                OR EXISTS (SELECT 1 FROM fielding_stats f WHERE f.game_id = ga.game_id AND f.player_id = ga.player_id)
-               ) AS has_row,
+               ) AS has_bat_bowl,
+               EXISTS (SELECT 1 FROM fielding_stats f WHERE f.game_id = ga.game_id AND f.player_id = ga.player_id)
+                 AS has_field,
                {not_played_game_sql('rg')} AS not_played,
                e.id AS exclusion_id, e.reason, e.note, e.entered_at, e.source
           FROM game_appearances ga
@@ -147,7 +157,7 @@ def _row_out(r) -> dict:
         "season_year": r["season_year"],
         "status": status,
         "counts": status in COUNTS,
-        "can_mark": status == NAMED,
+        "can_mark": status in (NAMED, FIELDED),
         "reason": r["reason"],
         "reason_label": REASONS.get(r["reason"]) if r["reason"] else None,
         "note": r["note"],
@@ -225,8 +235,7 @@ async def mark(db: AsyncSession, org_id, user_id, game_id, player_id, reason: st
         raise MarkRefused("That player is not on this club's team sheet for that match, "
                           "or the match is not one of this club's synced games.", 404)
     if row["status"] == PLAYED:
-        raise MarkRefused(f"{row['player_name']} has a batting, bowling or fielding line in this game, "
-                          "so it counts as played.")
+        raise MarkRefused(f"{row['player_name']} batted or bowled in this game, so it counts as played.")
     if row["status"] == MARKED:
         raise MarkRefused(f"{row['player_name']} is already marked as not having played this game.")
     if row["status"] == GAME_NOT_PLAYED:
@@ -328,7 +337,9 @@ async def suggestions(db: AsyncSession, org_id, limit: int = 500) -> dict:
             SELECT ga.player_id, ga.game_id, ga.is_reserve, s.year, {kind_s} AS kind,
                    (EXISTS (SELECT 1 FROM batting_innings b WHERE b.game_id = ga.game_id AND b.player_id = ga.player_id)
                     OR EXISTS (SELECT 1 FROM bowling_spells w WHERE w.game_id = ga.game_id AND w.player_id = ga.player_id)
-                    OR EXISTS (SELECT 1 FROM fielding_stats f WHERE f.game_id = ga.game_id AND f.player_id = ga.player_id)
+                    OR EXISTS (SELECT 1 FROM fielding_stats f WHERE f.game_id = ga.game_id AND f.player_id = ga.player_id
+                               AND NOT EXISTS (SELECT 1 FROM game_exclusions x
+                                                WHERE x.game_id = f.game_id AND x.player_id = f.player_id))
                    ) AS has_row,
                    {not_played_game_sql('rg')} AS not_played
               FROM game_appearances ga
@@ -431,7 +442,9 @@ async def big_sheets(db: AsyncSession, org_id, limit: int = 200) -> dict:
             SELECT ga.game_id, COALESCE(ga.team_name, '') AS team_name, ga.player_id, ga.is_reserve,
                    (EXISTS (SELECT 1 FROM batting_innings b WHERE b.game_id = ga.game_id AND b.player_id = ga.player_id)
                     OR EXISTS (SELECT 1 FROM bowling_spells w WHERE w.game_id = ga.game_id AND w.player_id = ga.player_id)
-                    OR EXISTS (SELECT 1 FROM fielding_stats f WHERE f.game_id = ga.game_id AND f.player_id = ga.player_id)
+                    OR EXISTS (SELECT 1 FROM fielding_stats f WHERE f.game_id = ga.game_id AND f.player_id = ga.player_id
+                               AND NOT EXISTS (SELECT 1 FROM game_exclusions x
+                                                WHERE x.game_id = f.game_id AND x.player_id = f.player_id))
                    ) AS has_row,
                    {not_played_game_sql('rg')} AS not_played
               FROM game_appearances ga
@@ -509,11 +522,11 @@ async def premiers_role_set(db: AsyncSession, org_id, user_id, game_id, player_i
                                              "match with this player on its team sheet."}
     name = row["player_name"]
     if row["status"] == PLAYED:
-        return {"changed": False, "message": f"{name} has a batting, bowling or fielding line in this match, "
+        return {"changed": False, "message": f"{name} batted or bowled in this match, "
                                              "so it still counts as a game played."}
     if row["status"] == MARKED:
         return {"changed": False, "message": f"{name} was already marked as not having played this match."}
-    if row["status"] != NAMED:
+    if row["status"] not in (NAMED, FIELDED):
         return {"changed": False, "message": f"This match already does not count as a game played for {name}."}
     try:
         async with db.begin_nested():

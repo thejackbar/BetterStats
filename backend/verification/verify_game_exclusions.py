@@ -185,6 +185,21 @@ async def seed() -> None:
                      r=True if extra_reserve else None, sl=12 if extra_reserve else None)
             return gid
 
+        # SUB: 3 games played, and a final where they were a substitute fielder and took a catch. CA counts 4.
+        P["SUB"] = uuid.uuid4()
+        await ex("INSERT INTO players (id, organisation_id, name, grassroots_id, status) VALUES (:i, :o, 'Sub, Sam', :g, 'active')",
+                 i=P["SUB"], o=ORG, g=str(P["SUB"]))
+        for _ in range(3):
+            gid = await game(G["C"], d1415)
+            await played("SUB", gid)
+            await ex("INSERT INTO fielding_stats (game_id, player_id, catches, catches_wk, run_outs, stumpings) "
+                     "VALUES (:g, :p, 1, 0, 0, 0)", g=gid, p=P["SUB"])
+        GAMES["sub_final"] = await game(G["C"], d1415 + timedelta(days=170))
+        await named("SUB", GAMES["sub_final"])
+        await ex("INSERT INTO fielding_stats (game_id, player_id, catches, catches_wk, run_outs, stumpings) "
+                 "VALUES (:g, :p, 1, 0, 0, 0)", g=GAMES["sub_final"], p=P["SUB"])
+        await ca("SUB", S1415, 4, {"C": 4})
+
         GAMES["gf"] = await sheet()
         GAMES["sheet_reserve"] = await sheet(extra_reserve=True)
         GAMES["sheet_checked"] = await sheet()
@@ -464,6 +479,50 @@ async def main() -> None:
         st = await gf_status(P["EXTRA"])
         check("a mark made on the match page survives the Premiers role coming off",
               st.get("status") == "marked" and st.get("reason") == "other", st)
+
+    print("\n-- 11. A SUBSTITUTE FIELDER WHO TOOK A CATCH: THE GAME AND THE CATCH COME OFF --")
+    async def catches_last10(key):
+        async with Session() as s:
+            d = await get_player_stats(player_id=str(P[key]), db=s, season_id=None, grade_id=None, last_n_games=10,
+                                       start_date=None, end_date=None, categories=None, formats=None, competitions=None,
+                                       grades=None)
+        return (d["career_fielding"] or {}).get("total_catches"), (d["career_fielding"] or {}).get("games")
+    st = (await as_admin(gx_routes.team_list, game_id=str(GAMES["sub_final"])))["players"]
+    sub = next((r for r in st if r["player_id"] == str(P["SUB"])), {})
+    check("a player whose only line is a catch reads as fielded, and can be marked",
+          sub.get("status") == "fielded" and sub.get("can_mark") is True, sub)
+    before = (await header("SUB"), await catches_last10("SUB"))
+    check("before: 4 games, and 4 catches over the last 10 games", before == (4, (4, 4)), before)
+    from app.services import fees as fees_svc
+    async with Session() as s:
+        fee_rows = {(str(r.game_id), str(r.player_id)) for r in await fees_svc._stat_line_appearances(s, [GAMES["sub_final"]])}
+    check("control: fees count the final as a match day for them", (str(GAMES["sub_final"]), str(P["SUB"])) in fee_rows)
+    try:
+        await as_admin(gx_routes.mark_not_played, game_id=str(GAMES["sub_final"]),
+                       data=gx_routes.NotPlayedIn(player_id=str(P["SUB"]), reason="other", note="sub fielder"))
+        marked = True
+    except HTTPException as e:
+        marked = False
+        check("marking a fielding-only player is accepted", False, e.detail)
+    if marked:
+        h, t, g = await everywhere("SUB")
+        check("header, season table and grid all read 3", (h, t, g) == (3, 3, 3), (h, t, g))
+        check("the catch comes off the per-game figures with the game (3 catches in 3 games)",
+              await catches_last10("SUB") == (3, 3), await catches_last10("SUB"))
+        check("the batting board agrees", await board("SUB") == 3, await board("SUB"))
+        async with Session() as s:
+            fee_rows = {(str(r.game_id), str(r.player_id)) for r in await fees_svc._stat_line_appearances(s, [GAMES["sub_final"]])}
+            raw = (await s.execute(text("SELECT catches FROM fielding_stats WHERE game_id = :g AND player_id = :p"),
+                                   {"g": GAMES["sub_final"], "p": P["SUB"]})).scalar()
+        check("fees no longer count it as a match day", (str(GAMES["sub_final"]), str(P["SUB"])) not in fee_rows)
+        check("the stored catch itself is untouched (the scorecard still shows it)", raw == 1, raw)
+        await as_admin(gx_routes.unmark_not_played, game_id=str(GAMES["sub_final"]), player_id=str(P["SUB"]))
+        check("taking the mark off puts the game and the catch back",
+              (await header("SUB"), await catches_last10("SUB")) == (4, (4, 4)),
+              (await header("SUB"), await catches_last10("SUB")))
+    async with engine.connect() as conn:
+        body = (await conn.execute(text("SELECT pg_get_viewdef('v_effective_fielding_stats'::regclass)"))).scalar()
+    check("the fielding view in the database carries the sub fielder clause", "game_exclusions" in (body or ""))
 
     await finish()
 

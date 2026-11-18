@@ -11,7 +11,8 @@ const BTN = 'px-3 py-1.5 rounded border pb-hairline font-mono text-[10px] tracki
 const BTN_PRIMARY = 'px-4 py-2 rounded bg-pb-accent text-white text-sm font-semibold hover:opacity-90 disabled:opacity-40'
 
 const STATUS = {
-  played: { label: 'Played', tone: 'text-pb-faint', note: 'Has a batting, bowling or fielding line, so the game counts.' },
+  played: { label: 'Played', tone: 'text-pb-faint', note: 'Batted or bowled, so the game counts.' },
+  fielded: { label: 'Counted', tone: 'text-pb-text', note: 'Fielded only (a catch, stumping or run out). If they were a substitute fielder, mark them as not played.' },
   named: { label: 'Counted', tone: 'text-pb-text', note: 'Named in the side with nothing recorded. Counted as a game played.' },
   marked: { label: 'Not counted', tone: 'text-pb-accent', note: null },
   game_not_played: { label: 'Not counted', tone: 'text-pb-faint', note: 'The match was called off or never started.' },
@@ -82,6 +83,14 @@ export function NotPlayedDialog({ row, reasons, onClose, onDone }) {
           {' '}They stay on the team list with the reason you pick, and this game comes off their games played
           everywhere: profile, season table, leaderboards and milestones.
         </p>
+
+        {row.status === 'fielded' && (
+          <p className="text-xs text-pb-text mb-4 rounded border border-pb-accent/40 p-3" data-testid="sub-fielder-note">
+            {row.player_name} has a fielding line in this game. If they were a substitute fielder, the catch, stumping
+            or run out was taken as a sub, so it comes off their fielding figures along with the game. The scorecard
+            still shows it.
+          </p>
+        )}
 
         <fieldset className="mb-4">
           <legend className="font-mono text-[10px] text-pb-faint mb-2">REASON</legend>
