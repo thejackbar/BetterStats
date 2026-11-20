@@ -4766,6 +4766,12 @@ async def lifespan(app: FastAPI):
         for _stmt in _ASSOC_WORKSPACE_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 393: an association workspace's crest library. Same one-copy rule: this
+        # and alembic's 393 both run services/association_crest_ddl.
+        from app.services.association_crest_ddl import STATEMENTS as _ASSOC_CREST_DDL
+        for _stmt in _ASSOC_CREST_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 391: a club marking a player as not having played a synced game, and the
         # "Games to check" suggestions it kept. Same one-copy rule: this and alembic's 391 both run
         # services/game_exclusion_ddl.STATEMENTS. The last statement writes every mark back onto its

@@ -67,6 +67,18 @@ async def get_org_logo(org_id: str, format: str | None = None, db: AsyncSession 
     return Response(content=data, media_type=mime, headers=_CACHE_HEADERS)
 
 
+@router.get("/association-crests/{workspace_id}/{ca_org_id}")
+async def get_association_crest(workspace_id: str, ca_org_id: str, variant: str = "", db: AsyncSession = Depends(get_db)):
+    """A club crest from an association workspace's library (services/association_crests.py).
+    The address carries ?v= of the bytes it serves, so it is cached hard like a logo."""
+    from app.services.association_crests import crest_image
+    wid = str(_parse_uuid(workspace_id))
+    data = await crest_image(db, wid, ca_org_id, variant if variant in ("original", "cleaned", "uploaded") else "")
+    if not data:
+        raise HTTPException(404, "No crest")
+    return Response(content=data, media_type="image/png", headers=_CACHE_HEADERS)
+
+
 @router.get("/organisations/{org_id}/font/{role}")
 async def get_org_font(org_id: str, role: str, db: AsyncSession = Depends(get_db)):
     if role not in font_service.FONT_ROLES:

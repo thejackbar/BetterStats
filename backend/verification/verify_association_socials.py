@@ -51,6 +51,10 @@ try:
     from app.services import social_competition as sc  # noqa: E402
 except Exception:  # the control commit has no such module
     sc = None
+try:
+    from app.services import association_crests as crests  # noqa: E402
+except Exception:  # the control commit has no crest library
+    crests = None
 
 engine = create_async_engine(os.environ["DATABASE_URL"], echo=False)
 Session = async_sessionmaker(engine, expire_on_commit=False)
@@ -85,6 +89,13 @@ async def attempt(label, coro):
         db = CURRENT_DB.get("db")
         if db is not None:
             await db.rollback()
+            # A rollback expires every loaded object: read the workspace and club
+            # again so one failed step does not take the checks after it down.
+            for inst in CURRENT_DB.get("keep", []):
+                try:
+                    await db.refresh(inst)
+                except Exception:  # noqa: BLE001
+                    pass
         return None
 
 
@@ -256,7 +267,36 @@ async def fake_grade_matches(grade_id, *, force=False):
     return list(GRADE_LIST) if grade_id.lower() == GRADE else []
 
 
+# Crest pictures Cricket Australia would serve: each club's colour on a WHITE
+# square, so the library has a plain background to take off. Kalamunda's host
+# is down (the fetch fails), so its crest must fall back to the raw address.
+CREST_COLOUR = {"app": (20, 60, 160), "wsc": (200, 30, 30), "sub": (20, 110, 50), "ben": (240, 180, 0),
+                "swv": (10, 120, 60), "kal": None}
+FETCHES: list[str] = []
+
+
+def crest_png(rgb):
+    import io
+    from PIL import Image, ImageDraw
+    im = Image.new("RGBA", (200, 200), (255, 255, 255, 255))
+    ImageDraw.Draw(im).ellipse((30, 20, 170, 180), fill=(*rgb, 255))
+    buf = io.BytesIO()
+    im.save(buf, "PNG")
+    return buf.getvalue()
+
+
+async def fake_fetch_logo(url, *, client=None):
+    FETCHES.append(url)
+    key = url.rsplit("/", 1)[-1].split(".")[0].split("?")[0]
+    rgb = CREST_COLOUR.get(key)
+    return crest_png(rgb) if rgb else None
+
+
+if crests is not None:
+    crests.fetch_logo = fake_fetch_logo
+
 gr.get_match_scorecard = fake_scorecard
+admin_router.get_match_scorecard = fake_scorecard  # the scorecard route imported it by name
 gr.get_match_detail = fake_detail
 gr.get_matches_detail = fake_details
 gr.get_grade_matches = fake_grade_matches
@@ -279,6 +319,17 @@ async def setup():
         await conn.run_sync(Base.metadata.create_all)
         # Independent of the DDL module so the control commit gets the same table.
         await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS workspace_kind TEXT"))
+        # The crest library, copied column for column from association_crest_ddl.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS association_crests (
+                workspace_id UUID NOT NULL, ca_org_id TEXT NOT NULL, name TEXT, src_url TEXT,
+                original_png BYTEA, cleaned_png BYTEA, uploaded_png BYTEA,
+                use_cleaned BOOLEAN NOT NULL DEFAULT TRUE, colour TEXT, colour2 TEXT,
+                colour_by_hand BOOLEAN NOT NULL DEFAULT FALSE, version TEXT, uploaded_by UUID,
+                uploaded_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (workspace_id, ca_org_id))
+        """))
         # usage_events is a raw lifespan table (main.py), copied column for column;
         # All Clubs reads it for "last active".
         await conn.execute(text("""
@@ -384,6 +435,7 @@ async def main():
             ws.workspace_kind = "association"
         club = await db.get(Organisation, APPLECROSS_ORG)
         await db.refresh(club)
+        CURRENT_DB["keep"] = [ws, club]
 
         print("\n[fixtures] a grade link with no round is the next round to be played")
         fx = await attempt("fixtures", admin_router.get_social_fixtures(GRADE_BARE, db, ws))
@@ -397,10 +449,97 @@ async def main():
         check("rows are neutral and read from home", all(r.get("neutral") and r.get("ha") == "H" for r in rows) and bool(rows))
         check("`grade` carries the home side so every layout names it first", [r.get("grade") for r in rows],
               ["WESTERN SUBURBS", "SWAN VALLEY"])
-        check("Applecross (registered here) prints our hosted crest", g(rows, 1, "oppLogo"),
-              "/api/images/organisations/app/logo")
-        check("an unregistered club prints its Cricket Australia crest", g(rows, 0, "homeLogo"), cdn("wsc"))
+        lib = f"/api/images/association-crests/{ws.id}/"
+        check("an unregistered club prints its crest from the workspace library",
+              str(g(rows, 0, "homeLogo", default="")).startswith(lib + CLUBS["wsc"][0]))
+        check("a registered club's crest also comes from the library (one look for the grade)",
+              str(g(rows, 1, "oppLogo", default="")).startswith(lib + str(APPLECROSS_ORG)))
+        check("each side carries the colour read from its crest", (g(rows, 0, "homeColor"), g(rows, 1, "oppColor")),
+              ("#c81e1e", "#143ca0"))
         check("no transient keys leak", bool(rows) and not any(k.startswith("_") for r in rows for k in r))
+
+        print("\n[crests] the workspace's crest library")
+        fetched_once = len(FETCHES)
+        fx_again = await attempt("fixtures again", admin_router.get_social_fixtures(GRADE_BARE, db, ws))
+        check("a second pull fetches no crest again (kept for the workspace)", len(FETCHES), fetched_once)
+        check("a second pull prints the same crests", [r.get("homeLogo") for r in g(fx_again, "dates", 0, "fixtures", default=[])],
+              [r.get("homeLogo") for r in rows])
+        lib_list = await attempt("crest list", lambda: admin_router.get_social_crests(db, ws))
+        held = {c["caOrgId"]: c for c in g(lib_list, "crests", default=[])}
+        wsc_id = CLUBS["wsc"][0]
+        check("the library lists every club a pull named", {CLUBS[k][0] for k in ("wsc", "sub", "swv", "app")} <= set(held))
+        png = await crests.crest_image(db, str(ws.id), wsc_id) if crests else None
+
+        def corner(data):
+            import io
+            from PIL import Image
+            return Image.open(io.BytesIO(data)).convert("RGBA").getpixel((0, 0)) if data else None
+
+        def centre(data):
+            import io
+            from PIL import Image
+            im = Image.open(io.BytesIO(data)).convert("RGBA") if data else None
+            return im.getpixel((im.width // 2, im.height // 2)) if im else None
+        check("the white square is taken off (corner is see-through)", (corner(png) or (0, 0, 0, 255))[3], 0)
+        check("the crest itself is kept (centre is the club's red)", (centre(png) or (0, 0, 0, 0))[:3], (200, 30, 30))
+        orig = await crests.crest_image(db, str(ws.id), wsc_id, "original") if crests else None
+        check("the original is kept beside it (corner still white)", corner(orig), (255, 255, 255, 255))
+        from PIL import Image as _Img
+        import io as _io
+        check("trimmed so the crest fills its box", _Img.open(_io.BytesIO(png)).size[0] < 200 if png else False)
+        kal_logo = None
+        fxk = await attempt("fixtures by match link (Kalamunda)", admin_router.get_social_fixtures(MATCH_LINK, db, ws))
+        for r in g(fxk, "dates", 0, "fixtures", default=[]):
+            if r.get("home") == "KALAMUNDA":
+                kal_logo = r.get("homeLogo")
+        check("a crest that cannot be fetched falls back to Cricket Australia's address", kal_logo, cdn("kal"))
+
+        # A person's choices are never replaced by code.
+        upd = await attempt("use the original", lambda: admin_router.patch_social_crest(
+            wsc_id, admin_router.CrestUpdate(use_cleaned=False), db, ws, SuperUser()))
+        served = await crests.crest_image(db, str(ws.id), wsc_id) if crests else None
+        check("'use the original' serves the original picture", corner(served), (255, 255, 255, 255))
+        await attempt("hand colour", lambda: admin_router.patch_social_crest(
+            wsc_id, admin_router.CrestUpdate(colour="#123456"), db, ws, SuperUser()))
+        bad_colour = None
+        try:
+            await admin_router.patch_social_crest(wsc_id, admin_router.CrestUpdate(colour="red"), db, ws, SuperUser())
+        except HTTPException as e:
+            bad_colour = e.status_code
+        except Exception:
+            bad_colour = "crash"
+            await db.rollback()
+            await db.refresh(ws)
+            await db.refresh(club)
+        check("a colour that is not hex is refused", bad_colour, 422)
+        from starlette.datastructures import UploadFile as _UF
+        up = await attempt("upload", lambda: admin_router.upload_social_crest(
+            wsc_id, _UF(file=_io.BytesIO(crest_png((90, 0, 120))), filename="mine.png"), db, ws, SuperUser()))
+        served = await crests.crest_image(db, str(ws.id), wsc_id) if crests else None
+        check("an upload is what a post draws", (centre(served) or (0, 0, 0, 0))[:3], (90, 0, 120))
+        # Cricket Australia changes its address: the automatic copy refreshes, the upload and colour stay.
+        await db.execute(text("UPDATE association_crests SET src_url = 'https://old.example/wsc.png' "
+                              "WHERE ca_org_id = :c"), {"c": wsc_id})
+        await db.commit()
+        fx3 = await attempt("fixtures after address change", admin_router.get_social_fixtures(GRADE_BARE, db, ws))
+        served = await crests.crest_image(db, str(ws.id), wsc_id) if crests else None
+        check("a refresh by code leaves the upload in place", (centre(served) or (0, 0, 0, 0))[:3], (90, 0, 120))
+        check("a refresh by code leaves the hand-set colour", g(fx3, "dates", 0, "fixtures", 0, "homeColor"), "#123456")
+        await attempt("drop upload", lambda: admin_router.patch_social_crest(
+            wsc_id, admin_router.CrestUpdate(drop_upload=True, use_cleaned=True), db, ws, SuperUser()))
+        served = await crests.crest_image(db, str(ws.id), wsc_id) if crests else None
+        check("going back from an upload serves the cleaned crest again", (corner(served) or (0, 0, 0, 255))[3], 0)
+        refused_lib = None
+        try:
+            await admin_router.get_social_crests(db, club)
+        except HTTPException as e:
+            refused_lib = e.status_code
+        except Exception:
+            refused_lib = "crash"
+            await db.rollback()
+            await db.refresh(ws)
+            await db.refresh(club)
+        check("a club has no crest library", refused_lib, 404)
 
         fx2 = await attempt("fixtures by match link", admin_router.get_social_fixtures(MATCH_LINK, db, ws))
         r2 = [r.get("home") for r in g(fx2, "dates", 0, "fixtures", default=[])]
@@ -429,6 +568,13 @@ async def main():
         check("both sides' top performers come through", (g(res, 0, "topBat", 0, "name"), g(res, 0, "oppTopBat", 0, "name")),
               ("A. ACE", "W. WALLY"))
         check("abandoned match is not a result", bool(res) and not any(r.get("matchId") == M4 for r in res))
+        check("leaders come from BOTH sides, best first", [(p.get("name"), p.get("team")) for p in g(res, 0, "leadBat", default=[])],
+              [("A. ACE", "home"), ("W. WALLY", "away")])
+        check("wicket takers from both sides, most wickets first",
+              [(p.get("name"), p.get("team")) for p in g(res, 0, "leadBowl", default=[])],
+              [("A. SPIN", "home"), ("W. QUICK", "away")])
+        check("a side can hold both leading places", [p.get("team") for p in g(res, 1, "leadBat", default=[])], ["home", "home"])
+        check("the winner is named by side, not W or L", (g(res, 0, "winnerSide"), g(res, 1, "winnerSide")), ("home", "home"))
 
         print("\n[team of the week] every club in the round, optional cap per club")
         tw = await attempt("totw", lambda: admin_router.get_social_totw(GRADE_R2, db, ws, "", "", "all", "week", 0))
@@ -439,7 +585,9 @@ async def main():
         check("top of the pool is the best performance (S One, 120)", (g(pool, 0, "last"), g(pool, 0, "points")), ("One", 120))
         check("no player is ever a club player id", all(p.get("pid") is None for p in pool) and bool(pool))
         app_p = next((p for p in pool if p.get("club") == "APPLECROSS"), {})
-        check("a player carries their own club's crest", app_p.get("clubLogo"), "/api/images/organisations/app/logo")
+        check("a player carries their own club's crest (from the library)",
+              str(app_p.get("clubLogo") or "").startswith(f"/api/images/association-crests/{ws.id}/{APPLECROSS_ORG}"))
+        check("and their club's colour", app_p.get("clubColor"), "#143ca0")
         check("matches counted", g(tw, "matches"), 2)
         check("skipped match reported", g(tw, "skipped"), ["BENTLEY BLACK V SWAN VALLEY"])
         top11 = [p.get("club") for p in pool[:11]]
@@ -452,8 +600,13 @@ async def main():
         check("a capped player is kept, moved down and flagged", bool(over) and pool2.index(over[0]) >= 6
               and over[0].get("club") == "SUBIACO MARIST")
         check("cap echoed", g(tw2, "cap"), 2)
+        check("the pool says how many clubs it holds", g(tw2, "clubs"), 4)
         if sc is not None:
             check("apply_club_cap(0) leaves the pool alone", sc.apply_club_cap([{"club": "A"}] * 3, 0), [{"club": "A"}] * 3)
+            spread = sc.apply_club_cap([{"club": c} for c in "AAABBC"], 1)
+            check("past the cap the clubs take turns (A B C, then A B, then A)", "".join(p["club"] for p in spread), "ABCABA")
+            check("only the first of each club is within the cap", [bool(p.get("overCap")) for p in spread],
+                  [False, False, False, True, True, True])
         else:
             check("apply_club_cap exists", False)
 
@@ -462,9 +615,27 @@ async def main():
         pp = g(pm, "players", default=[])
         check("players from both sides", {p.get("club") for p in pp}, {"APPLECROSS", "WESTERN SUBURBS"})
         wally = next((p for p in pp if p.get("last") == "Wally"), {})
-        check("an away player names the home side as opponent", (wally.get("opp"), wally.get("oppLogo")),
-              ("APPLECROSS", "/api/images/organisations/app/logo"))
+        check("an away player names the home side as opponent", (wally.get("opp"),
+              str(wally.get("oppLogo") or "").startswith(f"/api/images/association-crests/{ws.id}/{APPLECROSS_ORG}")),
+              ("APPLECROSS", True))
 
+        print("\n[scorecard] each side's crest and colour")
+        # The harness has no merge_logs table (a raw lifespan table), so the
+        # scorecard's best-effort merge lookup fails and rolls back: the
+        # workspace must come through that rollback readable.
+        scd = await attempt("workspace scorecard", admin_router.get_social_scorecard(M1, db, SuperUser(), ws))
+        check("home side's crest from the library", str(g(scd, "home", "logo", default="")).startswith(lib + str(APPLECROSS_ORG)))
+        check("away side's crest from the library", str(g(scd, "away", "logo", default="")).startswith(lib + CLUBS["wsc"][0]))
+        # Western Suburbs' colour was set by hand above, so it is that one.
+        check("each side's colour from its crest (or set by hand), not the stock blue and red",
+              (g(scd, "home", "color"), g(scd, "away", "color")), ("#143ca0", "#123456"))
+        csc = await attempt("club scorecard", admin_router.get_social_scorecard(M1, db, SuperUser(), club))
+        check("[club] an opponent with no hosted crest prints its club's Cricket Australia crest (was a monogram)",
+              g(csc, "away", "logo"), cdn("wsc"))
+
+        await db.rollback()
+        await db.refresh(ws)
+        await db.refresh(club)
         print("\n[lineups and match list]")
         lu = await attempt("lineups", admin_router.get_social_competition_lineups(GRADE_BARE, db, ws)) \
             if hasattr(admin_router, "get_social_competition_lineups") else None
@@ -473,6 +644,7 @@ async def main():
         check("one entry per Round 3 match", len(lm), 2)
         check("home side first, no side is ours", [(t.get("label"), t.get("is_home"), t.get("is_ours")) for t in g(lm, 0, "teams", default=[])],
               [("WESTERN SUBURBS", True, False), ("SUBIACO MARIST", False, False)])
+        check("each side carries its crest from the library", str(g(lm, 0, "teams", 0, "logo_url", default="")).startswith(lib))
         check("published side carries its players and keeper", (len(g(lm, 0, "teams", 0, "players", default=[])),
               g(lm, 0, "teams", 0, "players", 0, "is_wicket_keeper")), (11, True))
         ml = await attempt("matches", admin_router.get_social_competition_matches(GRADE_R2, ws)) \

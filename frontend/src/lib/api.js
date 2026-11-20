@@ -250,6 +250,11 @@ export const api = {
   // Association workspace: both sides of every match in a linked grade round, and
   // the round's matches as a pick list (services/social_competition.py).
   getSocialCompetitionLineups: (q) => request(`/admin/social/competition/lineups?q=${encodeURIComponent(q || '')}`),
+  // An association workspace's crest library (services/association_crests.py).
+  getSocialCrests: () => request('/admin/social/crests'),
+  // Only the keys given change: use_cleaned, colour (null hands it back to the crest), drop_upload.
+  patchSocialCrest: (caOrgId, fields) => request(`/admin/social/crests/${encodeURIComponent(caOrgId)}`, { method: 'PATCH', body: JSON.stringify(fields) }),
+  uploadSocialCrest: (caOrgId, file) => uploadFile(`/admin/social/crests/${encodeURIComponent(caOrgId)}/upload`, file),
   getSocialCompetitionMatches: (q) => request(`/admin/social/competition/matches?q=${encodeURIComponent(q || '')}`),
   getSocialTotw: (q, { dateFrom = '', dateTo = '', scope = 'all', basis = 'week', cap = 0 } = {}) => {
     const p = new URLSearchParams()

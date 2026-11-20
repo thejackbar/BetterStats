@@ -13,7 +13,7 @@ import { TOOL_TITLE } from '../../components/admin/socialpost/ToolRail'
 import StartScreen from '../../components/admin/socialpost/StartScreen'
 import { SaveTemplateDialog, TemplatesMenu, TemplateSyncNote, timeAgo } from '../../components/admin/socialpost/SavedTemplates'
 import MobileQuickPost from '../../components/admin/socialpost/MobileQuickPost'
-import { CompetitionLineupBox, CompetitionLinkInput, PlayhqNotice, SkippedNote, TotwClubCap, COMPETITION_LINK_HELP } from '../../components/admin/socialpost/CompetitionControls'
+import { CompetitionLineupBox, CompetitionLinkInput, CrestLibrary, PlayhqNotice, SkippedNote, TotwClubCap, COMPETITION_LINK_HELP, smallestCap } from '../../components/admin/socialpost/CompetitionControls'
 import TextPanel from '../../components/admin/socialpost/panels/TextPanel'
 import ShapesPanel from '../../components/admin/socialpost/panels/ShapesPanel'
 import ClubDataPanel from '../../components/admin/socialpost/panels/ClubDataPanel'
@@ -1208,6 +1208,11 @@ function TotwImportBox({ status, notice, data, onPull, onFetchLink, range, onRan
             ✓ {data.players.length} performers from {data.matches} {data.matches === 1 ? 'match' : 'matches'} · {[data.comp, data.round, data.label].filter(Boolean).join(' · ')}
           </p>
         )}
+        {status === 'ok' && data?.capRaised && (
+          <p className="font-mono text-[9px] mt-1 text-amber-400 leading-relaxed" data-testid="totw-cap-raised">
+            {data.clubs} clubs cannot fill a team of {TOTW_DEFAULT} at {data.capRaised.from} each, so the cap is {data.capRaised.to} a club.
+          </p>
+        )}
         {status === 'ok' && data?.liveMatches > 0 && (
           <p className="font-mono text-[9px] mt-1 text-amber-400 leading-relaxed" data-testid="totw-live-note">
             {data.liveMatches} of those {data.liveMatches === 1 ? 'match is' : 'matches are'} still in play, so the figures are not final.
@@ -1436,7 +1441,7 @@ function TotwControls({ t }) {
     <>
       <TotwBasisPicker basis={t.plan.basis} onChange={t.onBasis} busy={busy} />
       {t.competition
-        ? <TotwClubCap cap={t.plan.cap || 0} onChange={t.onCap} busy={busy} />
+        ? <TotwClubCap cap={t.plan.cap || 0} onChange={t.onCap} busy={busy} clubs={t.import.data?.clubs || 0} size={t.count || TOTW_DEFAULT} />
         : <TotwScopePicker scope={t.plan.scope} onChange={t.onScope} data={t.import.data} busy={busy} />}
       <TotwImportBox status={t.import.status} notice={t.import.notice} data={t.import.data}
         onPull={t.onPull} onFetchLink={t.onFetchLink} competition={t.competition}
@@ -1575,9 +1580,13 @@ function MatchPickList({ picks, onPick, onDismiss }) {
 // The untouched Style defaults, in the exact key order the style snapshot is
 // built with — used to tell "changed something" from "just visited the page"
 // before any style has ever been stored server-side.
+// The background's own settings (the club's photo, veil, texture, crest
+// watermark and background word) ride with it, so a background set on one post
+// is the background of every post, for every admin of the club.
 const DEFAULT_STYLE_JSON = JSON.stringify({
   palette: 'club', dark: true, font: 'barlow', bg: 'none',
   bg_colors: {}, palettes: [], designs: [], lineup_card: LINEUP_CARD_DEFAULTS,
+  bg_url: null, bg_tint: null, bg_texture: null, bg_logo: false, bg_logo_op: 0.15, bg_text: '', bg_text_op: 0.16,
 })
 
 // Saved templates live in their own table now (one row each), not in the Style
@@ -2465,6 +2474,8 @@ export default function AdminSocialPost() {
   const styleSnapshot = JSON.stringify({
     palette: paletteKey, dark: darkMode, font: fontKey, bg: bgStyle,
     bg_colors: bgColors, palettes: savedPalettes, designs: savedDesigns, lineup_card: lineupCard,
+    bg_url: bgCustomUrl && !String(bgCustomUrl).startsWith('blob:') ? bgCustomUrl : null, bg_tint: bgTint, bg_texture: bgTexture, bg_logo: bgLogoOn, bg_logo_op: bgLogoOpacity,
+    bg_text: bgBigText, bg_text_op: bgBigTextOpacity,
   })
   useEffect(() => {
     if (!settings) return undefined
@@ -2499,6 +2510,15 @@ export default function AdminSocialPost() {
             palettes: Array.isArray(st.palettes) ? st.palettes : [],
             designs: Array.isArray(st.designs) ? st.designs : [],
             lineup_card: { ...LINEUP_CARD_DEFAULTS, ...(st.lineup_card && typeof st.lineup_card === 'object' ? st.lineup_card : {}) },
+            // Absent means a style stored before the background travelled with
+            // it: keep what this browser had rather than clearing it.
+            bg_url: 'bg_url' in st ? (typeof st.bg_url === 'string' && st.bg_url ? st.bg_url : null) : (bgCustomUrl || null),
+            bg_tint: 'bg_tint' in st ? (typeof st.bg_tint === 'number' ? Math.max(0, Math.min(1, st.bg_tint)) : null) : bgTint,
+            bg_texture: 'bg_texture' in st ? (typeof st.bg_texture === 'boolean' ? st.bg_texture : null) : bgTexture,
+            bg_logo: 'bg_logo' in st ? st.bg_logo === true : bgLogoOn,
+            bg_logo_op: typeof st.bg_logo_op === 'number' ? st.bg_logo_op : bgLogoOpacity,
+            bg_text: 'bg_text' in st ? (typeof st.bg_text === 'string' ? st.bg_text : '') : bgBigText,
+            bg_text_op: typeof st.bg_text_op === 'number' ? st.bg_text_op : bgBigTextOpacity,
           }
           setPaletteKey(applied.palette)
           setDarkMode(applied.dark)
@@ -2508,6 +2528,13 @@ export default function AdminSocialPost() {
           setSavedPalettes(applied.palettes)
           setSavedDesigns(applied.designs)
           if (st.lineup_card && typeof st.lineup_card === 'object') setLineupCard(applied.lineup_card)
+          setBgCustomUrl(applied.bg_url)
+          setBgTint(applied.bg_tint)
+          setBgTexture(applied.bg_texture)
+          setBgLogoOn(applied.bg_logo)
+          setBgLogoOpacity(applied.bg_logo_op)
+          setBgBigText(applied.bg_text)
+          setBgBigTextOpacity(applied.bg_text_op)
           styleServerRef.current = JSON.stringify(applied)
         }
         setAllPlayers(p)
@@ -2886,7 +2913,8 @@ export default function AdminSocialPost() {
     const pool = data?.players || []
     let chosen
     if (makeup) {
-      chosen = pickMakeup(pool, makeup).picks
+      // The per-club cap rides on the pull (workspaces only; 0 for a club).
+      chosen = pickMakeup(pool, makeup, data?.cap || 0).picks
       totwCursor.current = chosen.reduce((c, pl) => Math.max(c, pool.indexOf(pl)), -1)
     } else {
       const n = Math.max(TOTW_MIN, Math.min(TOTW_MAX, size))
@@ -2911,6 +2939,14 @@ export default function AdminSocialPost() {
     setTotwImport(s => ({ ...s, status: 'loading', notice: null }))
     try {
       const data = await api.getSocialTotw(q || '', { dateFrom, dateTo, scope, basis, cap: isAssoc ? cap : 0 })
+      // A cap the round's clubs cannot fill the team with (1 a club, 8 clubs, 11
+      // places) is raised to the smallest one that can, and pulled again.
+      const least = isAssoc ? smallestCap(data?.clubs || 0, TOTW_DEFAULT) : 0
+      if (data.kind === 'round' && cap > 0 && least > cap && !over.raised) {
+        setTotwPlan(pl => ({ ...pl, cap: least }))
+        return loadTotw(q, { ...over, cap: least, raised: cap })
+      }
+      if (data.kind === 'round' && over.raised) data.capRaised = { from: over.raised, to: cap }
       if (data.kind === 'round' && data.players?.length) {
         setTotwImport({ status: 'ok', data, notice: null, source: { q: q || '', dateFrom, dateTo } })
         applyTotw(data, TOTW_DEFAULT, totwPlan.mode === 'makeup' ? totwPlan.makeup : null)
@@ -3464,6 +3500,11 @@ export default function AdminSocialPost() {
   // A workspace featuring one side of a match (Lineup, Player of the Match, Final
   // Score) prints that side's name and crest; every other post is the workspace's.
   const featuredSide = isAssoc && compTeam && ['lineup', 'motm', 'result'].includes(activeTab) ? compTeam : null
+  // The post's own crest before a featured side takes the team's place: the
+  // background watermark stays the association's on every post, and the
+  // featured club's crest is the one the layout draws (in a lineup, where a hero
+  // photo would go, until a hero image is uploaded).
+  const brandLogo = team.logo
   if (featuredSide) {
     const nm = featuredSide.name || team.name
     Object.assign(team, {
@@ -3636,7 +3677,7 @@ export default function AdminSocialPost() {
     imageUrl: bgStyle === 'custom-image' ? bgCustomUrl : undefined,
     bigText: bgBigText || undefined,
     bigTextOpacity: bgBigTextOpacity,
-    logoUrl: bgLogoOn ? team.logo : undefined,
+    logoUrl: bgLogoOn ? brandLogo : undefined,
     logoOpacity: bgLogoOpacity,
   }
   // The template's own opaque canvas fill is given an alpha channel so the
@@ -5097,6 +5138,10 @@ export default function AdminSocialPost() {
                   <p className="text-[11px] text-pb-dim leading-relaxed">{(isAssoc && ASSOC_SOURCE_HELP[activeTab]) || SOURCE_HELP[activeTab] || "This post type has nothing to import — it's all yours to design."}</p>
                 </div>
 
+                {isAssoc && DATA_TABS.includes(activeTab) && (
+                  <CrestLibrary version={[fxImport.status, rrImport.status, totwImport.status, resUrlStatus, scUrlStatus, compTeam?.name].join('|')} />
+                )}
+
                 {activeTab === 'lineup' && (
                   <div className="pb-card p-4 flex flex-col gap-2">
                     {isAssoc && <CompetitionLineupBox onPick={loadLineupFromCompetition} />}
@@ -5524,8 +5569,8 @@ export default function AdminSocialPost() {
                   </div>
                   <div className="flex items-center gap-3">
                     <label className="flex items-center gap-1.5 text-[11px] text-pb-faint font-mono">
-                      <input type="checkbox" checked={bgLogoOn} onChange={e => setBgLogoOn(e.target.checked)} disabled={!team.logo} />
-                      Club crest watermark
+                      <input type="checkbox" checked={bgLogoOn} onChange={e => setBgLogoOn(e.target.checked)} disabled={!brandLogo} />
+                      {isAssoc ? 'Association crest watermark' : 'Club crest watermark'}
                     </label>
                     {bgLogoOn && (
                       <label className="flex items-center gap-1.5 text-[10px] text-pb-faintest font-mono whitespace-nowrap">
@@ -5534,7 +5579,7 @@ export default function AdminSocialPost() {
                         {Math.round(bgLogoOpacity * 100)}%
                       </label>
                     )}
-                    {!team.logo && <span className="text-[10px] text-pb-faintest font-mono">— upload a club logo in Settings first</span>}
+                    {!brandLogo && <span className="text-[10px] text-pb-faintest font-mono">— upload a club logo in Settings first</span>}
                   </div>
                 </div>
               )}

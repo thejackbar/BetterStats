@@ -46,22 +46,35 @@ export function poolKinds(pool) {
 //   wanted  the team size asked for
 // A seat the pool cannot fill is a warning, not a refusal: a round with no
 // recorded keeper still gets a team, with the next best performer in the gap.
-export function pickMakeup(pool, counts) {
+//
+// `cap` (association workspaces): the most players one club may have. A seat
+// is filled from players whose club is under the cap first; only when the pool
+// cannot fill it that way does it reach past the cap (the server has already
+// ordered the pool so clubs take turns there). 0 or absent is no cap.
+export function pickMakeup(pool, counts, cap = 0) {
   const ranked = pool || []
   const taken = new Set()
   const short = {}
+  const perClub = {}
+  const clubOf = (p) => p.clubId || p.club || ''
+  const fits = (p) => !cap || (perClub[clubOf(p)] || 0) < cap
+  const take = (i) => { taken.add(i); const k = clubOf(ranked[i]); perClub[k] = (perClub[k] || 0) + 1 }
   for (const kind of FILL_ORDER) {
     const want = Math.max(0, Number(counts?.[kind]) || 0)
     let got = 0
-    for (let i = 0; i < ranked.length && got < want; i++) {
-      if (!taken.has(i) && ranked[i].kind === kind) { taken.add(i); got += 1 }
+    for (const strict of cap ? [true, false] : [false]) {
+      for (let i = 0; i < ranked.length && got < want; i++) {
+        if (!taken.has(i) && ranked[i].kind === kind && (!strict || fits(ranked[i]))) { take(i); got += 1 }
+      }
     }
     if (got < want) short[kind] = want - got
   }
   const gap = (Math.max(0, Number(counts?.ANY) || 0)) + Object.values(short).reduce((a, b) => a + b, 0)
   let filled = 0
-  for (let i = 0; i < ranked.length && filled < gap; i++) {
-    if (!taken.has(i)) { taken.add(i); filled += 1 }
+  for (const strict of cap ? [true, false] : [false]) {
+    for (let i = 0; i < ranked.length && filled < gap; i++) {
+      if (!taken.has(i) && (!strict || fits(ranked[i]))) { take(i); filled += 1 }
+    }
   }
   const picks = [...taken].sort((a, b) => a - b).map(i => ranked[i])
   return { picks, short, wanted: makeupSize(counts) }

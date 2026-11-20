@@ -45,6 +45,20 @@ function Monogram({ text = '?', size = 56, fg, bg, ring, logo }) {
   )
 }
 
+// An association workspace's crest: the picture alone (no disc, ring or clip),
+// since its library has already taken the background off and trimmed it, so
+// the crest fills the room it is given. No logo falls back to the monogram.
+function Crest({ logo, mono, size, fg, bg, ring }) {
+  if (logo) return <img src={logo} alt={mono || 'crest'} style={{ width: size, height: size, objectFit: 'contain', flexShrink: 0, display: 'block' }} />
+  return <Monogram text={mono || '?'} size={size} fg={fg} bg={bg} ring={ring} />
+}
+
+// How big a workspace row's crests are: a share of the row's own height, so a
+// five-match round gets big crests and a ten-match one still fits.
+function rowCrest(bodyH, n, share = 0.62, min = 50, max = 124) {
+  return Math.round(Math.max(min, Math.min(max, (bodyH / Math.max(1, n)) * share)))
+}
+
 function Slab({ children, bg, fg, size = 20, style = {} }) {
   return (
     <span style={{
@@ -186,6 +200,51 @@ function firstSide(r, club) {
     ? { name: r.home || r.grade, logo: r.homeLogo || null, mono: r.homeMono || '' }
     : { name: club.name, logo: club.logo, mono: club.mono }
 }
+// An association workspace's result row (`neutral`): neither side is ours, so
+// there is no WON or LOST. Both sides are named with their crest and score, and
+// the winner is picked out in the accent with a WIN tag; the other side is
+// dimmed. A tie, no result or a game in play tags nobody. `o` carries the sizes
+// and colours of the layout drawing it. A plain function, not a component, so
+// the row stays one element of the layout.
+function neutralWinner(r) {
+  if (isLive(r)) return null
+  return r.winnerSide || (r.outcome === 'W' ? 'home' : r.outcome === 'L' ? 'away' : null)
+}
+function neutralSide(r, side, o) {
+  const won = neutralWinner(r) === side
+  const lost = neutralWinner(r) && !won
+  const name = side === 'home' ? (r.home || r.grade) : r.opp
+  const score = side === 'home' ? r.us : r.them
+  const logo = side === 'home' ? r.homeLogo : r.oppLogo
+  const mono = side === 'home' ? r.homeMono : r.oppMono
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, opacity: lost ? 0.62 : 1 }}>
+      <Crest logo={logo} mono={mono} size={o.crest} fg={o.ink} bg={`${o.ink}14`} ring={`${o.ink}33`} />
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+          <span style={{ fontFamily: DISPLAY, fontSize: o.nameF, letterSpacing: 0.5, lineHeight: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: won ? o.win : o.nameColor }}>{name}</span>
+          {won ? <span style={{ fontFamily: DISPLAY, fontSize: Math.round(o.nameF * 0.62), letterSpacing: 1, padding: '3px 8px', background: o.win, color: o.onWin, flexShrink: 0, lineHeight: 1 }}>WIN</span> : null}
+        </div>
+        <div style={{ fontFamily: DISPLAY, fontSize: o.scoreF, letterSpacing: -0.5, lineHeight: 1, marginTop: 4, color: o.scoreColor }}>{score}</div>
+      </div>
+    </div>
+  )
+}
+// A workspace row's tag where a club row says WON or LOST: the winner's
+// monogram and WIN, or NR with no winner. `short` is for the W / L boxes.
+function neutralTag(r, short = false) {
+  const side = neutralWinner(r)
+  if (!side) return 'NR'
+  const mono = (side === 'home' ? r.homeMono : r.oppMono) || ''
+  return short ? (mono || 'W') : `${mono} WIN`.trim()
+}
+// The tie, no result or in-play word for a row with no winner, else the margin.
+function neutralNote(r) {
+  if (isLive(r)) return 'IN PLAY'
+  if (!neutralWinner(r)) return r.resultLabel || r.margin || 'NO RESULT'
+  return r.margin || ''
+}
+
 function record(rows) {
   const w = rows.filter(r => r.outcome === 'W').length
   const l = rows.filter(r => r.outcome === 'L').length
@@ -318,6 +377,10 @@ export function FixtureList({ palette: pal, width = 1080, height = 1080, meta = 
       <div style={{ position: 'absolute', left: 56, right: 56, top: barGeo(width, height).h + 8, bottom: bodyEnd(height), display: 'flex', flexDirection: 'column' }}>
         {rows.map((r, i) => {
           const home = r.ha === 'H'
+          // A workspace row names two clubs, so its crests carry the row: sized
+          // from the row's height and drawn bare. A club row is as it was.
+          const cs = r.neutral ? rowCrest(height - barGeo(width, height).h - 8 - bodyEnd(height), rows.length) : 50
+          const crestArgs = { fg: pc(parts, 'crestColor', pal.ink), bg: pc(parts, 'crestBg', `${pal.ink}12`), ring: pc(parts, 'crestRing', `${pal.ink}33`) }
           return (
             <div key={i} style={{ flex: 1, display: 'grid', gridTemplateColumns: `${pick(S.A, { square: 162, portrait: 178, story: 204 })}px minmax(0,1fr) 206px`, alignItems: 'center', gap: 18, borderBottom: i < rows.length - 1 ? `1px solid ${pc(parts, 'dividerColor', `${pal.ink}1a`)}` : 'none' }}>
               <div>
@@ -325,9 +388,11 @@ export function FixtureList({ palette: pal, width = 1080, height = 1080, meta = 
                 <div style={{ fontFamily: DISPLAY, fontSize: t(30), letterSpacing: 0.5, lineHeight: 0.95, color: pc(parts, 'gradeColor', undefined) }}>{r.grade}</div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 16, minWidth: 0 }}>
-                {r.neutral ? <Monogram text={r.homeMono} logo={r.homeLogo} size={50} fg={pc(parts, 'crestColor', pal.ink)} bg={pc(parts, 'crestBg', `${pal.ink}12`)} ring={pc(parts, 'crestRing', `${pal.ink}33`)} /> : null}
-                <span style={{ fontFamily: DISPLAY, fontSize: 20, letterSpacing: 2, color: home ? pc(parts, 'homeColor', pal.accent) : pc(parts, 'awayColor', pal.ink), opacity: home ? 1 : 0.55, width: 40, flexShrink: 0 }}>{home || meta.allVs ? 'VS' : '@'}</span>
-                <Monogram text={r.oppMono} logo={r.oppLogo} size={50} fg={pc(parts, 'crestColor', pal.ink)} bg={pc(parts, 'crestBg', `${pal.ink}12`)} ring={pc(parts, 'crestRing', `${pal.ink}33`)} />
+                {r.neutral ? <Crest logo={r.homeLogo} mono={r.homeMono} size={cs} {...crestArgs} /> : null}
+                <span style={{ fontFamily: DISPLAY, fontSize: 20, letterSpacing: 2, color: home ? pc(parts, 'homeColor', pal.accent) : pc(parts, 'awayColor', pal.ink), opacity: home ? 1 : 0.55, width: 40, flexShrink: 0, textAlign: r.neutral ? 'center' : undefined }}>{home || meta.allVs ? 'VS' : '@'}</span>
+                {r.neutral
+                  ? <Crest logo={r.oppLogo} mono={r.oppMono} size={cs} {...crestArgs} />
+                  : <Monogram text={r.oppMono} logo={r.oppLogo} size={50} {...crestArgs} />}
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontFamily: DISPLAY, fontSize: t(31), letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{r.opp}</div>
                   <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 1.5, color: pc(parts, 'haColor', pal.ink), opacity: 0.55, marginTop: 4 }}>{haWord(r, home)}</div>
@@ -479,9 +544,13 @@ export function FixtureGrid({ palette: pal, width = 1080, height = 1080, meta = 
                 {r.neutral ? null : <span style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 1.5, padding: '4px 9px', borderRadius: 3, background: tagBg, color: tagInk, fontWeight: 700, flexShrink: 0 }}>{home ? 'HOME' : 'AWAY'}</span>}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                <Shield logo={firstSide(r, club).logo} monogram={firstSide(r, club).mono} color={pal.ink} size={46} />
+                {r.neutral
+                  ? <Crest logo={r.homeLogo} mono={r.homeMono} size={84} fg={pc(parts, 'crestColor', pal.ink)} bg={pc(parts, 'crestBg', `${pal.ink}14`)} ring={pc(parts, 'crestRing', `${pal.ink}33`)} />
+                  : <Shield logo={firstSide(r, club).logo} monogram={firstSide(r, club).mono} color={pal.ink} size={46} />}
                 <span style={{ fontFamily: DISPLAY, fontSize: 22, color: pc(parts, 'vsColor', pal.accent), opacity: 0.9 }}>v</span>
-                <Monogram text={r.oppMono} logo={r.oppLogo} size={46} fg={pc(parts, 'crestColor', pal.ink)} bg={pc(parts, 'crestBg', `${pal.ink}14`)} ring={pc(parts, 'crestRing', `${pal.ink}33`)} />
+                {r.neutral
+                  ? <Crest logo={r.oppLogo} mono={r.oppMono} size={84} fg={pc(parts, 'crestColor', pal.ink)} bg={pc(parts, 'crestBg', `${pal.ink}14`)} ring={pc(parts, 'crestRing', `${pal.ink}33`)} />
+                  : <Monogram text={r.oppMono} logo={r.oppLogo} size={46} fg={pc(parts, 'crestColor', pal.ink)} bg={pc(parts, 'crestBg', `${pal.ink}14`)} ring={pc(parts, 'crestRing', `${pal.ink}33`)} />}
                 <div style={{ fontFamily: DISPLAY, fontSize: t(28), letterSpacing: 0.5, lineHeight: 0.95, minWidth: 0, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{r.opp}</div>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', borderTop: `1px solid ${pc(parts, 'dividerColor', `${pal.ink}1a`)}`, paddingTop: 12 }}>
@@ -1478,10 +1547,27 @@ export function ResultsList({ palette: pal, width = 1080, height = 1080, meta = 
           const oppF = t(n >= 9 ? 17 : n >= 7 ? 19 : 22)
           const badgeF = t(n >= 9 ? 16 : 20)
           const bar = t(n >= 9 ? 38 : 52)
+          const bodyH = height - S.head(200) - rrFoot(width, height).reserve
+          const nOpts = {
+            crest: rowCrest(bodyH, n, 0.5, 40, 96), nameF: oppF + 2, scoreF, ink: pal.ink,
+            win: pc(parts, 'winColor', pal.accent), onWin: rrOnFill(parts, 'winColor', pc(parts, 'winColor', pal.accent), pal.primary),
+            nameColor: pc(parts, 'nameColor', undefined), scoreColor: pc(parts, 'statColor', pal.ink),
+          }
           return rows.map((r, i) => {
             const w = r.outcome === 'W'
             const lv = isLive(r)
             const c = lv ? LIVE : w ? win : loss
+            if (r.neutral) {
+              return (
+                <div key={i} style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'grid', gridTemplateColumns: '6px minmax(0,1fr) 30px minmax(0,1fr) 170px', alignItems: 'center', gap: 14, borderBottom: i < rows.length - 1 ? `1px solid ${rrFaint(parts, 'dividerColor', pal.ink, '1a')}` : 'none' }}>
+                  <div style={{ width: 6, height: bar, background: lv ? LIVE : pal.accent }} />
+                  {neutralSide(r, 'home', nOpts)}
+                  <span style={{ fontFamily: DISPLAY, fontSize: badgeF, color: pc(parts, 'vsColor', pal.accent), textAlign: 'center' }}>V</span>
+                  {neutralSide(r, 'away', nOpts)}
+                  <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1, color: lv ? LIVE : pc(parts, 'subColor', pal.ink), opacity: lv ? 1 : 0.75, textAlign: 'right', lineHeight: 1.35 }}>{neutralNote(r)}</span>
+                </div>
+              )
+            }
             return (
               <div key={i} style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'grid', gridTemplateColumns: '6px 172px minmax(0,1fr) 210px', alignItems: 'center', gap: 14, borderBottom: i < rows.length - 1 ? `1px solid ${rrFaint(parts, 'dividerColor', pal.ink, '1a')}` : 'none' }}>
                 <div style={{ width: 6, height: bar, background: c }} />
@@ -1524,13 +1610,15 @@ export function perfKeys(side) {
   return side === 'them' ? { bat: 'oppTopBat', bowl: 'oppTopBowl' } : { bat: 'topBat', bowl: 'topBowl' }
 }
 export function ResultsListLeaders({ palette: pal, width = 1080, height = 1080, meta = {}, results = [], club = {}, sponsors, perfSide = 'us', parts }) {
-  const keys = perfKeys(perfSide)
-  const who = perfSide === 'them' ? 'OPPOSITION ' : ''
+  const rows = results
+  const neutral = isNeutral(rows)
+  // A workspace row leads with the match's best from BOTH sides (leadBat /
+  // leadBowl, each tagged with its side); "Players shown" is a club's choice.
+  const keys = neutral ? { bat: 'leadBat', bowl: 'leadBowl' } : perfKeys(perfSide)
+  const who = !neutral && perfSide === 'them' ? 'OPPOSITION ' : ''
   const S = roundScale(width, height)
   const t = sz(S.row)
-  const rows = results
   const rec = record(rows)
-  const neutral = isNeutral(rows)
   const win = pc(parts, 'winColor', WIN)
   const loss = pc(parts, 'lossColor', LOSS)
   const band = pc(parts, 'bandBg', pal.accent)
@@ -1561,7 +1649,7 @@ export function ResultsListLeaders({ palette: pal, width = 1080, height = 1080, 
         </div>
       </div>
       <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(180), bottom: rrFoot(width, height).reserve, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr 1fr', gap: 12, marginBottom: 8 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: neutral ? '6px 1fr 1fr' : '150px 1fr 1fr', gap: 12, marginBottom: 8 }}>
           <div />
           <Kicker color={pc(parts, 'rr7HeadingColor', pal.ink)} size={12} style={{ opacity: 0.55 }}>{who}{pt(parts, 'rr7BatHeading', 'TOP RUN SCORERS')}</Kicker>
           <Kicker color={pc(parts, 'rr7HeadingColor', pal.ink)} size={12} style={{ opacity: 0.55 }}>{who}{pt(parts, 'rr7BowlHeading', 'TOP WICKET TAKERS')}</Kicker>
@@ -1572,8 +1660,27 @@ export function ResultsListLeaders({ palette: pal, width = 1080, height = 1080, 
           const c = lv ? LIVE : w ? win : loss
           const bats = (r[keys.bat] || []).filter((p) => p && (p.name || p.line))
           const bowls = (r[keys.bowl] || []).filter((p) => p && (p.name || p.line))
+          // A leader's own side, as a small crest beside their name (workspace rows only).
+          const tagOf = (p) => (r.neutral && p.team
+            ? <Crest logo={p.team === 'home' ? r.homeLogo : r.oppLogo} mono={p.team === 'home' ? r.homeMono : r.oppMono} size={Math.round(nameF * 1.25)} fg={pal.ink} bg={`${pal.ink}14`} ring={`${pal.ink}33`} />
+            : null)
+          const bodyH = height - S.head(180) - rrFoot(width, height).reserve
+          const nOpts = {
+            crest: rowCrest(bodyH, n, 0.34, 36, 76), nameF: oppF + 2, scoreF: Math.round(scoreF * 0.85), ink: pal.ink,
+            win: pc(parts, 'winColor', pal.accent), onWin: rrOnFill(parts, 'winColor', pc(parts, 'winColor', pal.accent), pal.primary),
+            nameColor: pc(parts, 'nameColor', undefined), scoreColor: pc(parts, 'statColor', pal.ink),
+          }
           return (
             <div key={i} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 6, borderBottom: i < rows.length - 1 ? `1px solid ${rrFaint(parts, 'dividerColor', pal.ink, '1a')}` : 'none' }}>
+              {r.neutral ? (
+                <div style={{ display: 'grid', gridTemplateColumns: '6px minmax(0,1fr) 28px minmax(0,1fr) 170px', alignItems: 'center', gap: 12 }}>
+                  <div style={{ width: 6, height: bar, background: lv ? LIVE : pal.accent }} />
+                  {neutralSide(r, 'home', nOpts)}
+                  <span style={{ fontFamily: DISPLAY, fontSize: badgeF + 2, color: pc(parts, 'vsColor', pal.accent), textAlign: 'center' }}>V</span>
+                  {neutralSide(r, 'away', nOpts)}
+                  <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1, color: lv ? LIVE : pc(parts, 'subColor', pal.ink), opacity: lv ? 1 : 0.75, textAlign: 'right', lineHeight: 1.35 }}>{neutralNote(r)}</span>
+                </div>
+              ) : (
               <div style={{ display: 'grid', gridTemplateColumns: '6px 150px minmax(0,1fr) 190px', alignItems: 'center', gap: 12 }}>
                 <div style={{ width: 6, height: bar, background: c }} />
                 <div style={{ fontFamily: DISPLAY, fontSize: gradeF, letterSpacing: 0.5, lineHeight: 0.95, overflow: 'hidden', color: pc(parts, 'gradeColor', undefined) }}>{r.grade}</div>
@@ -1587,13 +1694,14 @@ export function ResultsListLeaders({ palette: pal, width = 1080, height = 1080, 
                   <span style={{ fontFamily: DISPLAY, fontSize: badgeF, letterSpacing: 1, color: rrOnFill(parts, lv ? 'liveColor' : w ? 'winColor' : 'lossColor', c, pal.primary), background: c, padding: '5px 12px', minWidth: 60, textAlign: 'center', flexShrink: 0 }}>{lv ? 'LIVE' : w ? 'WON' : 'LOST'}</span>
                 </div>
               </div>
+              )}
               {(bats.length > 0 || bowls.length > 0) && (
-                <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr 1fr', gap: 12, paddingLeft: 0 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: r.neutral ? '6px 1fr 1fr' : '150px 1fr 1fr', gap: 12, paddingLeft: 0 }}>
                   <div />
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                     {bats.map((p, k) => (
-                      <div key={k} style={{ display: 'flex', alignItems: 'baseline', gap: 6, minWidth: 0 }}>
-                        <span style={{ fontFamily: MONO, fontSize: lineF - 1, color: pc(parts, 'rr7BulletColor', pal.accent), flexShrink: 0 }}>▸</span>
+                      <div key={k} style={{ display: 'flex', alignItems: r.neutral ? 'center' : 'baseline', gap: 6, minWidth: 0 }}>
+                        {tagOf(p) || <span style={{ fontFamily: MONO, fontSize: lineF - 1, color: pc(parts, 'rr7BulletColor', pal.accent), flexShrink: 0 }}>▸</span>}
                         <span style={{ fontFamily: DISPLAY, fontSize: nameF, letterSpacing: 0.3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'rr7PlayerColor', undefined) }}>{p.name}</span>
                         <span style={{ fontFamily: MONO, fontSize: lineF, color: pc(parts, 'rr7LineColor', pal.ink), opacity: 0.7, flexShrink: 0 }}>{p.line}</span>
                       </div>
@@ -1601,8 +1709,8 @@ export function ResultsListLeaders({ palette: pal, width = 1080, height = 1080, 
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                     {bowls.map((p, k) => (
-                      <div key={k} style={{ display: 'flex', alignItems: 'baseline', gap: 6, minWidth: 0 }}>
-                        <span style={{ fontFamily: MONO, fontSize: lineF - 1, color: pc(parts, 'rr7BulletColor', pal.accent), flexShrink: 0 }}>▸</span>
+                      <div key={k} style={{ display: 'flex', alignItems: r.neutral ? 'center' : 'baseline', gap: 6, minWidth: 0 }}>
+                        {tagOf(p) || <span style={{ fontFamily: MONO, fontSize: lineF - 1, color: pc(parts, 'rr7BulletColor', pal.accent), flexShrink: 0 }}>▸</span>}
                         <span style={{ fontFamily: DISPLAY, fontSize: nameF, letterSpacing: 0.3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'rr7PlayerColor', undefined) }}>{p.name}</span>
                         <span style={{ fontFamily: MONO, fontSize: lineF, color: pc(parts, 'rr7LineColor', pal.ink), opacity: 0.7, flexShrink: 0 }}>{p.line}</span>
                       </div>
@@ -1666,21 +1774,25 @@ export function ResultsScoreboard({ palette: pal, width = 1080, height = 1080, m
         {rows.map((r, i) => {
           const w = r.outcome === 'W'
           const lv = isLive(r)
-          const c = lv ? LIVE : w ? win : loss
+          const c = lv ? LIVE : r.neutral ? pal.accent : w ? win : loss
           return (
             <div key={i} style={{ position: 'relative', background: pc(parts, 'cardBg', pal.secondary), border: `1px solid ${rrFaint(parts, 'cardBorder', pal.ink, '22')}`, borderTop: `3px solid ${c}`, borderRadius: 4, padding: '18px 24px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', overflow: 'hidden' }}>
-              {texture ? <div style={{ position: 'absolute', right: 14, bottom: 8, fontFamily: DISPLAY, fontSize: 120, lineHeight: 1, color: c, opacity: 0.09, letterSpacing: -6, userSelect: 'none' }}>{lv ? '' : w ? 'W' : 'L'}</div> : null}
+              {texture ? <div style={{ position: 'absolute', right: 14, bottom: 8, fontFamily: DISPLAY, fontSize: 120, lineHeight: 1, color: c, opacity: 0.09, letterSpacing: -6, userSelect: 'none' }}>{lv || r.neutral ? '' : w ? 'W' : 'L'}</div> : null}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, position: 'relative' }}>
                 <div style={{ fontFamily: DISPLAY, fontSize: t(26), letterSpacing: 0.5, lineHeight: 0.95, minWidth: 0, overflow: 'hidden', paddingRight: 2, color: pc(parts, 'gradeColor', undefined) }}>{r.grade}</div>
-                <span style={{ fontFamily: DISPLAY, fontSize: 16, letterSpacing: 1.5, padding: '4px 11px', background: c, color: rrOnFill(parts, lv ? 'liveColor' : w ? 'winColor' : 'lossColor', c, pal.primary), flexShrink: 0 }}>{lv ? 'LIVE' : w ? 'WON' : 'LOST'}</span>
+                <span style={{ fontFamily: DISPLAY, fontSize: 16, letterSpacing: 1.5, padding: '4px 11px', background: c, color: rrOnFill(parts, lv ? 'liveColor' : w ? 'winColor' : 'lossColor', c, pal.primary), flexShrink: 0 }}>{lv ? 'LIVE' : r.neutral ? neutralTag(r) : w ? 'WON' : 'LOST'}</span>
               </div>
               <div style={{ position: 'relative' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <Monogram text={firstSide(r, club).mono} logo={firstSide(r, club).logo} size={40} fg={pc(parts, 'crestColor', pal.ink)} bg={pc(parts, 'crestBg', `${pal.ink}14`)} ring={pc(parts, 'crestRing', `${pal.ink}33`)} />
+                  {r.neutral
+                    ? <Crest logo={r.homeLogo} mono={r.homeMono} size={64} fg={pc(parts, 'crestColor', pal.ink)} bg={pc(parts, 'crestBg', `${pal.ink}14`)} ring={pc(parts, 'crestRing', `${pal.ink}33`)} />
+                    : <Monogram text={firstSide(r, club).mono} logo={firstSide(r, club).logo} size={40} fg={pc(parts, 'crestColor', pal.ink)} bg={pc(parts, 'crestBg', `${pal.ink}14`)} ring={pc(parts, 'crestRing', `${pal.ink}33`)} />}
                   <span style={{ fontFamily: DISPLAY, fontSize: t(32), letterSpacing: -0.5, color: pc(parts, 'statColor', undefined) }}>{r.us}</span>
                   <span style={{ fontFamily: DISPLAY, fontSize: t(18), color: pc(parts, 'vsColor', pal.accent), opacity: 0.8 }}>v</span>
                   <span style={{ fontFamily: DISPLAY, fontSize: t(32), letterSpacing: -0.5, opacity: 0.85, color: pc(parts, 'oppScoreColor', undefined) }}>{r.them}</span>
-                  <Monogram text={r.oppMono} logo={r.oppLogo} size={40} fg={pc(parts, 'crestColor', pal.ink)} bg={pc(parts, 'crestBg', `${pal.ink}14`)} ring={pc(parts, 'crestRing', `${pal.ink}33`)} />
+                  {r.neutral
+                    ? <Crest logo={r.oppLogo} mono={r.oppMono} size={64} fg={pc(parts, 'crestColor', pal.ink)} bg={pc(parts, 'crestBg', `${pal.ink}14`)} ring={pc(parts, 'crestRing', `${pal.ink}33`)} />
+                    : <Monogram text={r.oppMono} logo={r.oppLogo} size={40} fg={pc(parts, 'crestColor', pal.ink)} bg={pc(parts, 'crestBg', `${pal.ink}14`)} ring={pc(parts, 'crestRing', `${pal.ink}33`)} />}
                 </div>
                 <div style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 1.2, color: pc(parts, 'subColor', pal.ink), opacity: 0.65, marginTop: 10 }}>{r.opp} · {r.margin}</div>
               </div>
@@ -1746,13 +1858,13 @@ export function ResultsRecord({ palette: pal, width = 1080, height = 1080, meta 
           {rows.map((r, i) => {
             const w = r.outcome === 'W'
             const lv = isLive(r)
-            const c = lv ? LIVE : w ? win : loss
+            const c = lv ? LIVE : r.neutral ? pal.accent : w ? win : loss
             return (
               <div key={i} style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 18, borderBottom: i < rows.length - 1 ? `1px solid ${rrFaint(parts, 'dividerColor', pal.ink, '1a')}` : 'none' }}>
-                <span style={{ fontFamily: DISPLAY, fontSize: 18, letterSpacing: 1, color: rrOnFill(parts, lv ? 'liveColor' : w ? 'winColor' : 'lossColor', c, pal.primary), background: c, width: 44, height: 32, display: 'grid', placeItems: 'center', flexShrink: 0 }}>{lv ? 'LV' : w ? 'W' : 'L'}</span>
+                <span style={{ fontFamily: DISPLAY, fontSize: 18, letterSpacing: 1, color: rrOnFill(parts, lv ? 'liveColor' : w ? 'winColor' : 'lossColor', c, pal.primary), background: c, width: 44, height: 32, display: 'grid', placeItems: 'center', flexShrink: 0 }}>{lv ? 'LV' : r.neutral ? neutralTag(r, true) : w ? 'W' : 'L'}</span>
                 <div style={{ width: 150, fontFamily: DISPLAY, fontSize: t(26), letterSpacing: 0.5, flexShrink: 0, color: pc(parts, 'gradeColor', undefined) }}>{r.grade}</div>
                 <div style={{ flex: 1, minWidth: 0, fontFamily: DISPLAY, fontSize: t(24), letterSpacing: 0.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>
-                  <span style={{ color: w ? pc(parts, 'defColor', pal.ink) : c }}>{lv ? 'V' : w ? 'DEF' : 'LOST TO'}</span> {r.opp}
+                  <span style={{ color: w ? pc(parts, 'defColor', pal.ink) : c }}>{lv || r.neutral ? 'V' : w ? 'DEF' : 'LOST TO'}</span> {r.opp}
                 </div>
                 <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1, color: pc(parts, 'statColor', pal.ink), opacity: 0.7, flexShrink: 0 }}>{r.us} v {r.them}</div>
                 <div style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 1, color: c, width: 130, textAlign: 'right', flexShrink: 0 }}>{r.margin}</div>
@@ -1805,7 +1917,7 @@ export function ResultsHeadline({ palette: pal, width = 1080, height = 1080, met
   const rest = rows.slice(1)
   const fw = f.outcome === 'W'
   const flv = isLive(f)
-  const fc = flv ? LIVE : fw ? win : loss
+  const fc = flv ? LIVE : f.neutral ? pal.accent : fw ? win : loss
   // A taller post gives the feature card a little more room, so a long club name that wraps to a third line still sits inside it.
   const lift = pick(S.A, { square: 0, portrait: 16, story: 56 })
   return (
@@ -1828,7 +1940,7 @@ export function ResultsHeadline({ palette: pal, width = 1080, height = 1080, met
       <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(196), height: S.head(560) - S.head(196) - 24 + lift, background: pc(parts, 'cardBg', pal.secondary), borderTop: `3px solid ${fc}`, padding: '26px 32px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 2, color: pc(parts, 'rr4FeatureColor', pal.accent) }}>{`// ${pt(parts, 'rr4FeatureWord', 'FEATURE')} · ${f.neutral ? compOf(meta) : f.grade}`}</span>
-          <span style={{ fontFamily: DISPLAY, fontSize: 18, letterSpacing: 2, color: rrOnFill(parts, flv ? 'liveColor' : fw ? 'winColor' : 'lossColor', fc, pal.primary), background: fc, padding: '5px 12px' }}>{flv ? 'LIVE' : fw ? 'WON' : 'LOST'}</span>
+          <span style={{ fontFamily: DISPLAY, fontSize: 18, letterSpacing: 2, color: rrOnFill(parts, flv ? 'liveColor' : fw ? 'winColor' : 'lossColor', fc, pal.primary), background: fc, padding: '5px 12px' }}>{flv ? 'LIVE' : f.neutral ? neutralTag(f) : fw ? 'WON' : 'LOST'}</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 26, marginTop: 22 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -1841,7 +1953,7 @@ export function ResultsHeadline({ palette: pal, width = 1080, height = 1080, met
             <Monogram text={f.oppMono} logo={f.oppLogo} size={66} fg={pc(parts, 'crestColor', pal.ink)} bg={pc(parts, 'crestBg', `${pal.ink}14`)} ring={!fw && !flv ? pc(parts, 'rr4WinnerRing', pal.accent) : pc(parts, 'crestRing', `${pal.ink}40`)} />
           </div>
         </div>
-        <div style={{ textAlign: 'center', fontFamily: DISPLAY, fontSize: b(40), letterSpacing: 0, marginTop: 20, lineHeight: 1, color: pc(parts, 'rr4SummaryColor', undefined) }}>{firstSide(f, club).name} {flv ? 'V' : fw ? 'DEF' : 'LOST TO'} {f.opp} {f.margin}</div>
+        <div style={{ textAlign: 'center', fontFamily: DISPLAY, fontSize: b(40), letterSpacing: 0, marginTop: 20, lineHeight: 1, color: pc(parts, 'rr4SummaryColor', undefined) }}>{firstSide(f, club).name} {flv || f.neutral ? 'V' : fw ? 'DEF' : 'LOST TO'} {f.opp} {f.margin}</div>
       </div>
       <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(560) + lift, bottom: rrFoot(width, height).reserve }}>
         <Kicker color={pc(parts, 'rr4OtherColor', pal.ink)} size={12} style={{ opacity: 0.55, marginBottom: 8 }}>{`// ${pt(parts, 'rr4OtherWord', 'OTHER RESULTS')}`}</Kicker>
@@ -1849,10 +1961,10 @@ export function ResultsHeadline({ palette: pal, width = 1080, height = 1080, met
           {rest.map((r, i) => {
             const w = r.outcome === 'W'
             const lv = isLive(r)
-            const c = lv ? LIVE : w ? win : loss
+            const c = lv ? LIVE : r.neutral ? pal.accent : w ? win : loss
             return (
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '9px 0', borderBottom: `1px solid ${rrFaint(parts, 'dividerColor', pal.ink, '14')}` }}>
-                <span style={{ fontFamily: DISPLAY, fontSize: 16, letterSpacing: 1, color: rrOnFill(parts, lv ? 'liveColor' : w ? 'winColor' : 'lossColor', c, pal.primary), background: c, width: 40, height: 28, display: 'grid', placeItems: 'center', flexShrink: 0 }}>{lv ? 'LV' : w ? 'W' : 'L'}</span>
+                <span style={{ fontFamily: DISPLAY, fontSize: 16, letterSpacing: 1, color: rrOnFill(parts, lv ? 'liveColor' : w ? 'winColor' : 'lossColor', c, pal.primary), background: c, width: 40, height: 28, display: 'grid', placeItems: 'center', flexShrink: 0 }}>{lv ? 'LV' : r.neutral ? neutralTag(r, true) : w ? 'W' : 'L'}</span>
                 <span style={{ fontFamily: DISPLAY, fontSize: 22, width: 132, flexShrink: 0, lineHeight: 1, color: pc(parts, 'gradeColor', undefined) }}>{r.grade}</span>
                 <span style={{ fontFamily: DISPLAY, fontSize: 22, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}><span style={{ color: w ? pc(parts, 'defColor', pal.ink) : c }}>{lv ? 'v' : w ? 'def' : 'lost to'}</span> {r.opp}</span>
                 <span style={{ fontFamily: MONO, fontSize: 12, color: pc(parts, 'statColor', pal.ink), opacity: 0.65, flexShrink: 0, whiteSpace: 'nowrap' }}>{r.us} v {r.them}</span>
@@ -1923,17 +2035,17 @@ export function ResultsBoard({ palette: pal, width = 1080, height = 1080, meta =
         {rows.map((r, i) => {
           const w = r.outcome === 'W'
           const lv = isLive(r)
-          const c = lv ? LIVE : w ? win : loss
+          const c = lv ? LIVE : r.neutral ? pal.accent : w ? win : loss
           return (
             <div key={i} style={{ flex: 1, display: 'grid', gridTemplateColumns: cols, gap: 18, alignItems: 'center', padding: '0 14px', background: i % 2 ? rrFaint(parts, 'cardBg', pal.ink, '08') : 'transparent' }}>
               <div style={{ fontFamily: DISPLAY, fontSize: t(26), letterSpacing: 0.5, lineHeight: 0.92, color: pc(parts, 'gradeColor', undefined) }}>{r.grade}</div>
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontFamily: DISPLAY, fontSize: t(24), letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}><span style={{ color: w ? pc(parts, 'defColor', pal.ink) : c }}>{lv ? 'V' : w ? 'DEF' : 'LOST TO'}</span> {r.opp}</div>
+                <div style={{ fontFamily: DISPLAY, fontSize: t(24), letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}><span style={{ color: w ? pc(parts, 'defColor', pal.ink) : c }}>{lv || r.neutral ? 'V' : w ? 'DEF' : 'LOST TO'}</span> {r.opp}</div>
                 <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 1, color: c, marginTop: 4 }}>{r.margin}</div>
               </div>
               <div style={{ fontFamily: MONO, fontSize: 17, letterSpacing: 0.5, color: pc(parts, 'statColor', pal.ink), opacity: 0.85, textAlign: 'right', whiteSpace: 'nowrap' }}>{r.us} v {r.them}</div>
               <div style={{ display: 'flex', justifyContent: 'center' }}>
-                <span style={{ fontFamily: DISPLAY, fontSize: 18, letterSpacing: 1, color: rrOnFill(parts, lv ? 'liveColor' : w ? 'winColor' : 'lossColor', c, pal.primary), background: c, width: 60, textAlign: 'center', padding: '5px 0' }}>{lv ? 'LIVE' : w ? 'WON' : 'LOST'}</span>
+                <span style={{ fontFamily: DISPLAY, fontSize: 18, letterSpacing: 1, color: rrOnFill(parts, lv ? 'liveColor' : w ? 'winColor' : 'lossColor', c, pal.primary), background: c, width: 60, textAlign: 'center', padding: '5px 0' }}>{lv ? 'LIVE' : r.neutral ? neutralTag(r) : w ? 'WON' : 'LOST'}</span>
               </div>
             </div>
           )

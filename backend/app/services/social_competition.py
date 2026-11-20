@@ -297,19 +297,29 @@ def _bucket(ctx: dict, day: str, rows_key: str, rows: list[dict]) -> dict:
     }
 
 
-async def _attach_logos(db: AsyncSession, rows: list[dict]) -> None:
-    """In place: ``homeLogo`` and ``oppLogo`` from the transient club ids and CDN
-    urls, through the same batched lookup the club roundups use (a club that is
-    also registered here prints its own uploaded crest)."""
-    home = [(r.pop("_homeOrgId", None), r.pop("_homeLogoRaw", None)) for r in rows]
-    away = [(r.pop("_oppOrgId", None), r.pop("_oppLogoRaw", None)) for r in rows]
-    logos = await _resolve_opp_logos(db, home + away)
+async def _crests(db: AsyncSession, org, entries: list[tuple]) -> list[dict]:
+    """``{logo, colour, colour2}`` per ``(ca_org_id, raw_url, name)``: the
+    workspace's crest library first (the crest fetched once, its plain
+    background taken off, services/association_crests.py), else a club
+    registered here prints its own uploaded crest, else Cricket Australia's."""
+    from app.services.association_crests import resolve_crests
+    fallback = await _resolve_opp_logos(db, [(ca, raw) for ca, raw, _ in entries])
+    return await resolve_crests(db, org, entries, fallback)
+
+
+async def _attach_logos(db: AsyncSession, org, rows: list[dict]) -> None:
+    """In place: ``homeLogo``/``oppLogo`` and ``homeColor``/``oppColor`` from the
+    transient club ids and CDN urls, in one batched lookup for the round."""
+    home = [(r.pop("_homeOrgId", None), r.pop("_homeLogoRaw", None), r.get("homeClub")) for r in rows]
+    away = [(r.pop("_oppOrgId", None), r.pop("_oppLogoRaw", None), r.get("oppClub")) for r in rows]
+    got = await _crests(db, org, home + away)
     n = len(rows)
     for i, r in enumerate(rows):
-        if logos[i]:
-            r["homeLogo"] = logos[i]
-        if logos[n + i]:
-            r["oppLogo"] = logos[n + i]
+        for side, c in (("home", got[i]), ("opp", got[n + i])):
+            if c["logo"]:
+                r[f"{side}Logo"] = c["logo"]
+            if c["colour"]:
+                r[f"{side}Color"] = c["colour"]
 
 
 def _side_fields(ctx: dict, home: dict, away: dict) -> dict:
@@ -355,7 +365,7 @@ async def competition_fixtures(db: AsyncSession, org, raw: str) -> dict:
             "venue": (((m.get("venue") or {}).get("name")) or "").upper(),
             "matchId": m.get("id"),
         })
-    await _attach_logos(db, rows)
+    await _attach_logos(db, org, rows)
     day = _match_day_time(ctx["matches"][0])[0]
     return {
         "kind": "round", "neutral": True, "season": _season_label(day), "club": _club_dict(org),
@@ -402,6 +412,30 @@ async def _round_cards(ctx: dict, include_live: bool) -> tuple[list[tuple[dict, 
     return kept, skipped
 
 
+_LEAD_RE = re.compile(r"^(\d+)\*?\s*\((\d+)\)")
+_BOWL_RE = re.compile(r"^(\d+)/(\d+)")
+
+
+def _leaders(row: dict) -> tuple[list[dict], list[dict]]:
+    """The match's top two run scorers and top two wicket takers from BOTH
+    sides, each tagged with their side (``team``: ``home`` or ``away``). Read
+    from the per-side top two the row already carries, since the best two of a
+    match are always among each side's best two."""
+    def bat_key(p):
+        m = _LEAD_RE.match(p.get("line") or "")
+        return (-int(m.group(1)), int(m.group(2))) if m else (0, 0)
+
+    def bowl_key(p):
+        m = _BOWL_RE.match(p.get("line") or "")
+        return (-int(m.group(1)), int(m.group(2))) if m else (0, 0)
+
+    bats = [{**p, "team": "home"} for p in row.get("topBat") or []] + \
+           [{**p, "team": "away"} for p in row.get("oppTopBat") or []]
+    bowls = [{**p, "team": "home"} for p in row.get("topBowl") or []] + \
+            [{**p, "team": "away"} for p in row.get("oppTopBowl") or []]
+    return sorted(bats, key=bat_key)[:2], sorted(bowls, key=bowl_key)[:2]
+
+
 async def competition_results(db: AsyncSession, org, raw: str, include_live: bool = False) -> dict:
     """The round's results across the whole grade, each read from the home side."""
     err, ctx = await resolve_round(raw, want="done")
@@ -421,10 +455,14 @@ async def competition_results(db: AsyncSession, org, raw: str, include_live: boo
         row.pop("_oppLogoRaw", None)
         row.update(_side_fields(ctx, home, away))
         row["matchId"] = m.get("id")
+        # Neither side is the association's: a post leads with the match's best
+        # from both sides, and names the winner rather than a W or an L.
+        row["leadBat"], row["leadBowl"] = _leaders(row)
+        row["winnerSide"] = "home" if row.get("outcome") == "W" else "away" if row.get("outcome") == "L" else None
         rows.append(row)
     if not rows:
         return {"kind": "no_results", "message": no_round, "skipped": skipped}
-    await _attach_logos(db, rows)
+    await _attach_logos(db, org, rows)
     day = _match_day_time(pairs[-1][0], last=True)[0] if pairs else ""
     return {
         "kind": "round", "neutral": True, "season": _season_label(day), "club": _club_dict(org),
@@ -435,21 +473,25 @@ async def competition_results(db: AsyncSession, org, raw: str, include_live: boo
 def apply_club_cap(pool: list[dict], cap: int) -> list[dict]:
     """Reorder a ranked pool so that, read from the top, no club has more than
     ``cap`` players. A player past their club's cap is moved below everyone who
-    fits, in their own order, and flagged ``overCap`` so a hand swap can still
-    reach them. ``cap`` of 0 or less leaves the pool alone."""
+    fits and flagged ``overCap`` so a hand swap can still reach them. Past the
+    cap the clubs take turns (each club's next ``cap`` before anyone's third
+    batch), so a grade with fewer clubs than places still spreads the team.
+    ``cap`` of 0 or less leaves the pool alone."""
     if cap <= 0:
         return pool
     seen: dict[str, int] = {}
-    kept, later = [], []
-    for p in pool:
+    tiers: list[tuple[int, int, dict]] = []
+    for i, p in enumerate(pool):
         key = p.get("clubId") or p.get("club") or ""
         n = seen.get(key, 0)
-        if n < cap:
-            seen[key] = n + 1
-            kept.append(p)
-        else:
-            later.append({**p, "overCap": True})
-    return kept + later
+        seen[key] = n + 1
+        # Tier 0 is each club's best `cap`; tier 1 their next `cap`, and so on.
+        # Past the cap, a club's next player waits behind every other club's
+        # same-depth player, so a short grade spreads its extra places across
+        # clubs rather than handing them all to the strongest one.
+        tier = n // cap
+        tiers.append((tier, i, p if tier == 0 else {**p, "overCap": True}))
+    return [p for _, _, p in sorted(tiers, key=lambda x: (x[0], x[1]))]
 
 
 async def competition_totw(
@@ -474,12 +516,12 @@ async def competition_totw(
             if team.get("id"):
                 tasks.append((m, sc, team))
 
-    logo_rows = [(_club_of(t)["id"], _club_of(t)["logo"]) for _, _, t in tasks]
-    logos = await _resolve_opp_logos(db, logo_rows)
+    crests = await _crests(db, org, [(_club_of(t)["id"], _club_of(t)["logo"], _club_of(t)["name"]) for _, _, t in tasks])
 
     scored = []
     live_matches = set()
-    for (m, sc, team), logo in zip(tasks, logos):
+    for (m, sc, team), crest in zip(tasks, crests):
+        logo = crest["logo"]
         tid = (team.get("id") or "").lower()
         try:
             ranked = await _rank_our_side(db, org, sc, team_id=tid)
@@ -517,6 +559,7 @@ async def competition_totw(
                 "clubId": club["id"] or tid,
                 "clubMono": _mono(club["name"] or label),
                 "clubLogo": logo,
+                "clubColor": crest["colour"],
             })
         scored.append((block, players))
     pool = _pool_round(scored)
@@ -539,6 +582,8 @@ async def competition_totw(
         "scope": "all",
         "mode": mode,
         "cap": max(0, cap),
+        # How many clubs the pool holds: a cap below team size / clubs cannot be met.
+        "clubs": len({p.get("clubId") or p.get("club") for p in pool}),
         "liveMatches": len(live_matches),
         "skipped": skipped,
         "scopeMatches": {"junior": 0, "senior": len(pairs)},
@@ -556,8 +601,9 @@ async def competition_potm(db: AsyncSession, org, match_id: str) -> dict:
     labels = _labels([raw])
     hid = (home.get("id") or "").lower()
     teams = [t for t in (raw.get("teams") or []) if t.get("id")]
-    logos = await _resolve_opp_logos(db, [(_club_of(t)["id"], _club_of(t)["logo"]) for t in teams])
-    logo_by_team = {(t.get("id") or "").lower(): lg for t, lg in zip(teams, logos)}
+    crests = await _crests(db, org, [(_club_of(t)["id"], _club_of(t)["logo"], _club_of(t)["name"]) for t in teams])
+    logo_by_team = {(t.get("id") or "").lower(): c["logo"] for t, c in zip(teams, crests)}
+    colour_by_team = {(t.get("id") or "").lower(): c["colour"] for t, c in zip(teams, crests)}
     match = None
     players = []
     for team in teams:
@@ -579,6 +625,7 @@ async def competition_potm(db: AsyncSession, org, match_id: str) -> dict:
                 **p, "pid": None,
                 "club": label, "clubFull": (club["name"] or "").upper(),
                 "clubMono": _mono(club["name"] or label), "clubLogo": logo_by_team.get(tid),
+                "clubColor": colour_by_team.get(tid),
                 "opp": labels.get(oid) or (opp.get("displayName") or "").upper(),
                 "oppMono": _mono(_club_of(opp)["name"] or opp.get("displayName") or ""),
                 "oppLogo": logo_by_team.get(oid),
@@ -624,6 +671,10 @@ async def competition_lineups(db: AsyncSession, org, raw: str) -> dict:
                 p["photo_url"] = None
             teams.append(nt)
         teams.sort(key=lambda t: not t["is_home"])
+        crests = await _crests(db, org, [(t.get("club_id"), t.get("logo_url"), t.get("club")) for t in teams])
+        for t, c in zip(teams, crests):
+            t["logo_url"] = c["logo"]
+            t["color"] = c["colour"]
         days = gr.schedule_days(d)
         start = days[0][1] if days else ""
         out.append({

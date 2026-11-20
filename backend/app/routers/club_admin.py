@@ -995,6 +995,10 @@ _SOCIALS_STYLE_KEYS = {
     "palette", "dark", "font", "bg", "bg_colors", "palettes", "designs",
     # The Match Day Card's own look: background photo, wash, corner, list and logo.
     "lineup_card",
+    # The background's own settings, so a background set once is every post's:
+    # the club's photo, the veil and texture over it, the crest watermark and
+    # the background word, with their strengths.
+    "bg_url", "bg_tint", "bg_texture", "bg_logo", "bg_logo_op", "bg_text", "bg_text_op",
     # Saved Templates ride the same blob as palettes and designs. Left off this
     # allowlist they were stripped on the way in, so a saved template only ever
     # lived in the one browser that made it and never reached another admin.

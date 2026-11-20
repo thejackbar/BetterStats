@@ -1,4 +1,4 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, text
 from sqlalchemy.exc import IntegrityError
@@ -2108,7 +2108,9 @@ async def get_social_scorecard(match_id: str, db: AsyncSession = Depends(get_db)
     """
     try:
         from app.services.social_competition import is_association
-        return await _get_social_scorecard_inner(match_id, db, None if is_association(club) else club)
+        if is_association(club):
+            return await _get_social_scorecard_inner(match_id, db, None, workspace=club)
+        return await _get_social_scorecard_inner(match_id, db, club)
     except HTTPException:
         raise
     except Exception as exc:
@@ -2265,6 +2267,62 @@ async def get_social_competition_lineups(q: str = "", db: AsyncSession = Depends
         raise HTTPException(500, f"Lineups import error: {exc}") from exc
 
 
+@router.get("/social/crests", dependencies=[Depends(require_cap(MANAGE_SOCIAL)), Depends(require_module("socials"))])
+async def get_social_crests(db: AsyncSession = Depends(get_db), club=Depends(get_current_club)):
+    """An association workspace's crest library: every club a pull has named,
+    with the crest a post draws, the versions it was made from and its colours."""
+    from app.services.social_competition import is_association
+    from app.services.association_crests import list_crests
+    if not is_association(club):
+        raise HTTPException(404, "Only an association workspace keeps a crest library")
+    return {"crests": await list_crests(db, club.id)}
+
+
+class CrestUpdate(BaseModel):
+    use_cleaned: bool | None = None
+    colour: str | None = None
+    drop_upload: bool | None = None
+
+
+@router.patch("/social/crests/{ca_org_id}", dependencies=[Depends(require_module("socials"))])
+async def patch_social_crest(
+    ca_org_id: str, req: CrestUpdate, db: AsyncSession = Depends(get_db), club=Depends(get_current_club),
+    current_user: User = Depends(require_cap(MANAGE_SOCIAL)),
+):
+    """Choose the cleaned or original crest, set its colour by hand (null hands
+    it back to the crest) or go back from an upload to Cricket Australia's crest.
+    Only the keys sent change."""
+    from app.services.social_competition import is_association
+    from app.services.association_crests import update_crest, list_crests
+    if not is_association(club):
+        raise HTTPException(404, "Only an association workspace keeps a crest library")
+    if req.colour and not re.fullmatch(r"#[0-9a-fA-F]{6}", req.colour):
+        raise HTTPException(422, "Colour must be a hex like #1a4eb8")
+    fields = {k: getattr(req, k) for k in req.model_fields_set}
+    if not await update_crest(db, club.id, ca_org_id, fields):
+        raise HTTPException(404, "That club is not in the crest library")
+    return {"crests": await list_crests(db, club.id)}
+
+
+@router.post("/social/crests/{ca_org_id}/upload", dependencies=[Depends(require_module("socials"))])
+async def upload_social_crest(
+    ca_org_id: str, file: UploadFile = File(...), db: AsyncSession = Depends(get_db),
+    club=Depends(get_current_club), current_user: User = Depends(require_cap(MANAGE_SOCIAL)),
+):
+    """A person's own crest for a club in the library (for example one cut out
+    in the image editor). Kept until they go back to Cricket Australia's."""
+    from app.services.social_competition import is_association
+    from app.services.association_crests import upload_crest, list_crests
+    if not is_association(club):
+        raise HTTPException(404, "Only an association workspace keeps a crest library")
+    data = await file.read(5_000_001)
+    if len(data) > 5_000_000:
+        raise HTTPException(413, "That picture is over 5MB")
+    if not await upload_crest(db, club.id, ca_org_id, data, getattr(current_user, "id", None)):
+        raise HTTPException(422, "That is not a picture we can read, or the club is not in the library")
+    return {"crests": await list_crests(db, club.id)}
+
+
 @router.get("/social/competition/matches", dependencies=[Depends(require_cap(MANAGE_SOCIAL)), Depends(require_module("socials"))])
 async def get_social_competition_matches(q: str = "", club=Depends(get_current_club)):
     """The matches in a linked grade round, to pick one for a scorecard, a match
@@ -2338,7 +2396,7 @@ async def get_social_milestone_watch(
         raise HTTPException(500, f"Milestone watch error: {exc}") from exc
 
 
-async def _get_social_scorecard_inner(match_id: str, db: AsyncSession, club=None):
+async def _get_social_scorecard_inner(match_id: str, db: AsyncSession, club=None, workspace=None):
     raw = await get_match_scorecard(match_id)
     if raw is None:
         raise HTTPException(404, "Scorecard not found — match may be PlayHQ-only or not yet completed")
@@ -2409,7 +2467,7 @@ async def _get_social_scorecard_inner(match_id: str, db: AsyncSession, club=None
         raw_merge = {row.r: row.k for row in merge_res.mappings().all()}
     except Exception:
         log.exception("merge_logs lookup failed for scorecard %s", match_id)
-        await _rollback_keeping(db, club)
+        await _rollback_keeping(db, club, workspace)
         raw_merge = {}
 
     def _resolve_merge(rid, seen=None):
@@ -2457,7 +2515,7 @@ async def _get_social_scorecard_inner(match_id: str, db: AsyncSession, club=None
                     name_map[str(p.id).lower()] = (first, last)
             except Exception:
                 log.exception("player name lookup failed for scorecard %s", match_id)
-                await _rollback_keeping(db, club)
+                await _rollback_keeping(db, club, workspace)
 
     # Build roster name map from team player lists (covers opposition players not in our DB)
     roster_name_map: dict[str, tuple[str, str]] = {}
@@ -2646,8 +2704,11 @@ async def _get_social_scorecard_inner(match_id: str, db: AsyncSession, club=None
         name = (team_raw.get("displayName") or team_raw.get("name") or "TEAM").upper()
         short = "".join(w[0] for w in name.split()[:3])
         total, wickets, overs, rr = team_totals(inn, batting)
+        # A scorecard's team carries its crest on the owning club, not on the
+        # team itself, so without this read every side drew its monogram.
         logo_url = (team_raw.get("logoUrl") or team_raw.get("logo") or
-                    team_raw.get("imageUrl") or team_raw.get("image") or None)
+                    team_raw.get("imageUrl") or team_raw.get("image") or
+                    (team_raw.get("owningOrganisation") or {}).get("logoUrl") or None)
         return {
             "name": name,
             "short": short,
@@ -2691,6 +2752,23 @@ async def _get_social_scorecard_inner(match_id: str, db: AsyncSession, club=None
             # it's the one they chose, and it's served from our own domain
             # rather than a hotlink that can 404 mid-render.
             side["logo"] = _org_logo_url(org) or side.get("logo")
+
+    # An association workspace owns neither side: each prints its crest from the
+    # workspace's library (background taken off) in the colour read from it.
+    if workspace is not None:
+        from app.services.association_crests import resolve_crests
+        entries = []
+        for team_raw in (home_team_raw, away_team_raw):
+            own = team_raw.get("owningOrganisation") or {}
+            entries.append(((own.get("id") or "").lower() or None, own.get("logoUrl"), own.get("name")))
+        crests = await resolve_crests(db, workspace, entries, [home.get("logo"), away.get("logo")])
+        for side, c in zip((home, away), crests):
+            if c["logo"]:
+                side["logo"] = c["logo"]
+            if c["colour"]:
+                side["color"] = c["colour"]
+            if c["colour2"]:
+                side["color2"] = c["colour2"]
 
     # Result, venue, date and match type live at the TOP level of a /scores/*
     # match, not on matchSummary (which only carries `resultText` + `teams`) —
