@@ -13,6 +13,7 @@ import { TOOL_TITLE } from '../../components/admin/socialpost/ToolRail'
 import StartScreen from '../../components/admin/socialpost/StartScreen'
 import { SaveTemplateDialog, TemplatesMenu, TemplateSyncNote, timeAgo } from '../../components/admin/socialpost/SavedTemplates'
 import MobileQuickPost from '../../components/admin/socialpost/MobileQuickPost'
+import { CompetitionLineupBox, CompetitionLinkInput, PlayhqNotice, SkippedNote, TotwClubCap, COMPETITION_LINK_HELP } from '../../components/admin/socialpost/CompetitionControls'
 import TextPanel from '../../components/admin/socialpost/panels/TextPanel'
 import ShapesPanel from '../../components/admin/socialpost/panels/ShapesPanel'
 import ClubDataPanel from '../../components/admin/socialpost/panels/ClubDataPanel'
@@ -209,6 +210,9 @@ const TAB_MAP = {
 // other type takes football data as it is; fixtures, results, lineups and the
 // player spotlight are fed from the football backend's own /admin/social/*.
 const AFL_HIDDEN_TABS = new Set(['toss', 'scorecard', 'result', 'totw', 'milestones'])
+// An association socials workspace (services/social_competition.py) has no club
+// records, so the post types that read them are left out.
+const ASSOC_HIDDEN_TABS = new Set(['milestones'])
 const TABS = [
   { key: 'lineup',       label: 'Lineup' },
   { key: 'fixtures',     label: 'Fixtures' },
@@ -250,6 +254,17 @@ const IMPORT_NEXT_STEP = {
   events: 'Now fill in the event in Content.',
 }
 const DATA_TABS = ['lineup', 'fixtures', 'results', 'result', 'scorecard', 'motm', 'totw', 'milestones']
+// The Data step's help line in an association workspace, where every pull is a
+// whole grade from a link and nothing is one club's own.
+const ASSOC_SOURCE_HELP = {
+  lineup: 'Paste a match or grade link, then pick the side to post. Its published team, captain and keeper come through with the match details.',
+  fixtures: 'Paste a match or grade link and every match in that grade round comes through, home team first, with crests, times and grounds.',
+  results: 'Paste a match or grade link and every result in that grade round comes through, home team first, with scores, margins and top performers for both sides.',
+  result: 'Paste any match link from the grade. The post features the side that batted first; swap the names in Content if you want the other way round.',
+  scorecard: 'Paste any match link from the grade to pull the full scorecard for both sides.',
+  motm: 'Paste any match link. Players from both sides are ranked, and the post features the chosen player\'s club.',
+  totw: 'Paste a match or grade link. Both sides of every match in that grade round are ranked together, and each player shows their club\'s crest.',
+}
 const SOURCE_HELP = {
   lineup: 'Pick a saved BetterSelect XI or a Play.Cricket published team list below to pull the players, captain, keeper and match details — or add players yourself in Content.',
   result: 'Pick a game from your Games page, or paste the match link, and we\'ll pull the scores, the top batters and bowlers for both sides, the result and the player of the match.',
@@ -457,6 +472,10 @@ function playerToTemplatePlayer(p, { captain = false, viceCaptain = false, keepe
     // The club milestone this player is about to reach (lineup posts only), or null.
     milestone,
     headshot: p.photo_url ? `${BASE_URL}/images/players/${p.id}/photo` : null,
+    // An association workspace's player has no photo here: their club's crest
+    // (Team of the Week). Null for every club player.
+    crest: p.crest || null,
+    crestMono: p.crestMono || '',
     // The hero photo and the action shot, when the club has them. Only the big
     // hero slot reaches for them — grids and card fronts stay on the headshot,
     // which is the photo that actually reads at that size. `heroSource` is the
@@ -1044,7 +1063,7 @@ function OppLogoChip({ logo, loading, onClear, alt = null, onUseAlt = null }) {
 // live feed with no link, or a pasted match link resolves that link's own round
 // (onFetchLink). A pasted playhq.com link comes back as a `notice` — a different
 // id namespace, so the correction renders as its own amber box.
-function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick, onFetchLink, notice, off = [], onToggleCat, inPlay, onInPlay }) {
+function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick, onFetchLink, notice, off = [], onToggleCat, inPlay, onInPlay, competition = false, skipped }) {
   const [link, setLink] = useState('')
   const rowsOf = (d) => (d ? d[rowsKey] || [] : [])
   // Which categories the pull holds, counted on the day being shown.
@@ -1053,13 +1072,17 @@ function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick, onF
   const fetchLink = () => { const q = link.trim(); if (q) onFetchLink(q) }
   return (
     <div className="mb-4 p-3 rounded border pb-hairline bg-pb-surface2">
-      <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-2">Auto-fill from match link</p>
-      <div className="flex flex-col gap-2">
-        <button onClick={onPull} disabled={status === 'loading'}
+      {competition && (<>
+        <CompetitionLinkInput onFetch={onFetchLink} busy={status === 'loading'} label="Paste a match or grade link from the round" />
+        <p className="text-pb-faintest text-[10px] mt-1.5 leading-relaxed">{COMPETITION_LINK_HELP} Every club in the grade comes through, home team first.</p>
+      </>)}
+      {!competition && <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-2">Auto-fill from match link</p>}
+      <div className={competition ? 'flex flex-col gap-2 mt-2' : 'flex flex-col gap-2'}>
+        {!competition && <button onClick={onPull} disabled={status === 'loading'}
           className="px-3 py-1.5 rounded text-xs font-mono tracking-wide2 shrink-0 disabled:opacity-50"
           style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>
           {status === 'loading' ? 'Loading…' : 'Pull latest round'}
-        </button>
+        </button>}
         {onInPlay && (
           <label className="flex items-start gap-2 text-xs font-mono text-pb-text cursor-pointer" data-testid="results-in-play">
             <input type="checkbox" className="mt-0.5" checked={!!inPlay} disabled={status === 'loading'} onChange={e => onInPlay(e.target.checked)} />
@@ -1077,6 +1100,7 @@ function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick, onF
           </select>
         )}
       </div>
+      {!competition && (<>
       <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mt-3 mb-1.5">…or paste any match link from that round</p>
       <div className="flex gap-2">
         <input value={link} onChange={e => setLink(e.target.value)}
@@ -1093,6 +1117,8 @@ function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick, onF
           <p className="font-mono text-[9px] text-amber-400/80 mt-1 leading-relaxed">Open your match on play.cricket.com.au and copy the address from there.</p>
         </div>
       )}
+      </>)}
+      {competition && <PlayhqNotice notice={notice} />}
       {status === 'ok' && dates.length > 0 && present.length > 0 && onToggleCat && (
         <div className="mt-3" data-testid="round-cat-toggles">
           <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-1.5">Include</p>
@@ -1118,11 +1144,12 @@ function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick, onF
         </div>
       )}
       {status === 'ok' && dates.length > 0 && (
-        <p className="font-mono text-[9px] mt-1.5 text-green-400">✓ {filterByCats(rowsOf(dates[idx]), off).length} loaded · {dates[idx]?.label}</p>
+        <p className="font-mono text-[9px] mt-1.5 text-green-400">✓ {filterByCats(rowsOf(dates[idx]), off).length} loaded · {[competition ? dates[idx]?.comp : '', dates[idx]?.round && competition ? dates[idx].round : '', dates[idx]?.label].filter(Boolean).join(' · ')}</p>
       )}
+      {status === 'ok' && <SkippedNote skipped={skipped} />}
       {status && status !== 'loading' && status !== 'ok' && (
         <p className="font-mono text-[9px] mt-1.5 text-pb-faint">
-          {status === 'empty' ? `No ${hint} found for the current season.` : `✗ ${status}`}
+          {status === 'empty' ? (competition ? 'No matches in that round.' : `No ${hint} found for the current season.`) : `✗ ${status}`}
         </p>
       )}
     </div>
@@ -1163,11 +1190,39 @@ function writeTotwRange(r) {
   try { localStorage.setItem(TOTW_RANGE_KEY, JSON.stringify(r)) } catch { /* private window */ }
 }
 
-function TotwImportBox({ status, notice, data, onPull, onFetchLink, range, onRange, onPullRange }) {
+function TotwImportBox({ status, notice, data, onPull, onFetchLink, range, onRange, onPullRange, competition = false }) {
   const [link, setLink] = useState('')
   const fetchLink = () => { const q = link.trim(); if (q) onFetchLink(q) }
   const dateCls = 'w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1.5 text-xs text-pb-text font-mono'
   const btnCls = 'px-3 py-1.5 rounded text-xs font-mono tracking-wide2 shrink-0 disabled:opacity-50'
+  if (competition) {
+    // A workspace has no latest round of its own and no period: a link names the
+    // grade round, and every club's players in it are ranked together.
+    return (
+      <div className="mb-4 p-3 rounded border pb-hairline bg-pb-surface2" data-testid="totw-competition">
+        <CompetitionLinkInput onFetch={onFetchLink} busy={status === 'loading'} label="Paste a match or grade link from the round" />
+        <p className="text-pb-faintest text-[10px] mt-1.5 leading-relaxed">{COMPETITION_LINK_HELP}</p>
+        <PlayhqNotice notice={notice} />
+        {status === 'ok' && data && (
+          <p className="font-mono text-[9px] mt-1.5 text-green-400">
+            ✓ {data.players.length} performers from {data.matches} {data.matches === 1 ? 'match' : 'matches'} · {[data.comp, data.round, data.label].filter(Boolean).join(' · ')}
+          </p>
+        )}
+        {status === 'ok' && data?.liveMatches > 0 && (
+          <p className="font-mono text-[9px] mt-1 text-amber-400 leading-relaxed" data-testid="totw-live-note">
+            {data.liveMatches} of those {data.liveMatches === 1 ? 'match is' : 'matches are'} still in play, so the figures are not final.
+          </p>
+        )}
+        {status === 'ok' && <SkippedNote skipped={data?.skipped} />}
+        {status && status !== 'loading' && status !== 'ok' && (
+          <p className="font-mono text-[9px] mt-1.5 text-pb-faint">✗ {status}</p>
+        )}
+        <p className="text-pb-faintest text-[10px] mt-2 leading-relaxed">
+          Both sides of every match count. Points: 1 a run, 20 a wicket, 2 a maiden, 8 an outfield catch, stumping or run out, 4 a keeper catch.
+        </p>
+      </div>
+    )
+  }
   return (
     <div className="mb-4 p-3 rounded border pb-hairline bg-pb-surface2">
       <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-2">Auto-fill from a round</p>
@@ -1376,12 +1431,15 @@ function TotwTeamShape({ mode, onMode, makeup, onMakeup, data, count, onSize }) 
 // The whole Team of the Week pull panel: which teams, which round, what shape.
 // One component so the full editor and the phone quick-post cannot drift apart.
 function TotwControls({ t }) {
+  const busy = t.import.status === 'loading'
   return (
     <>
-      <TotwBasisPicker basis={t.plan.basis} onChange={t.onBasis} busy={t.import.status === 'loading'} />
-      <TotwScopePicker scope={t.plan.scope} onChange={t.onScope} data={t.import.data} busy={t.import.status === 'loading'} />
+      <TotwBasisPicker basis={t.plan.basis} onChange={t.onBasis} busy={busy} />
+      {t.competition
+        ? <TotwClubCap cap={t.plan.cap || 0} onChange={t.onCap} busy={busy} />
+        : <TotwScopePicker scope={t.plan.scope} onChange={t.onScope} data={t.import.data} busy={busy} />}
       <TotwImportBox status={t.import.status} notice={t.import.notice} data={t.import.data}
-        onPull={t.onPull} onFetchLink={t.onFetchLink}
+        onPull={t.onPull} onFetchLink={t.onFetchLink} competition={t.competition}
         range={t.plan.range} onRange={t.onRange} onPullRange={t.onPullRange} />
       <TotwTeamShape mode={t.plan.mode} onMode={t.onMode} makeup={t.plan.makeup} onMakeup={t.onMakeup}
         data={t.import.data} count={t.count} onSize={t.onSize} />
@@ -1600,6 +1658,13 @@ export default function AdminSocialPost() {
     return () => window.removeEventListener('resize', onResize)
   }, [])
   const [settings, setSettings] = useState(null)
+  // An association socials workspace: no club behind it, every pull reads a
+  // whole grade from a pasted link. `compTeam` is the side a Lineup, Player of
+  // the Match or Final Score post features, in place of the workspace's own name
+  // and crest; null shows the workspace.
+  const isAssoc = settings?.workspace_kind === 'association'
+  const [compTeam, setCompTeam] = useState(null)
+  const visibleTabs = isAssoc ? TABS.filter(t => !ASSOC_HIDDEN_TABS.has(t.key)) : TABS
   const [allPlayers, setAllPlayers] = useState([])
   const [manualPlayerOpen, setManualPlayerOpen] = useState(false)
   const [adminSponsors, setAdminSponsors] = useState([])
@@ -1935,7 +2000,7 @@ export default function AdminSocialPost() {
   const [totwOpts, setTotwOpts] = useState({ showPoints: false })
   // How the pool is pulled and shaped: which teams (all, juniors, seniors), the
   // period for a round that is not a weekend, and best performers or a set make-up.
-  const [totwPlan, setTotwPlan] = useState(() => ({ scope: 'all', basis: 'week', range: readTotwRange(), mode: 'best', makeup: { ...FANTASY_MAKEUP } }))
+  const [totwPlan, setTotwPlan] = useState(() => ({ scope: 'all', basis: 'week', range: readTotwRange(), mode: 'best', makeup: { ...FANTASY_MAKEUP }, cap: 0 }))
   // Milestones: the club's recorded list, which are ticked (in post order), the
   // window and search that narrow the picker, and what the post says about them.
   const [msImport, setMsImport] = useState({ status: null, report: null })
@@ -2586,6 +2651,8 @@ export default function AdminSocialPost() {
     const themKey = usKey === 'home' ? 'away' : 'home'
     const us = data[usKey] || {}
     const them = data[themKey] || {}
+    // A workspace owns neither side: the post features the side read as "us".
+    if (isAssoc) setCompTeam(us.name ? { name: tidyClubName(us.name), logo: us.logo || null, monogram: us.monogram || '' } : null)
 
     const usRuns = parseInt(String(us.total || '0'), 10) || 0
     const themRuns = parseInt(String(them.total || '0'), 10) || 0
@@ -2653,7 +2720,7 @@ export default function AdminSocialPost() {
         logoAlt: null,
       }))
     }
-  }, [settings, playerForPid])
+  }, [settings, playerForPid, isAssoc])
 
   // Same two-step as the scorecard import above — see loadScorecardMatch.
   const loadResultMatch = async (matchId) => {
@@ -2733,7 +2800,12 @@ export default function AdminSocialPost() {
     }])
 
     const mm = data.match || {}
-    if (mm.opponent) {
+    if (isAssoc && pl.club) {
+      // Both sides are ranked in a workspace: feature the player's own club and
+      // name the side they played as the opponent.
+      setCompTeam({ name: pl.club, logo: pl.clubLogo || null, monogram: pl.clubMono || '' })
+      setOpponent(o => ({ ...o, name: pl.opp || o.name, monogram: pl.oppMono || o.monogram, logo: pl.oppLogo || null, logoAlt: null }))
+    } else if (mm.opponent) {
       setOpponent(o => ({ ...o, name: tidyClubName(mm.opponent) || o.name, monogram: mm.oppMono || o.monogram }))
     }
     setMatch(m => ({
@@ -2743,7 +2815,7 @@ export default function AdminSocialPost() {
       date: fmtIsoDate(mm.date) || m.date,
       competition: mm.grade || m.competition,
     }))
-  }, [playerForPid])
+  }, [playerForPid, isAssoc])
 
   const loadPotmMatch = async (matchId) => {
     setPotmPicks(null)
@@ -2797,7 +2869,8 @@ export default function AdminSocialPost() {
   const totwSelection = useCallback((pl, i) => {
     const rosterPlayer = pl.pid ? playerForPid(pl.pid) : null
     const fallbackName = pl.first && pl.last ? `${pl.last}, ${pl.first}` : (pl.last || pl.first || pl.short || 'Player')
-    const player = rosterPlayer || { id: pl.pid || `totw_${pl.guid || i}`, display_name: fallbackName }
+    // A workspace's players are nobody's roster record: their club's crest stands in for a photo.
+    const player = rosterPlayer || { id: pl.pid || `totw_${pl.guid || i}`, display_name: fallbackName, crest: pl.clubLogo || null, crestMono: pl.clubMono || '' }
     const derived = pl.batting && pl.bowling ? 'AR' : pl.bowling ? 'BOWL' : 'BAT'
     const role = rosterPlayer ? socialRole(rosterPlayer, derived) : derived
     return {
@@ -2821,7 +2894,7 @@ export default function AdminSocialPost() {
       totwCursor.current = Math.min(n, pool.length) - 1
     }
     setSelectedPlayers(chosen.map(pl => totwSelection(pl, pool.indexOf(pl))))
-    setMatch(m => ({ ...m, round: data.round || m.round, date: data.label || m.date, season: data.season || m.season }))
+    setMatch(m => ({ ...m, round: data.round || m.round, date: data.label || m.date, season: data.season || m.season, competition: data.comp || m.competition }))
   }, [totwSelection])
 
   // A period names the round by the days it was played; a pasted link names it
@@ -2832,11 +2905,12 @@ export default function AdminSocialPost() {
   const loadTotw = useCallback(async (q, over = {}) => {
     const scope = over.scope ?? totwPlan.scope
     const basis = over.basis ?? totwPlan.basis
+    const cap = over.cap ?? totwPlan.cap
     const dateFrom = over.dateFrom || ''
     const dateTo = over.dateTo || ''
     setTotwImport(s => ({ ...s, status: 'loading', notice: null }))
     try {
-      const data = await api.getSocialTotw(q || '', { dateFrom, dateTo, scope, basis })
+      const data = await api.getSocialTotw(q || '', { dateFrom, dateTo, scope, basis, cap: isAssoc ? cap : 0 })
       if (data.kind === 'round' && data.players?.length) {
         setTotwImport({ status: 'ok', data, notice: null, source: { q: q || '', dateFrom, dateTo } })
         applyTotw(data, TOTW_DEFAULT, totwPlan.mode === 'makeup' ? totwPlan.makeup : null)
@@ -2850,7 +2924,7 @@ export default function AdminSocialPost() {
     } catch (e) {
       setTotwImport(s => ({ ...s, status: e?.message || 'failed', notice: null }))
     }
-  }, [applyTotw, totwPlan])
+  }, [applyTotw, totwPlan, isAssoc])
 
   const pullTotwRange = () => {
     const { from, to } = totwPlan.range
@@ -2870,6 +2944,13 @@ export default function AdminSocialPost() {
     setTotwPlan(pl => ({ ...pl, basis }))
     const src = totwImport.source
     if (src && totwImport.data) loadTotw(src.q, { dateFrom: src.dateFrom, dateTo: src.dateTo, basis })
+  }
+  // Workspace only: the per-club cap reorders the pool, so it is a new pull.
+  const changeTotwCap = (cap) => {
+    if (cap === totwPlan.cap) return
+    setTotwPlan(pl => ({ ...pl, cap }))
+    const src = totwImport.source
+    if (src && totwImport.data) loadTotw(src.q, { cap })
   }
   const changeTotwMode = (mode) => {
     if (mode === totwPlan.mode) return
@@ -2941,6 +3022,7 @@ export default function AdminSocialPost() {
   const totwControls = {
     plan: totwPlan, import: totwImport, count: selectedPlayers.length,
     onScope: changeTotwScope, onBasis: changeTotwBasis, onMode: changeTotwMode, onMakeup: changeTotwMakeup, onSize: changeTotwSize,
+    competition: isAssoc, onCap: changeTotwCap,
     onRange: (range) => setTotwPlan(pl => ({ ...pl, range })),
     onPull: () => loadTotw(''), onFetchLink: (q) => loadTotw(q), onPullRange: pullTotwRange,
   }
@@ -2948,8 +3030,10 @@ export default function AdminSocialPost() {
   // ── Play.cricket fixtures / results round import ────────────────────────────
   const applyFxDate = useCallback((d, season, off) => {
     if (!d) return
-    setFixtures(sortByGrade(filterByCats(d.fixtures || [], off).map(f => ({ ...f }))))
-    setMatch(m => ({ ...m, round: d.round || m.round, date: d.label || m.date, season: season || m.season }))
+    // A workspace's rows are one grade, home team first: kept in draw order, not by grade.
+    const rows = filterByCats(d.fixtures || [], off).map(f => ({ ...f }))
+    setFixtures(d.comp ? rows : sortByGrade(rows))
+    setMatch(m => ({ ...m, round: d.round || m.round, date: d.label || m.date, season: season || m.season, competition: d.comp || m.competition }))
   }, [])
   const importFixtures = useCallback(async () => {
     setFxImport(s => ({ ...s, status: 'loading' }))
@@ -2964,8 +3048,9 @@ export default function AdminSocialPost() {
 
   const applyRrDate = useCallback((d, season, off) => {
     if (!d) return
-    setResults(sortByGrade(filterByCats(d.results || [], off).map(r => ({ ...r }))))
-    setMatch(m => ({ ...m, round: d.round || m.round, date: d.label || m.date, season: season || m.season }))
+    const rows = filterByCats(d.results || [], off).map(r => ({ ...r }))
+    setResults(d.comp ? rows : sortByGrade(rows))
+    setMatch(m => ({ ...m, round: d.round || m.round, date: d.label || m.date, season: season || m.season, competition: d.comp || m.competition }))
   }, [])
   // `live` is passed in (not read from state) so flipping the box can re-pull at once.
   const runResultsPull = useCallback(async (live) => {
@@ -3012,7 +3097,7 @@ export default function AdminSocialPost() {
       if (data.kind === 'round') {
         const dates = data.dates || []
         if (!dates.length) { setRrImport(s => ({ ...s, status: 'empty', notice: null })); return }
-        setRrImport({ status: 'ok', dates, idx: 0, season: data.season, notice: null })
+        setRrImport({ status: 'ok', dates, idx: 0, season: data.season, notice: null, skipped: data.skipped || [] })
         applyRrDate(dates[0], data.season, rrOff)
         return
       }
@@ -3337,17 +3422,17 @@ export default function AdminSocialPost() {
 
   // Load BetterSelect fixtures the first time the lineup data step is opened.
   useEffect(() => {
-    if (tool === 'source' && activeTab === 'lineup' && sourceFixtures === null && !IS_AFL) {
+    if (tool === 'source' && activeTab === 'lineup' && sourceFixtures === null && !IS_AFL && settings && !isAssoc) {
       api.bsSelectionOverview().then((d) => setSourceFixtures(d.fixtures || [])).catch(() => setSourceFixtures([]))
     }
-  }, [tool, activeTab, sourceFixtures])
+  }, [tool, activeTab, sourceFixtures, settings, isAssoc])
   // Load Play.Cricket-published team lists (upcoming, falling back to recent)
   // the same way — a second, independent source for the same lineup step.
   useEffect(() => {
-    if (tool === 'source' && activeTab === 'lineup' && pcFixtures === null && settings?.id) {
+    if (tool === 'source' && activeTab === 'lineup' && pcFixtures === null && settings?.id && !isAssoc) {
       api.getOrgLineups(settings.id, { mode: 'upcoming', limit: 20 }).then((d) => setPcFixtures(d.matches || [])).catch(() => setPcFixtures([]))
     }
-  }, [tool, activeTab, pcFixtures, settings])
+  }, [tool, activeTab, pcFixtures, settings, isAssoc])
   // Default to whichever source actually has something to pick, once both have
   // loaded — an admin who hasn't manually chosen a source shouldn't land on an
   // empty "No saved teams yet" BetterSelect card when Play.Cricket has one.
@@ -3376,6 +3461,16 @@ export default function AdminSocialPost() {
       ? (IS_AFL ? footballAsset(settings.logo_url) : `${BASE_URL}/images/organisations/${settings.id}/logo`)
       : null,
   } : { name: 'CLUB', fullName: 'Club', short: 'CLB', monogram: 'CL', logo: null }
+  // A workspace featuring one side of a match (Lineup, Player of the Match, Final
+  // Score) prints that side's name and crest; every other post is the workspace's.
+  const featuredSide = isAssoc && compTeam && ['lineup', 'motm', 'result'].includes(activeTab) ? compTeam : null
+  if (featuredSide) {
+    const nm = featuredSide.name || team.name
+    Object.assign(team, {
+      name: nm.toUpperCase(), fullName: nm, short: deriveShort(nm),
+      monogram: featuredSide.monogram || deriveShort(nm).slice(0, 2), logo: featuredSide.logo || null,
+    })
+  }
 
   const oppData = {
     name: (shortClubNames ? shortClubName(opponent.name) : opponent.name).toUpperCase() || 'OPPONENT',
@@ -4316,7 +4411,7 @@ export default function AdminSocialPost() {
         <MobileQuickPost
           moduleLogo={moduleBrand('socials').logo} clubName={settings?.name}
           W={W} H={H} content={previewContent} fontStyle={fontStyle} fill={canvasFill}
-          types={TABS.map((t) => ({ key: t.key, label: t.label }))} activeType={activeTab} onPickType={switchTab}
+          types={visibleTabs.map((t) => ({ key: t.key, label: t.label }))} activeType={activeTab} onPickType={switchTab}
           fields={mFields} extra={mExtra} palettes={mPalettes} paletteKey={paletteKey} onPickPalette={setPaletteKey}
           onExport={handleExport} exporting={exporting} onSaveDraft={saveCurrentTemplate}
           onFullEditor={() => setForceFullEditor(true)}
@@ -4331,7 +4426,7 @@ export default function AdminSocialPost() {
   const entryParams = new URLSearchParams(location.search)
   const showStart = !entryParams.has('type') && !entryParams.has('template')
   if (showStart) {
-    const startTypes = TABS.map((t) => ({
+    const startTypes = visibleTabs.map((t) => ({
       key: t.key, label: t.label, icon: TAB_ICON[t.key],
       count: TEMPLATES.filter((x) => TAB_MAP[x.id] === t.key).length,
     }))
@@ -4428,6 +4523,23 @@ export default function AdminSocialPost() {
     if (oppTeam?.club || oppTeam?.name) setOpponent((o) => ({ ...o, name: oppTeam.club || oppTeam.name || o.name, logo: oppTeam.logo_url || o.logo }))
     const tn = teamHeadline(ourTeam.name || ourTeam.club || '', settings?.name, fx.grade_name || fx.grade || match.competition)
     if (tn) setHeadline(tn)
+    setLineupLoad(`ok:${picked.length}`)
+  }
+
+  // Workspace lineup: one side of a grade round match, picked in the Data step.
+  // Nobody is a roster record, so the side's crest stands in for photos.
+  const loadLineupFromCompetition = (fx, side) => {
+    if (!fx || !side?.players?.length) { setLineupLoad('err:No published side for this match yet'); return }
+    const other = (fx.teams || []).find((t) => t.id !== side.id)
+    const picked = side.players.map((p) => ({
+      player: { id: p.participant_id, display_name: p.name },
+      role: p.is_wicket_keeper ? 'WK' : 'BAT',
+      captain: !!p.is_captain, viceCaptain: false, keeper: !!p.is_wicket_keeper,
+    }))
+    setSelectedPlayers(picked)
+    setCompTeam({ name: side.label || tidyClubName(side.club || side.name), logo: side.logo_url || null, monogram: '' })
+    if (other) setOpponent((o) => ({ ...o, name: other.label || tidyClubName(other.club || other.name) || o.name, logo: other.logo_url || null, logoAlt: null }))
+    setMatch((m) => ({ ...m, competition: (fx.grade || m.competition || '').toUpperCase(), round: fx.round || m.round, venue: fx.venue || m.venue, date: fx.date || m.date, time: fx.time || m.time }))
     setLineupLoad(`ok:${picked.length}`)
   }
 
@@ -4674,7 +4786,7 @@ export default function AdminSocialPost() {
   )
 
   // Every post type across the top — replaces the old dropdown.
-  const tabBar = TABS.map((t) => {
+  const tabBar = visibleTabs.map((t) => {
     const on = activeTab === t.key
     return (
       <button key={t.key} onClick={() => switchTab(t.key)}
@@ -4982,12 +5094,13 @@ export default function AdminSocialPost() {
                     <Icon name={TAB_ICON[activeTab] || 'bolt'} size={15} className="text-pb-accent" />
                     <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">{TABS.find((t) => t.key === activeTab)?.label} · data</h2>
                   </div>
-                  <p className="text-[11px] text-pb-dim leading-relaxed">{SOURCE_HELP[activeTab] || "This post type has nothing to import — it's all yours to design."}</p>
+                  <p className="text-[11px] text-pb-dim leading-relaxed">{(isAssoc && ASSOC_SOURCE_HELP[activeTab]) || SOURCE_HELP[activeTab] || "This post type has nothing to import — it's all yours to design."}</p>
                 </div>
 
                 {activeTab === 'lineup' && (
                   <div className="pb-card p-4 flex flex-col gap-2">
-                    {!IS_AFL && <div className="flex gap-0.5 p-[3px] rounded-lg bg-pb-surface2 border pb-hairline">
+                    {isAssoc && <CompetitionLineupBox onPick={loadLineupFromCompetition} />}
+                    {!IS_AFL && !isAssoc && <div className="flex gap-0.5 p-[3px] rounded-lg bg-pb-surface2 border pb-hairline">
                       {[{ key: 'betterselect', label: 'BetterSelect' }, { key: 'playcricket', label: 'Play.Cricket' }].map((s) => (
                         <button key={s.key}
                           onClick={() => { lineupSourceTouched.current = true; setLineupSourceKind(s.key) }}
@@ -4997,7 +5110,7 @@ export default function AdminSocialPost() {
                       ))}
                     </div>}
 
-                    {lineupSourceKind === 'betterselect' && (<>
+                    {!isAssoc && lineupSourceKind === 'betterselect' && (<>
                       {sourceFixtures === null && <div className="text-pb-faintest text-[10px] font-mono">Loading your teams…</div>}
                       {Array.isArray(sourceFixtures) && sourceFixtures.length === 0 && (
                         <div className="text-pb-faintest text-[11px] leading-relaxed">No saved teams yet. Pick your XI in BetterSelect, or add players yourself in Content.</div>
@@ -5016,7 +5129,7 @@ export default function AdminSocialPost() {
                       <button onClick={() => navigate('/admin/betterselect')} className="self-start mt-1 font-mono text-[10px] text-pb-faint hover:text-pb-text">Open BetterSelect →</button>
                     </>)}
 
-                    {lineupSourceKind === 'playcricket' && (<>
+                    {!isAssoc && lineupSourceKind === 'playcricket' && (<>
                       {pcFixtures === null && <div className="text-pb-faintest text-[10px] font-mono">Loading published team lists…</div>}
                       {Array.isArray(pcFixtures) && pcFixtures.length === 0 && (
                         <div className="text-pb-faintest text-[11px] leading-relaxed">{IS_AFL
@@ -5083,7 +5196,7 @@ export default function AdminSocialPost() {
 
                 {activeTab === 'fixtures' && (
                   <div className="pb-card p-4">
-                    <RoundImportBox hint="upcoming fixtures" rowsKey="fixtures"
+                    <RoundImportBox hint="upcoming fixtures" rowsKey="fixtures" competition={isAssoc}
                       status={fxImport.status} dates={fxImport.dates} idx={fxImport.idx}
                       onPull={importFixtures} onFetchLink={importFixturesFromLink} notice={fxImport.notice}
                       onPick={(i) => { setFxImport((s) => ({ ...s, idx: i })); applyFxDate(fxImport.dates[i], fxImport.season, fxOff) }}
@@ -5092,7 +5205,7 @@ export default function AdminSocialPost() {
                 )}
                 {activeTab === 'results' && (
                   <div className="pb-card p-4">
-                    <RoundImportBox hint="recent results" rowsKey="results"
+                    <RoundImportBox hint="recent results" rowsKey="results" competition={isAssoc} skipped={rrImport.skipped}
                       status={rrImport.status} dates={rrImport.dates} idx={rrImport.idx}
                       onPull={importResults} onFetchLink={importResultsFromLink} notice={rrImport.notice} inPlay={rrLive} onInPlay={IS_AFL ? undefined : changeRrLive}
                       onPick={(i) => { setRrImport((s) => ({ ...s, idx: i })); applyRrDate(rrImport.dates[i], rrImport.season, rrOff) }}
@@ -6570,7 +6683,7 @@ export default function AdminSocialPost() {
                     className="w-6 h-6 rounded border pb-hairline font-mono text-xs text-pb-faint hover:text-pb-text disabled:opacity-30">+</button>
                   <span className="text-pb-faintest text-[10px]">Rows spread evenly across pages</span>
                 </div>
-                <RoundImportBox hint="upcoming fixtures" rowsKey="fixtures"
+                <RoundImportBox hint="upcoming fixtures" rowsKey="fixtures" competition={isAssoc}
                   status={fxImport.status} dates={fxImport.dates} idx={fxImport.idx}
                   onPull={importFixtures} onFetchLink={importFixturesFromLink} notice={fxImport.notice}
                   onPick={(i) => { setFxImport(s => ({ ...s, idx: i })); applyFxDate(fxImport.dates[i], fxImport.season, fxOff) }}
@@ -6643,7 +6756,7 @@ export default function AdminSocialPost() {
                     className="w-6 h-6 rounded border pb-hairline font-mono text-xs text-pb-faint hover:text-pb-text disabled:opacity-30">+</button>
                   <span className="text-pb-faintest text-[10px]">Rows spread evenly across pages</span>
                 </div>
-                <RoundImportBox hint="recent results" rowsKey="results"
+                <RoundImportBox hint="recent results" rowsKey="results" competition={isAssoc} skipped={rrImport.skipped}
                   status={rrImport.status} dates={rrImport.dates} idx={rrImport.idx}
                   onPull={importResults} onFetchLink={importResultsFromLink} notice={rrImport.notice} inPlay={rrLive} onInPlay={IS_AFL ? undefined : changeRrLive}
                   onPick={(i) => { setRrImport(s => ({ ...s, idx: i })); applyRrDate(rrImport.dates[i], rrImport.season, rrOff) }}

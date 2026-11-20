@@ -420,6 +420,10 @@ class Organisation(Base):
     # (migration 080 backfilled module_overrides from it); it is no longer read.
     tier = Column(Text, nullable=False, server_default="good", default="good")
     module_overrides = Column(JSONB, nullable=False, server_default="[]", default=list)
+    # NULL for a real club; 'association' for a BetterSocials-only workspace with no
+    # club behind it (migration 392, services/social_competition.py). A workspace is
+    # never is_active, so the sync scheduler and public pages already pass it by.
+    workspace_kind = Column(Text, nullable=True)
     # ─── Subscription state (migration 057) ──────────────────────────────────
     # Drives entitlement now (status gates module access) and reflects the
     # manual-invoicing state in-app ahead of Stripe. Statuses: active/trial/

@@ -54,6 +54,7 @@ export const SUPER_SECTIONS = [
     label: 'Clubs & Data',
     blurb: 'Backups, merges, migration and onboarding enquiries.',
     items: [
+      { to: '/admin/super/association-socials', label: 'Association Socials', blurb: 'BetterSocials workspaces for an association, building posts for a whole grade from a match link.' },
       { to: '/admin/super/backups', label: 'Backups', blurb: 'Database backups and restore points.' },
       { to: '/admin/super/fantasy', label: 'Fantasy Competitions', blurb: 'Every club running a BetterFantasyCricket competition, with the current scores.' },
       { to: '/admin/super/migration', label: 'KlubPro Migration', blurb: 'Import player profiles and sponsors from a legacy KlubPro club.' },

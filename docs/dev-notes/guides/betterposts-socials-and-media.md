@@ -159,6 +159,15 @@
 86. `organisations.logo_data` is written only by a club upload (and the demo clone). A wrong opponent crest is stored data: run `python -m app.scripts.audit_org_logos`, or compare `md5(logo_data)` across clubs in psql. The editor takes our crest only for an id match that has `logo_url` and is not archived, and keeps the Cricket Australia URL as `logoAlt`. An ARCHIVED club's stored crest is never used on a post (`_org_logo_by_ca_id`, the scorecard `_org_for_team` result, `resolveClubLogo`); archiving does not clear it.
 87. `_org_for_team` matches on distinctive words only (`_GENERIC_CLUB_WORDS` and the grade words are dropped); one shared word such as "Cricket" is never a match.
 
+**Association Socials workspaces (v9.147.0, `services/social_competition.py`, migration 392)**
+88a. An association workspace is an `organisations` row with `workspace_kind = 'association'`, `is_active = false`, no slug and `module_overrides = ['socials']`. It is created only by `POST /club-admin/super/association-workspaces`. `is_active = false` is what keeps it out of the sync scheduler, notification jobs, public site and sitemap. All Clubs, `/super/overview`, `GET /organisations`, the broadcast pickers and the admin contact list filter `workspace_kind IS NULL`. A new list of "every club" needs the same filter.
+88b. In a workspace, the existing `/admin/social/{fixtures,results,totw,potm,match-lookup,scorecard}` routes branch on `is_association(club)` and read the WHOLE grade a pasted link names. They never fall back to club games (no link answers `kind: 'needs_link'`). A round is the grade's matches with the same `round.id`, never a date window. A grade link with no `roundId` is the next round with a match in status 0, 1 or 2 (fixtures, lineups), or the last round with a finished match (results, team of the week). Abandoned (4) is never "ahead".
+88c. Workspace code never uses `club_match` name matching: a workspace called "Applecross Socials" would claim Applecross's games. A side is named by team id (`_rank_our_side(team_id=)`, `_result_row(team_id=)`, `_our_keeper_guids(team_id=)`), and the scorecard route passes `club=None`.
+88d. Workspace rows read from the HOME side and carry `neutral: true`. The home team stands in `grade` (so every layout names it first) with `home`, `homeLogo`, `homeMono`. Layouts use `isNeutral`, `haWord`, `firstSide` and `compOf` in `round-templates.jsx` to drop the round record and HOME / AWAY words and to swap the club crest for the home crest. A club row has no `neutral`, so a club post draws what it drew before. A new fixtures or results layout needs the same handling.
+88e. Team of the week in a workspace pools both sides of every match, `pid` is always null, each player carries `club`, `clubLogo` and `clubId`, and `cap` (0 to 11) reorders the pool with `apply_club_cap`: past-cap players are moved down and flagged `overCap`, never dropped. `Face` in `totw-templates.jsx` draws `p.crest` (set from `clubLogo`) before the post's crest.
+88f. Lineup, Player of the Match and Final Score in a workspace feature one side: `compTeam` in `AdminSocialPost.jsx` replaces the workspace's name and crest on those three tabs only (`featuredSide`). Lineups come from `GET /admin/social/competition/lineups` (404 for a club). Milestones is hidden (`ASSOC_HIDDEN_TABS`).
+88g. Cricket Australia sometimes serves a finished match with no innings. `_round_cards` re-reads such a card once with `force=True` and names any still bare in `skipped`; the editor shows it (`SkippedNote`). A club Results margin reads `matchSummary.resultText` (Cricket Australia's name for it), after `result`.
+
 ## Traps and failure signatures
 - Geometry checks pass but a layout reads wrong (black bands, clumped story names). Judge from real screenshots.
 - Hero layouts show a crest, not the cut-out: harness roster stubbed `photo_url: null`. Stubs must cover every conditional's data (give players a photo and a route for it).
@@ -181,6 +190,8 @@
 - Control runs must report, not crash: anchor on the export button, read new elements through `textOf`/`seen`/`press`.
 - Fonts: check on the club's real site (`VITE_PROXY_TARGET=https://betterat.cricket/api`). Videos: diagnose from response headers and directory modes.
 
+- Association workspaces: `backend/verification/verify_association_socials.py` (real Postgres, shipped route bodies, Cricket Australia stubbed: 60 checks, the control on the previous commit fails 57 without crashing) and `frontend/verification/verify_association_socials_browser.mjs` (production build, API stubbed, reads the export node: 31 checks, the previous build fails 30).
+
 ## Operator commands and scripts
 - Confirm both mounts before enabling the hand-off: `docker compose exec betterstats-backend ls /mnt/media/bettercricket/internal/videos` and the same on `betterstats-frontend`, then set `VIDEO_ACCEL_LOCATION=/_internal_videos/`.
 - After a database restore onto a new box, videos show titles and thumbnails but will not play: re-upload (super admin sees the count); `orphaned_files()` lists strays.
@@ -198,6 +209,8 @@
 - Videos: no draft state, no transcoding (`.mov` refused with a message).
 - Results rows for games in play have only the score so far; there is no live result line or run rate. Team of the Week: a period reads the current season only (a past round needs a pasted link); the phone quick-post has no round pull for Fixtures, Results or Team of the Week.
 - Story slots on some footers sit at the very bottom, not lifted clear of the app's reply bar.
+
+- Association workspaces: no "Association Socials" role yet (super admin only; a role would need the socials capability and the workspace as its club). FX2, FX4 and FX6 print names only for both sides, as they do for a club, so a workspace post on them has no crests. Ladder posts are not built. The phone quick-post has no workspace pulls.
 
 ## Flags: conflicting, superseded or possibly obsolete guidance
 - [FLAG-POSTS-1] "Only C1-C4 decompose ... 40+ layouts, large work" | wrong for reflow and layering (v9.74/v9.76) but still true for decomposition; `templateToBlocks.js` exists | "A FIXED LAYOUT CANNOT RE-LAY ITSELF OUT AT 4:5" L995-1085 | keep (decomposition only)

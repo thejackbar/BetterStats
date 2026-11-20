@@ -100,7 +100,8 @@ async def admin_rows(session: AsyncSession, *, club_id=None) -> list:
         select(User, ClubMembership, Organisation)
         .join(ClubMembership, ClubMembership.user_id == User.id)
         .join(Organisation, Organisation.id == ClubMembership.club_id)
-        .where(ClubMembership.role == "club_admin", Organisation.archived_at.is_(None))
+        .where(ClubMembership.role == "club_admin", Organisation.archived_at.is_(None),
+               Organisation.workspace_kind.is_(None))
         .order_by(ClubMembership.is_primary_admin.desc(), User.created_at.asc())
     )
     if club_id is not None:

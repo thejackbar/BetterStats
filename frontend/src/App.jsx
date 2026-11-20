@@ -189,6 +189,7 @@ const SuperOverview = lazy(() => import('./pages/admin/SuperOverview'))
 const SuperHub = lazy(() => import('./pages/admin/SuperHub'))
 const SuperClubs = lazy(() => import('./pages/admin/SuperClubs'))
 const SuperClubMerge = lazy(() => import('./pages/admin/SuperClubMerge'))
+const SuperAssociationWorkspaces = lazy(() => import('./pages/admin/SuperAssociationWorkspaces'))
 const SuperClubLinks = lazy(() => import('./pages/admin/SuperClubLinks'))
 const SuperPrivacyRequests = lazy(() => import('./pages/admin/SuperPrivacyRequests'))
 const SuperUsers = lazy(() => import('./pages/admin/SuperUsers'))
@@ -603,6 +604,7 @@ export default function App() {
           <Route path="/admin/super/club-links" element={<ProtectedRoute requireRole="super_admin"><SuperClubLinks /></ProtectedRoute>} />
           <Route path="/admin/super/privacy-requests" element={<ProtectedRoute requireRole="super_admin"><SuperPrivacyRequests /></ProtectedRoute>} />
           <Route path="/admin/super/merge-clubs" element={<ProtectedRoute requireRole="super_admin"><SuperClubMerge /></ProtectedRoute>} />
+          <Route path="/admin/super/association-socials" element={<ProtectedRoute requireRole="super_admin"><SuperAssociationWorkspaces /></ProtectedRoute>} />
           <Route path="/admin/super/users" element={<ProtectedRoute requireRole="super_admin"><SuperUsers /></ProtectedRoute>} />
           <Route path="/admin/super/onboarding" element={<ProtectedRoute requireRole="super_admin"><SuperOnboarding /></ProtectedRoute>} />
           <Route path="/admin/super/unpause-requests" element={<ProtectedRoute requireRole="super_admin"><SuperUnpauseRequests /></ProtectedRoute>} />

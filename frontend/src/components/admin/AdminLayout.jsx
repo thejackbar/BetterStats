@@ -427,6 +427,16 @@ export default function AdminLayout({ children }) {
         </div>
       )}
 
+      {/* Association socials workspace: no club behind it, so only BetterPosts and
+          the branding (crest, colours, fonts, sponsors) mean anything here. */}
+      {user?.workspace_kind === 'association' && (
+        <div className="text-center font-mono text-[10px] tracking-wide2 py-1.5 px-4 bg-pb-surface2 text-pb-dim" data-testid="association-workspace-banner">
+          ASSOCIATION SOCIALS WORKSPACE · posts cover a whole grade from a match link ·{' '}
+          <Link to="/admin/social-post" className="underline hover:no-underline">BetterPosts</Link>{' · '}
+          <Link to="/admin/settings" className="underline hover:no-underline">Branding</Link>
+        </div>
+      )}
+
       {/* Linked-club banner — a Club Admin working in a club other than their
           own is told so on every page, with a way back, so a change never lands
           on the wrong club unnoticed. */}

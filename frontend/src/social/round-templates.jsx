@@ -172,6 +172,20 @@ function Shield({ logo, monogram, color, size = 74 }) {
   return <ClubLogo src={logo || null} monogram={monogram} color={color} size={size} shape="shield" />
 }
 
+// An association workspace's round is a whole grade (services/social_competition.py):
+// every row is marked `neutral`, the home team stands where a club's own grade
+// would (`grade`, with `homeLogo` and `homeMono`), and nothing is one club's.
+// So a W/L round record, a HOME / AWAY word and the club crest beside a row's
+// first side are left out or swapped for the home side. A club's rows carry no
+// `neutral`, so its posts draw exactly what they drew before.
+const isNeutral = (rows) => (rows || []).some(r => r && r.neutral)
+const compOf = (meta) => (meta.comp && meta.comp !== 'COMPETITION' ? meta.comp : '')
+const haWord = (r, home) => (r && r.neutral ? '' : home ? 'HOME' : 'AWAY')
+function firstSide(r, club) {
+  return r && r.neutral
+    ? { name: r.home || r.grade, logo: r.homeLogo || null, mono: r.homeMono || '' }
+    : { name: club.name, logo: club.logo, mono: club.mono }
+}
 function record(rows) {
   const w = rows.filter(r => r.outcome === 'W').length
   const l = rows.filter(r => r.outcome === 'L').length
@@ -311,11 +325,12 @@ export function FixtureList({ palette: pal, width = 1080, height = 1080, meta = 
                 <div style={{ fontFamily: DISPLAY, fontSize: t(30), letterSpacing: 0.5, lineHeight: 0.95, color: pc(parts, 'gradeColor', undefined) }}>{r.grade}</div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 16, minWidth: 0 }}>
+                {r.neutral ? <Monogram text={r.homeMono} logo={r.homeLogo} size={50} fg={pc(parts, 'crestColor', pal.ink)} bg={pc(parts, 'crestBg', `${pal.ink}12`)} ring={pc(parts, 'crestRing', `${pal.ink}33`)} /> : null}
                 <span style={{ fontFamily: DISPLAY, fontSize: 20, letterSpacing: 2, color: home ? pc(parts, 'homeColor', pal.accent) : pc(parts, 'awayColor', pal.ink), opacity: home ? 1 : 0.55, width: 40, flexShrink: 0 }}>{home || meta.allVs ? 'VS' : '@'}</span>
                 <Monogram text={r.oppMono} logo={r.oppLogo} size={50} fg={pc(parts, 'crestColor', pal.ink)} bg={pc(parts, 'crestBg', `${pal.ink}12`)} ring={pc(parts, 'crestRing', `${pal.ink}33`)} />
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontFamily: DISPLAY, fontSize: t(31), letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{r.opp}</div>
-                  <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 1.5, color: pc(parts, 'haColor', pal.ink), opacity: 0.55, marginTop: 4 }}>{home ? 'HOME' : 'AWAY'}</div>
+                  <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 1.5, color: pc(parts, 'haColor', pal.ink), opacity: 0.55, marginTop: 4 }}>{haWord(r, home)}</div>
                 </div>
               </div>
               <div style={{ textAlign: 'right' }}>
@@ -461,10 +476,10 @@ export function FixtureGrid({ palette: pal, width = 1080, height = 1080, meta = 
             <div key={i} style={{ position: 'relative', background: pc(parts, 'cardBg', pal.secondary), borderTop: `3px solid ${pc(parts, 'cardBorder', pal.accent)}`, padding: '20px 24px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', overflow: 'hidden' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ fontFamily: DISPLAY, fontSize: t(30), letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', color: pc(parts, 'gradeColor', undefined) }}>{r.grade}</div>
-                <span style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 1.5, padding: '4px 9px', borderRadius: 3, background: tagBg, color: tagInk, fontWeight: 700, flexShrink: 0 }}>{home ? 'HOME' : 'AWAY'}</span>
+                {r.neutral ? null : <span style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 1.5, padding: '4px 9px', borderRadius: 3, background: tagBg, color: tagInk, fontWeight: 700, flexShrink: 0 }}>{home ? 'HOME' : 'AWAY'}</span>}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={46} />
+                <Shield logo={firstSide(r, club).logo} monogram={firstSide(r, club).mono} color={pal.ink} size={46} />
                 <span style={{ fontFamily: DISPLAY, fontSize: 22, color: pc(parts, 'vsColor', pal.accent), opacity: 0.9 }}>v</span>
                 <Monogram text={r.oppMono} logo={r.oppLogo} size={46} fg={pc(parts, 'crestColor', pal.ink)} bg={pc(parts, 'crestBg', `${pal.ink}14`)} ring={pc(parts, 'crestRing', `${pal.ink}33`)} />
                 <div style={{ fontFamily: DISPLAY, fontSize: t(28), letterSpacing: 0.5, lineHeight: 0.95, minWidth: 0, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{r.opp}</div>
@@ -539,7 +554,7 @@ export function FixtureBoard({ palette: pal, width = 1080, height = 1080, meta =
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
                 <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1, color: home ? pc(parts, 'homeColor', pal.accent) : pc(parts, 'awayColor', pal.ink), opacity: home ? 1 : 0.5, flexShrink: 0, width: 22 }}>{home || meta.allVs ? 'VS' : '@'}</span>
                 <span style={{ fontFamily: DISPLAY, fontSize: t(28), letterSpacing: 0.5, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{r.opp}</span>
-                <span style={{ fontFamily: MONO, fontSize: 10, letterSpacing: 1.2, padding: '2px 7px', borderRadius: 3, border: `1px solid ${pc(parts, 'fx4TagBorder', `${pal.ink}30`)}`, color: pc(parts, 'haColor', pal.ink), opacity: 0.6, flexShrink: 0 }}>{home ? 'HOME' : 'AWAY'}</span>
+                {r.neutral ? null : <span style={{ fontFamily: MONO, fontSize: 10, letterSpacing: 1.2, padding: '2px 7px', borderRadius: 3, border: `1px solid ${pc(parts, 'fx4TagBorder', `${pal.ink}30`)}`, color: pc(parts, 'haColor', pal.ink), opacity: 0.6, flexShrink: 0 }}>{home ? 'HOME' : 'AWAY'}</span>}
               </div>
               <div style={{ fontFamily: MONO, fontSize: 20, fontWeight: 700, letterSpacing: 0.5, color: pc(parts, 'timeColor', pal.accent), textAlign: 'right', whiteSpace: 'nowrap' }}>{r.time}</div>
               <div style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 1, color: pc(parts, 'venueColor', pal.ink), opacity: 0.7, textAlign: 'right', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.venue}</div>
@@ -588,6 +603,7 @@ export function FixtureHeadline({ palette: pal, width = 1080, height = 1080, met
   const feat = rows[0] || { grade: '', opp: '', oppMono: '', ha: 'H', time: '', venue: '' }
   const rest = rows.slice(1)
   const fHome = feat.ha === 'H'
+  const fFirst = firstSide(feat, club)
   // The feature panel keeps its share of a taller post, and the list under it
   // takes what is left, so a story is not a square with a gap at the bottom.
   const headB = barGeo(width, height, false).h + 8
@@ -608,11 +624,11 @@ export function FixtureHeadline({ palette: pal, width = 1080, height = 1080, met
         </>
       ) })}
       <div style={{ position: 'absolute', left: 56, right: 56, top: headB, height: panelH, boxSizing: 'border-box', background: pc(parts, 'cardBg', pal.secondary), borderTop: `3px solid ${pc(parts, 'cardBorder', pal.accent)}`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-        <Kicker color={pc(parts, 'fx5FeatureColor', pal.accent)} size={13} style={{ marginBottom: 22 }}>{`// ${featureLabel ? featureLabel + ' · ' : ''}${feat.grade}`}</Kicker>
+        <Kicker color={pc(parts, 'fx5FeatureColor', pal.accent)} size={13} style={{ marginBottom: 22 }}>{`// ${featureLabel ? featureLabel + ' · ' : ''}${feat.neutral ? compOf(meta) : feat.grade}`}</Kicker>
         <div style={{ display: 'flex', alignItems: 'center', gap: 44 }}>
           <div style={{ textAlign: 'center', width: 280 }}>
-            <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={crest} />
-            <div style={{ fontFamily: DISPLAY, fontSize: 30, letterSpacing: 0.5, marginTop: 12, color: pc(parts, 'clubColor', undefined) }}>{club.name}</div>
+            <Shield logo={fFirst.logo} monogram={fFirst.mono} color={pal.ink} size={crest} />
+            <div style={{ fontFamily: DISPLAY, fontSize: 30, letterSpacing: 0.5, marginTop: 12, color: pc(parts, 'clubColor', undefined) }}>{fFirst.name}</div>
           </div>
           <div style={{ fontFamily: DISPLAY, fontSize: b(60), color: pc(parts, 'vsColor', pal.accent), letterSpacing: 1 }}>{pt(parts, 'fx5VsText', 'VS')}</div>
           <div style={{ textAlign: 'center', width: 280 }}>
@@ -621,7 +637,7 @@ export function FixtureHeadline({ palette: pal, width = 1080, height = 1080, met
           </div>
         </div>
         <div style={{ display: 'flex', gap: 26, marginTop: 26, fontFamily: MONO, fontSize: 14, letterSpacing: 1.5, color: pal.ink, opacity: 0.85, alignItems: 'center' }}>
-          <span style={{ color: pc(parts, 'timeColor', pal.accent), fontWeight: 700 }}>{feat.time}</span><span style={{ opacity: 0.4 }}>·</span><span style={{ color: pc(parts, 'venueColor', undefined) }}>{feat.venue}</span><span style={{ opacity: 0.4 }}>·</span><span style={{ color: pc(parts, 'haColor', undefined) }}>{fHome ? 'HOME' : 'AWAY'}</span>
+          <span style={{ color: pc(parts, 'timeColor', pal.accent), fontWeight: 700 }}>{feat.time}</span><span style={{ opacity: 0.4 }}>·</span><span style={{ color: pc(parts, 'venueColor', undefined) }}>{feat.venue}</span>{feat.neutral ? null : <><span style={{ opacity: 0.4 }}>·</span><span style={{ color: pc(parts, 'haColor', undefined) }}>{fHome ? 'HOME' : 'AWAY'}</span></>}
         </div>
       </div>
       <div style={{ position: 'absolute', left: 56, right: 56, top: headB + panelH + 28, bottom: bodyEnd(height), display: 'flex', flexDirection: 'column' }}>
@@ -710,7 +726,7 @@ export function FixtureSchedule({ palette: pal, width = 1080, height = 1080, met
                   <span style={{ fontFamily: DISPLAY, fontSize: 26, width: 132, flexShrink: 0, lineHeight: 0.95, color: pc(parts, 'gradeColor', undefined) }}>{r.grade}</span>
                   <span style={{ fontFamily: MONO, fontSize: 13, color: home ? pc(parts, 'homeColor', pal.accent) : pc(parts, 'awayColor', pal.ink), opacity: home ? 1 : 0.5, flexShrink: 0, width: 24 }}>{home || meta.allVs ? 'VS' : '@'}</span>
                   <span style={{ fontFamily: DISPLAY, fontSize: t(30), flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{r.opp}</span>
-                  <span style={{ fontFamily: MONO, fontSize: 12, color: pc(parts, 'venueColor', pal.ink), opacity: 0.6, flexShrink: 0, whiteSpace: 'nowrap' }}>{r.venue} · {home ? 'H' : 'A'}</span>
+                  <span style={{ fontFamily: MONO, fontSize: 12, color: pc(parts, 'venueColor', pal.ink), opacity: 0.6, flexShrink: 0, whiteSpace: 'nowrap' }}>{r.neutral ? r.venue : <>{r.venue} · {home ? 'H' : 'A'}</>}</span>
                 </div>
               </div>
             )
@@ -1430,6 +1446,7 @@ export function ResultsList({ palette: pal, width = 1080, height = 1080, meta = 
   const t = sz(S.row)
   const rows = results
   const rec = record(rows)
+  const neutral = isNeutral(rows)
   const win = pc(parts, 'winColor', WIN)
   const loss = pc(parts, 'lossColor', LOSS)
   const band = pc(parts, 'bandBg', pal.accent)
@@ -1445,8 +1462,8 @@ export function ResultsList({ palette: pal, width = 1080, height = 1080, meta = 
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontFamily: DISPLAY, fontSize: 30, letterSpacing: 0.5, lineHeight: 0.95, maxWidth: 320, color: pc(parts, 'clubColor', undefined) }}>{club.full || club.name}</div>
-            <div style={{ fontFamily: DISPLAY, fontSize: 36, letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', marginTop: 4 }}><span style={{ color: win }}>{rec.w}W</span> · <span style={{ color: loss }}>{rec.l}L</span></div>
-            <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 2, color: pc(parts, 'recordLabelColor', pal.ink), opacity: 0.6, marginTop: 4 }}>{pt(parts, 'recordLabel', 'ROUND RECORD')}</div>
+            <div style={{ fontFamily: DISPLAY, fontSize: 36, letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', marginTop: 4 }}>{neutral ? compOf(meta) : <><span style={{ color: win }}>{rec.w}W</span> · <span style={{ color: loss }}>{rec.l}L</span></>}</div>
+            <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 2, color: pc(parts, 'recordLabelColor', pal.ink), opacity: 0.6, marginTop: 4 }}>{neutral ? 'ALL RESULTS' : pt(parts, 'recordLabel', 'ROUND RECORD')}</div>
           </div>
           <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={110} />
         </div>
@@ -1513,6 +1530,7 @@ export function ResultsListLeaders({ palette: pal, width = 1080, height = 1080, 
   const t = sz(S.row)
   const rows = results
   const rec = record(rows)
+  const neutral = isNeutral(rows)
   const win = pc(parts, 'winColor', WIN)
   const loss = pc(parts, 'lossColor', LOSS)
   const band = pc(parts, 'bandBg', pal.accent)
@@ -1536,8 +1554,8 @@ export function ResultsListLeaders({ palette: pal, width = 1080, height = 1080, 
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontFamily: DISPLAY, fontSize: 26, letterSpacing: 0.5, lineHeight: 0.95, maxWidth: 280, color: pc(parts, 'clubColor', undefined) }}>{club.full || club.name}</div>
-            <div style={{ fontFamily: DISPLAY, fontSize: 32, letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', marginTop: 3 }}><span style={{ color: win }}>{rec.w}W</span> · <span style={{ color: loss }}>{rec.l}L</span></div>
-            <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: 2, color: pc(parts, 'recordLabelColor', pal.ink), opacity: 0.6, marginTop: 3 }}>{pt(parts, 'recordLabel', 'ROUND RECORD')}</div>
+            <div style={{ fontFamily: DISPLAY, fontSize: 32, letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', marginTop: 3 }}>{neutral ? compOf(meta) : <><span style={{ color: win }}>{rec.w}W</span> · <span style={{ color: loss }}>{rec.l}L</span></>}</div>
+            <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: 2, color: pc(parts, 'recordLabelColor', pal.ink), opacity: 0.6, marginTop: 3 }}>{neutral ? 'ALL RESULTS' : pt(parts, 'recordLabel', 'ROUND RECORD')}</div>
           </div>
           <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={96} />
         </div>
@@ -1623,6 +1641,7 @@ export function ResultsScoreboard({ palette: pal, width = 1080, height = 1080, m
   const b = sz(S.big)
   const rows = results
   const rec = record(rows)
+  const neutral = isNeutral(rows)
   const win = pc(parts, 'winColor', WIN)
   const loss = pc(parts, 'lossColor', LOSS)
   const texture = usePostLook().texture !== false
@@ -1638,7 +1657,7 @@ export function ResultsScoreboard({ palette: pal, width = 1080, height = 1080, m
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontFamily: DISPLAY, fontSize: 30, letterSpacing: 0.5, lineHeight: 0.95, maxWidth: 300, color: pc(parts, 'clubColor', undefined) }}>{club.full || club.name}</div>
-            <div style={{ fontFamily: DISPLAY, fontSize: 28, marginTop: 4 }}><span style={{ color: win }}>{rec.w}W</span> · <span style={{ color: loss }}>{rec.l}L</span></div>
+            <div style={{ fontFamily: DISPLAY, fontSize: 28, marginTop: 4 }}>{neutral ? compOf(meta) : <><span style={{ color: win }}>{rec.w}W</span> · <span style={{ color: loss }}>{rec.l}L</span></>}</div>
           </div>
           <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={100} />
         </div>
@@ -1657,7 +1676,7 @@ export function ResultsScoreboard({ palette: pal, width = 1080, height = 1080, m
               </div>
               <div style={{ position: 'relative' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <Monogram text={club.mono} logo={club.logo} size={40} fg={pc(parts, 'crestColor', pal.ink)} bg={pc(parts, 'crestBg', `${pal.ink}14`)} ring={pc(parts, 'crestRing', `${pal.ink}33`)} />
+                  <Monogram text={firstSide(r, club).mono} logo={firstSide(r, club).logo} size={40} fg={pc(parts, 'crestColor', pal.ink)} bg={pc(parts, 'crestBg', `${pal.ink}14`)} ring={pc(parts, 'crestRing', `${pal.ink}33`)} />
                   <span style={{ fontFamily: DISPLAY, fontSize: t(32), letterSpacing: -0.5, color: pc(parts, 'statColor', undefined) }}>{r.us}</span>
                   <span style={{ fontFamily: DISPLAY, fontSize: t(18), color: pc(parts, 'vsColor', pal.accent), opacity: 0.8 }}>v</span>
                   <span style={{ fontFamily: DISPLAY, fontSize: t(32), letterSpacing: -0.5, opacity: 0.85, color: pc(parts, 'oppScoreColor', undefined) }}>{r.them}</span>
@@ -1693,6 +1712,7 @@ export function ResultsRecord({ palette: pal, width = 1080, height = 1080, meta 
   const b = sz(S.big)
   const rows = results
   const rec = record(rows)
+  const neutral = isNeutral(rows)
   const slot = slotRR3(width, height, 3)
   const rr3Foot = rr3Strip(height)
   const win = pc(parts, 'winColor', WIN)
@@ -1706,7 +1726,7 @@ export function ResultsRecord({ palette: pal, width = 1080, height = 1080, meta 
     <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.07} size={10} />
       <Stripes color={pal.accent} opacity={0.04} gap={26} angle={-20} />
-      {texture ? <div style={{ position: 'absolute', right: -50, top: slot.y + slot.h + 8, fontFamily: DISPLAY, fontSize: share(height, 620), lineHeight: 0.74, color: pal.ink, opacity: 0.05, letterSpacing: -18, userSelect: 'none' }}>{rec.w}–{rec.l}</div> : null}
+      {texture && !neutral ? <div style={{ position: 'absolute', right: -50, top: slot.y + slot.h + 8, fontFamily: DISPLAY, fontSize: share(height, 620), lineHeight: 0.74, color: pal.ink, opacity: 0.05, letterSpacing: -18, userSelect: 'none' }}>{rec.w}–{rec.l}</div> : null}
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '48px 56px 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', background: pc(parts, 'headerBg', undefined) }}>
         <div>
           <Kicker color={pc(parts, 'roundColor', pal.accent)} size={15}>{`// ${kickParts(meta)}`}</Kicker>
@@ -1717,10 +1737,10 @@ export function ResultsRecord({ palette: pal, width = 1080, height = 1080, meta 
       </div>
       <div style={{ position: 'absolute', left: 56, right: 56, top: slot.y + slot.h + 16, bottom: rr3Foot.reserve, display: 'flex', flexDirection: 'column', gap: 26 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 26, padding: '20px 28px', background: band, flexShrink: 0 }}>
-          <div style={{ fontFamily: DISPLAY, fontSize: pick(S.A, { square: 58, portrait: 62, story: 64 }), letterSpacing: -1, lineHeight: 1, color: pc(parts, 'rr3WinsColor', onBand), whiteSpace: 'nowrap', flexShrink: 0 }}>{rec.w}{` ${pt(parts, 'rr3WinsWord', 'WINS')}`}</div>
-          <div style={{ width: 3, height: 52, background: pc(parts, 'rr3BandRule', onBand), opacity: 0.4, flexShrink: 0 }} />
-          <div style={{ fontFamily: DISPLAY, fontSize: pick(S.A, { square: 58, portrait: 62, story: 64 }), letterSpacing: -1, lineHeight: 1, color: pc(parts, 'rr3LossesColor', onBand), opacity: 0.6, whiteSpace: 'nowrap', flexShrink: 0 }}>{rec.l}{` ${pt(parts, 'rr3LossesWord', 'LOSSES')}`}</div>
-          <div style={{ marginLeft: 'auto', fontFamily: MONO, fontSize: 12, letterSpacing: 2, color: pc(parts, 'rr3NoteColor', onBand), textAlign: 'right', lineHeight: 1.5, flexShrink: 0 }}>{club.full}<br />{meta.season}</div>
+          <div style={{ fontFamily: DISPLAY, fontSize: pick(S.A, { square: 58, portrait: 62, story: 64 }), letterSpacing: -1, lineHeight: 1, color: pc(parts, 'rr3WinsColor', onBand), whiteSpace: 'nowrap', flexShrink: 0 }}>{neutral ? `${rows.length} ${rows.length === 1 ? 'RESULT' : 'RESULTS'}` : `${rec.w} ${pt(parts, 'rr3WinsWord', 'WINS')}`}</div>
+          {neutral ? null : <div style={{ width: 3, height: 52, background: pc(parts, 'rr3BandRule', onBand), opacity: 0.4, flexShrink: 0 }} />}
+          {neutral ? null : <div style={{ fontFamily: DISPLAY, fontSize: pick(S.A, { square: 58, portrait: 62, story: 64 }), letterSpacing: -1, lineHeight: 1, color: pc(parts, 'rr3LossesColor', onBand), opacity: 0.6, whiteSpace: 'nowrap', flexShrink: 0 }}>{rec.l}{` ${pt(parts, 'rr3LossesWord', 'LOSSES')}`}</div>}
+          <div style={{ marginLeft: 'auto', fontFamily: MONO, fontSize: 12, letterSpacing: 2, color: pc(parts, 'rr3NoteColor', onBand), textAlign: 'right', lineHeight: 1.5, flexShrink: 0 }}>{neutral ? compOf(meta) || club.full : club.full}<br />{meta.season}</div>
         </div>
         <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           {rows.map((r, i) => {
@@ -1777,6 +1797,7 @@ export function ResultsHeadline({ palette: pal, width = 1080, height = 1080, met
   const b = sz(S.big)
   const rows = results
   const rec = record(rows)
+  const neutral = isNeutral(rows)
   const win = pc(parts, 'winColor', WIN)
   const loss = pc(parts, 'lossColor', LOSS)
   const band = pc(parts, 'bandBg', pal.accent)
@@ -1799,19 +1820,19 @@ export function ResultsHeadline({ palette: pal, width = 1080, height = 1080, met
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontFamily: DISPLAY, fontSize: 28, letterSpacing: 0.5, lineHeight: 0.95, maxWidth: 280, color: pc(parts, 'clubColor', undefined) }}>{club.full || club.name}</div>
-            <div style={{ fontFamily: DISPLAY, fontSize: 32, whiteSpace: 'nowrap', marginTop: 4 }}><span style={{ color: win }}>{rec.w}W</span> · <span style={{ color: loss }}>{rec.l}L</span></div>
+            <div style={{ fontFamily: DISPLAY, fontSize: 32, whiteSpace: 'nowrap', marginTop: 4 }}>{neutral ? compOf(meta) : <><span style={{ color: win }}>{rec.w}W</span> · <span style={{ color: loss }}>{rec.l}L</span></>}</div>
           </div>
           <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={104} />
         </div>
       </div>
       <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(196), height: S.head(560) - S.head(196) - 24 + lift, background: pc(parts, 'cardBg', pal.secondary), borderTop: `3px solid ${fc}`, padding: '26px 32px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 2, color: pc(parts, 'rr4FeatureColor', pal.accent) }}>{`// ${pt(parts, 'rr4FeatureWord', 'FEATURE')} · ${f.grade}`}</span>
+          <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 2, color: pc(parts, 'rr4FeatureColor', pal.accent) }}>{`// ${pt(parts, 'rr4FeatureWord', 'FEATURE')} · ${f.neutral ? compOf(meta) : f.grade}`}</span>
           <span style={{ fontFamily: DISPLAY, fontSize: 18, letterSpacing: 2, color: rrOnFill(parts, flv ? 'liveColor' : fw ? 'winColor' : 'lossColor', fc, pal.primary), background: fc, padding: '5px 12px' }}>{flv ? 'LIVE' : fw ? 'WON' : 'LOST'}</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 26, marginTop: 22 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <Monogram text={club.mono} logo={club.logo} size={66} fg={pc(parts, 'crestColor', pal.ink)} bg={pc(parts, 'crestBg', `${pal.ink}14`)} ring={fw ? pc(parts, 'rr4WinnerRing', pal.accent) : pc(parts, 'crestRing', `${pal.ink}40`)} />
+            <Monogram text={firstSide(f, club).mono} logo={firstSide(f, club).logo} size={66} fg={pc(parts, 'crestColor', pal.ink)} bg={pc(parts, 'crestBg', `${pal.ink}14`)} ring={fw ? pc(parts, 'rr4WinnerRing', pal.accent) : pc(parts, 'crestRing', `${pal.ink}40`)} />
             <span style={{ fontFamily: DISPLAY, fontSize: b(64), letterSpacing: -1, lineHeight: 1, color: pc(parts, 'statColor', undefined) }}>{f.us}</span>
           </div>
           <span style={{ fontFamily: DISPLAY, fontSize: 34, color: pc(parts, 'vsColor', pal.accent) }}>v</span>
@@ -1820,7 +1841,7 @@ export function ResultsHeadline({ palette: pal, width = 1080, height = 1080, met
             <Monogram text={f.oppMono} logo={f.oppLogo} size={66} fg={pc(parts, 'crestColor', pal.ink)} bg={pc(parts, 'crestBg', `${pal.ink}14`)} ring={!fw && !flv ? pc(parts, 'rr4WinnerRing', pal.accent) : pc(parts, 'crestRing', `${pal.ink}40`)} />
           </div>
         </div>
-        <div style={{ textAlign: 'center', fontFamily: DISPLAY, fontSize: b(40), letterSpacing: 0, marginTop: 20, lineHeight: 1, color: pc(parts, 'rr4SummaryColor', undefined) }}>{club.name} {flv ? 'V' : fw ? 'DEF' : 'LOST TO'} {f.opp} {f.margin}</div>
+        <div style={{ textAlign: 'center', fontFamily: DISPLAY, fontSize: b(40), letterSpacing: 0, marginTop: 20, lineHeight: 1, color: pc(parts, 'rr4SummaryColor', undefined) }}>{firstSide(f, club).name} {flv ? 'V' : fw ? 'DEF' : 'LOST TO'} {f.opp} {f.margin}</div>
       </div>
       <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(560) + lift, bottom: rrFoot(width, height).reserve }}>
         <Kicker color={pc(parts, 'rr4OtherColor', pal.ink)} size={12} style={{ opacity: 0.55, marginBottom: 8 }}>{`// ${pt(parts, 'rr4OtherWord', 'OTHER RESULTS')}`}</Kicker>
@@ -1872,6 +1893,7 @@ export function ResultsBoard({ palette: pal, width = 1080, height = 1080, meta =
   const t = sz(S.row)
   const rows = results
   const rec = record(rows)
+  const neutral = isNeutral(rows)
   const win = pc(parts, 'winColor', WIN)
   const loss = pc(parts, 'lossColor', LOSS)
   const band = pc(parts, 'bandBg', pal.accent)
@@ -1887,7 +1909,7 @@ export function ResultsBoard({ palette: pal, width = 1080, height = 1080, meta =
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontFamily: DISPLAY, fontSize: 28, letterSpacing: 0.5, lineHeight: 0.95, maxWidth: 280, color: pc(parts, 'clubColor', undefined) }}>{club.full || club.name}</div>
-            <div style={{ fontFamily: DISPLAY, fontSize: 32, whiteSpace: 'nowrap', marginTop: 4 }}><span style={{ color: win }}>{rec.w}W</span> · <span style={{ color: loss }}>{rec.l}L</span></div>
+            <div style={{ fontFamily: DISPLAY, fontSize: 32, whiteSpace: 'nowrap', marginTop: 4 }}>{neutral ? compOf(meta) : <><span style={{ color: win }}>{rec.w}W</span> · <span style={{ color: loss }}>{rec.l}L</span></>}</div>
           </div>
           <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={104} />
         </div>

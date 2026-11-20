@@ -309,6 +309,7 @@ async def _eligible_recipients(db: AsyncSession) -> list[dict]:
         JOIN users u ON u.id = cm.user_id
         WHERE cm.role IN ('club_admin', 'club_member')
           AND o.archived_at IS NULL
+          AND o.workspace_kind IS NULL
     """))).mappings().all()
     return [dict(r) for r in rows]
 
@@ -492,7 +493,7 @@ async def audience_options(
     the composer's club and user pickers."""
     clubs = (await db.execute(text("""
         SELECT id, name, slug FROM organisations
-        WHERE archived_at IS NULL
+        WHERE archived_at IS NULL AND workspace_kind IS NULL
         ORDER BY lower(name)
     """))).mappings().all()
     by_club: dict[str, list] = {}

@@ -354,6 +354,7 @@ def _match_org_names(m: dict) -> tuple[str, str]:
 
 def _result_row(
     sc: dict, org, keys: list[str], grade_name: str, grade_order: int | None = None, live: bool = False,
+    team_id: str | None = None,
 ) -> dict | None:
     """One results-roundup row from a raw Grassroots scorecard, from the club's
     perspective (us / them / W·L·T / margin).
@@ -361,13 +362,18 @@ def _result_row(
     ``live`` is a match still in play: a side that has not batted yet reads ``-``
     instead of dropping the row, the outcome is ``LIVE`` (neither a win nor a
     loss) and the margin says so. A live match with no innings at all has
-    nothing to show and is skipped. A completed row carries none of this."""
+    nothing to show and is skipped. A completed row carries none of this.
+
+    ``team_id`` reads the row from that side's point of view instead of the
+    club's (an association workspace reads every match from the home side)."""
     ms = sc.get("matchSummary") or {}
     summary_teams = ms.get("teams") or []
     teams_raw = sc.get("teams") or []
     innings = sc.get("innings") or []
 
     def is_ours(t: dict) -> bool:
+        if team_id:
+            return (t.get("id") or "").lower() == str(team_id).lower()
         return team_is_club(org, t)
 
     our_team = next((t for t in teams_raw if is_ours(t)), None)
@@ -429,7 +435,7 @@ def _result_row(
         "us": us,
         "them": them,
         "outcome": outcome,
-        "margin": "IN PROGRESS" if live else _margin_from_text(ms.get("result") or ms.get("statusText")),
+        "margin": "IN PROGRESS" if live else _margin_from_text(ms.get("result") or ms.get("resultText") or ms.get("statusText")),
         "topBat": top_bat,
         "topBowl": top_bowl,
         # The same two lists for the other side, for a post that shows them.
@@ -931,14 +937,17 @@ async def social_potm(db: AsyncSession, org, match_id: str) -> dict:
     return await _rank_our_side(db, org, raw)
 
 
-async def _rank_our_side(db: AsyncSession, org, raw: dict) -> dict:
+async def _rank_our_side(db: AsyncSession, org, raw: dict, team_id: str | None = None) -> dict:
     """The player-of-the-match ranking for ONE raw Grassroots scorecard. Shared
     by the single-match shortlist and the team-of-the-week pool, so both score a
     performance by exactly the same points.
 
     Our batting rows live in our innings' batting; our bowling and fielding
     rows live in the OPPOSITION's batting innings (we bowl and field while
-    they bat) — the same semantics sync.py's per-game inserts follow."""
+    they bat) — the same semantics sync.py's per-game inserts follow.
+
+    ``team_id`` names the side to rank instead of finding the club's own (an
+    association workspace ranks both sides of every match, and owns neither)."""
     ms = raw.get("matchSummary") or {}
     teams_raw = raw.get("teams") or []
     innings = raw.get("innings") or []
@@ -948,7 +957,10 @@ async def _rank_our_side(db: AsyncSession, org, raw: dict) -> dict:
     def is_ours(t: dict) -> bool:
         return team_is_club(org, t)
 
-    our_team = next((t for t in teams_raw if is_ours(t)), None)
+    if team_id:
+        our_team = next((t for t in teams_raw if (t.get("id") or "").lower() == str(team_id).lower()), None)
+    else:
+        our_team = next((t for t in teams_raw if is_ours(t)), None)
     if not our_team:
         raise HTTPException(404, "That match doesn't look like one of your club's — no team matched your club name")
     our_id = (our_team.get("id") or "").lower()
@@ -1165,7 +1177,7 @@ async def _rank_our_side(db: AsyncSession, org, raw: dict) -> dict:
         "us": _score_str(inn_by_team.get(our_id)),
         "them": _score_str(inn_by_team.get(opp_id)),
         "outcome": outcome,
-        "margin": _margin_from_text(ms.get("result") or ms.get("statusText")),
+        "margin": _margin_from_text(ms.get("result") or ms.get("resultText") or ms.get("statusText")),
     }
     return {"match": match, "players": players}
 
@@ -1255,9 +1267,14 @@ def _scope_matches(scope: str, categories) -> bool:
     return True
 
 
-def _our_keeper_guids(org, raw: dict) -> set[str]:
-    """Scorecard participants our side lists as the wicketkeeper."""
-    our_team = next((t for t in (raw.get("teams") or []) if team_is_club(org, t)), None)
+def _our_keeper_guids(org, raw: dict, team_id: str | None = None) -> set[str]:
+    """Scorecard participants our side (or the side ``team_id`` names) lists as
+    the wicketkeeper."""
+    if team_id:
+        our_team = next((t for t in (raw.get("teams") or [])
+                         if (t.get("id") or "").lower() == str(team_id).lower()), None)
+    else:
+        our_team = next((t for t in (raw.get("teams") or []) if team_is_club(org, t)), None)
     out: set[str] = set()
     for rp in (our_team or {}).get("players") or []:
         roles = [str(r).lower() for r in (rp.get("roles") or [])]

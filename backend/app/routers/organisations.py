@@ -196,7 +196,10 @@ async def onboard_organisation(
 
 @router.get("", response_model=list[OrganisationOut])
 async def list_organisations(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Organisation).order_by(Organisation.name))
+    # Clubs only: an association socials workspace is not a club (migration 392).
+    result = await db.execute(
+        select(Organisation).where(Organisation.workspace_kind.is_(None)).order_by(Organisation.name)
+    )
     return result.scalars().all()
 
 

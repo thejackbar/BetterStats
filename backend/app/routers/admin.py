@@ -1,4 +1,4 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, text
 from sqlalchemy.exc import IntegrityError
@@ -2107,7 +2107,8 @@ async def get_social_scorecard(match_id: str, db: AsyncSession = Depends(get_db)
     Gated behind the BetterSocials module (require_module).
     """
     try:
-        return await _get_social_scorecard_inner(match_id, db, club)
+        from app.services.social_competition import is_association
+        return await _get_social_scorecard_inner(match_id, db, None if is_association(club) else club)
     except HTTPException:
         raise
     except Exception as exc:
@@ -2128,7 +2129,10 @@ async def social_match_lookup(q: str = "", db: AsyncSession = Depends(get_db), c
     direct translation.
     """
     from app.services.social_match_lookup import resolve_match_reference
+    from app.services.social_competition import is_association, competition_match_reference
     try:
+        if is_association(club):
+            return await competition_match_reference(q)
         return await resolve_match_reference(db, club, q)
     except HTTPException:
         raise
@@ -2147,7 +2151,10 @@ async def get_social_fixtures(q: str = "", db: AsyncSession = Depends(get_db), c
     match's round instead — every club grade's match that weekend, whatever
     its status, so an off-season or already-started round is still buildable."""
     from app.services.social_rounds import social_fixtures, social_fixtures_for_reference
+    from app.services.social_competition import is_association, competition_fixtures, needs_link
     try:
+        if is_association(club):
+            return await competition_fixtures(db, club, q) if q.strip() else needs_link()
         if q.strip():
             return await social_fixtures_for_reference(db, club, q)
         return await social_fixtures(db, club)
@@ -2173,7 +2180,10 @@ async def get_social_results(
     ``live`` also returns the matches still in play, as rows whose outcome is
     ``LIVE`` and whose margin reads ``IN PROGRESS``."""
     from app.services.social_rounds import social_results, social_results_for_reference
+    from app.services.social_competition import is_association, competition_results, needs_link
     try:
+        if is_association(club):
+            return await competition_results(db, club, q, include_live=live) if q.strip() else needs_link()
         if q.strip():
             return await social_results_for_reference(db, club, q, include_live=live)
         return await social_results(db, club, include_live=live)
@@ -2190,7 +2200,10 @@ async def get_social_potm(match_id: str, db: AsyncSession = Depends(get_db), clu
     and fielding lines from the Grassroots scorecard, ranked by a simple points
     blend, for the BetterSocials POTM post."""
     from app.services.social_rounds import social_potm
+    from app.services.social_competition import is_association, competition_potm
     try:
+        if is_association(club):
+            return await competition_potm(db, club, match_id)
         return await social_potm(db, club, match_id)
     except HTTPException:
         raise
@@ -2203,6 +2216,7 @@ async def get_social_potm(match_id: str, db: AsyncSession = Depends(get_db), clu
 async def get_social_totw(
     q: str = "", db: AsyncSession = Depends(get_db), club=Depends(get_current_club),
     date_from: str = "", date_to: str = "", scope: str = "all", mode: str = "week",
+    cap: int = Query(0, ge=0, le=11),
 ):
     """Team-of-the-week pool for the BetterSocials post: every completed club
     match in one round, each performance scored with the same points as the
@@ -2214,15 +2228,59 @@ async def get_social_totw(
     match-day and the games within a weekend of it. ``scope`` is ``all``,
     ``junior`` or ``senior``. ``mode`` is ``week`` (finished matches only) or
     ``round`` (also matches still in play, flagged ``live``). The post takes its
-    team off the front of the list."""
+    team off the front of the list.
+
+    In an association workspace the pool is every club in the linked grade's
+    round, and ``cap`` (0 for none) is the most players one club may have in
+    the team: anyone past it is moved below everyone who fits."""
     from app.services.social_rounds import social_totw
+    from app.services.social_competition import is_association, competition_totw
     try:
+        if is_association(club):
+            return await competition_totw(db, club, q, mode, cap)
         return await social_totw(db, club, q, date_from, date_to, scope, mode)
     except HTTPException:
         raise
     except Exception as exc:
         log.exception("social totw failed for %s", getattr(club, "id", "?"))
         raise HTTPException(500, f"Team of the week error: {exc}") from exc
+
+
+@router.get("/social/competition/lineups", dependencies=[Depends(require_cap(MANAGE_SOCIAL)), Depends(require_module("socials"))])
+async def get_social_competition_lineups(q: str = "", db: AsyncSession = Depends(get_db), club=Depends(get_current_club)):
+    """Both published sides of every match in a linked grade round, for a lineup
+    post in an association workspace. Refused for a club: a club's lineups come
+    from BetterSelect or its own Lineups list."""
+    from app.services.social_competition import is_association, competition_lineups, needs_link
+    if not is_association(club):
+        raise HTTPException(404, "Only an association workspace reads a whole grade")
+    if not q.strip():
+        return needs_link()
+    try:
+        return await competition_lineups(db, club, q)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.exception("social competition lineups failed for %s", getattr(club, "id", "?"))
+        raise HTTPException(500, f"Lineups import error: {exc}") from exc
+
+
+@router.get("/social/competition/matches", dependencies=[Depends(require_cap(MANAGE_SOCIAL)), Depends(require_module("socials"))])
+async def get_social_competition_matches(q: str = "", club=Depends(get_current_club)):
+    """The matches in a linked grade round, to pick one for a scorecard, a match
+    summary or a player of the match post in an association workspace."""
+    from app.services.social_competition import is_association, competition_matches, needs_link
+    if not is_association(club):
+        raise HTTPException(404, "Only an association workspace reads a whole grade")
+    if not q.strip():
+        return needs_link()
+    try:
+        return await competition_matches(q)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.exception("social competition matches failed for %s", getattr(club, "id", "?"))
+        raise HTTPException(500, f"Match list error: {exc}") from exc
 
 
 @router.get("/social/debuts", dependencies=[Depends(require_cap(MANAGE_SOCIAL)), Depends(require_module("socials"))])

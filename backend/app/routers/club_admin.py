@@ -1082,6 +1082,8 @@ async def get_settings(
         "slug": club.slug,
         "name": club.name,
         "short_name": club.short_name,
+        # 'association' for a BetterSocials-only workspace (migration 392).
+        "workspace_kind": getattr(club, "workspace_kind", None),
         "contact_email": club.contact_email,
         "primary_color": club.primary_color,
         "accent_color": club.accent_color,
@@ -2090,7 +2092,9 @@ async def super_overview(
         # subqueries that tripped a statement timeout at fleet scale.
         org_rows = (await db.execute(_text(
             "SELECT id::text AS id, name, slug, subscription_status, is_active, "
-            "module_overrides, created_at FROM organisations ORDER BY name"
+            "module_overrides, created_at FROM organisations "
+            # An association socials workspace is not a club (migration 392).
+            "WHERE workspace_kind IS NULL ORDER BY name"
         ))).mappings().all()
 
         players_by = {r["org"]: r["n"] for r in (await db.execute(_text(
@@ -2314,6 +2318,8 @@ async def list_all_clubs(
     db: AsyncSession = Depends(get_db),
 ):
     q = select(Organisation).options(selectinload(Organisation.module_subscriptions))
+    # Association socials workspaces have their own list (/super/association-workspaces).
+    q = q.where(Organisation.workspace_kind.is_(None))
     if not include_archived:
         q = q.where(Organisation.archived_at.is_(None))
     result = await db.execute(q.order_by(Organisation.name))
@@ -2837,6 +2843,102 @@ async def patch_general_settings(
         "backup_schedule": await ps.get_backup_schedule(db),
         "webinar_recording_url": await ps.get_webinar_recording_url(db),
     }
+
+
+class AssociationWorkspaceCreate(BaseModel):
+    name: str
+    short_name: Optional[str] = None
+    primary_color: str = "#16c784"
+    accent_color: str = "#243352"
+
+
+def _workspace_out(o: Organisation) -> dict:
+    return {
+        "id": str(o.id),
+        "name": o.name,
+        "short_name": o.short_name,
+        "logo_url": o.logo_url or (f"/api/images/organisations/{o.id}/logo" if o.logo_data else None),
+        "primary_color": o.primary_color,
+        "accent_color": o.accent_color,
+        "archived_at": o.archived_at.isoformat() if o.archived_at else None,
+    }
+
+
+@router.get("/super/association-workspaces")
+async def list_association_workspaces(
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Super Admin → Association Socials: every association workspace, the
+    BetterSocials-only organisations that build posts for a whole grade from a
+    pasted link (services/social_competition.py). They are kept off All Clubs."""
+    rows = (await db.execute(
+        select(Organisation)
+        .where(Organisation.workspace_kind == "association")
+        .order_by(Organisation.archived_at.is_not(None), Organisation.name)
+    )).scalars().all()
+    return {"workspaces": [_workspace_out(o) for o in rows]}
+
+
+@router.post("/super/association-workspaces", status_code=201)
+async def create_association_workspace(
+    data: AssociationWorkspaceCreate,
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create an association workspace: an organisation with no Cricket
+    Australia club behind it, holding only the BetterSocials module.
+
+    It is never ``is_active`` and has no slug, so the sync scheduler, the
+    notification jobs, the public site, the sitemap and the trusted-clubs list
+    all pass it by, and it never syncs. No marketing club link is made (the
+    name-match fallback could tie it to the association's own directory row).
+    A super admin opens it with the club switcher (POST /auth/switch-club)."""
+    import re as _re
+
+    name = (data.name or "").strip()
+    if not name:
+        raise HTTPException(422, "Give the workspace a name")
+    for c in (data.primary_color, data.accent_color):
+        if not _re.fullmatch(r"#[0-9a-fA-F]{6}", c or ""):
+            raise HTTPException(422, "Colours must be hex, like #16c784")
+    clash = await db.scalar(
+        select(Organisation.id).where(
+            Organisation.workspace_kind == "association",
+            Organisation.archived_at.is_(None),
+            func.lower(Organisation.name) == name.lower(),
+        )
+    )
+    if clash:
+        raise HTTPException(409, "An association workspace with that name already exists")
+    org = Organisation(
+        id=uuid.uuid4(),
+        name=name,
+        short_name=(data.short_name or "").strip() or None,
+        slug=None,
+        is_active=False,
+        primary_color=data.primary_color,
+        accent_color=data.accent_color,
+        module_overrides=["socials"],
+        subscription_status="active",
+        onboarding_method="association_workspace",
+        workspace_kind="association",
+    )
+    db.add(org)
+    await db.flush()
+    # The same permanent 'active' rows main.py's boot backfill writes for every
+    # org (Core, and each module in module_overrides), written now so the
+    # workspace's entitlement does not wait for the next restart.
+    await db.execute(_text("""
+        INSERT INTO org_module_subscriptions
+            (id, organisation_id, module_key, status, started_at, created_at, updated_at)
+        VALUES (gen_random_uuid(), :o, 'core', 'active', NOW(), NOW(), NOW()),
+               (gen_random_uuid(), :o, 'socials', 'active', NOW(), NOW(), NOW())
+        ON CONFLICT (organisation_id, module_key) DO NOTHING
+    """), {"o": org.id})
+    await db.commit()
+    await db.refresh(org)
+    return _workspace_out(org)
 
 
 @router.post("/super/clubs", status_code=201)

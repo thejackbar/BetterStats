@@ -247,9 +247,15 @@ export const api = {
     return request(`/admin/social/results${qs ? `?${qs}` : ''}`)
   },
   getSocialPotm: (matchId) => request(`/admin/social/potm/${matchId}`),
-  getSocialTotw: (q, { dateFrom = '', dateTo = '', scope = 'all', basis = 'week' } = {}) => {
+  // Association workspace: both sides of every match in a linked grade round, and
+  // the round's matches as a pick list (services/social_competition.py).
+  getSocialCompetitionLineups: (q) => request(`/admin/social/competition/lineups?q=${encodeURIComponent(q || '')}`),
+  getSocialCompetitionMatches: (q) => request(`/admin/social/competition/matches?q=${encodeURIComponent(q || '')}`),
+  getSocialTotw: (q, { dateFrom = '', dateTo = '', scope = 'all', basis = 'week', cap = 0 } = {}) => {
     const p = new URLSearchParams()
     if (q) p.set('q', q)
+    // Association workspace only: the most players one club may have in the team.
+    if (cap > 0) p.set('cap', String(cap))
     if (dateFrom) p.set('date_from', dateFrom)
     if (dateTo) p.set('date_to', dateTo)
     if (scope && scope !== 'all') p.set('scope', scope)
@@ -2491,6 +2497,10 @@ export const api = {
         result_count: club?.result_count,
       }),
     }),
+  // Association socials workspaces (BetterSocials only, no club behind them).
+  superListAssociationWorkspaces: () => request('/club-admin/super/association-workspaces'),
+  superCreateAssociationWorkspace: (data) =>
+    request('/club-admin/super/association-workspaces', { method: 'POST', body: JSON.stringify(data) }),
   superCreateClub: (data) =>
     request('/club-admin/super/clubs', { method: 'POST', body: JSON.stringify(data) }),
   superPatchClub: (clubId, data) =>

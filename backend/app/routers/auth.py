@@ -642,6 +642,9 @@ async def _build_me(current_user: User, db: AsyncSession) -> dict:
         "club_id": str(eff_id) if eff_id else None,
         "club_slug": club.slug if club else None,
         "club_name": club.name if club else None,
+        # 'association' for a BetterSocials-only workspace with no club behind it
+        # (migration 392); the admin shell shows it only Posts and branding.
+        "workspace_kind": getattr(club, "workspace_kind", None) if club else None,
         # True when acting as the BetterCricket marketing-outreach org (not a real
         # club), so the public club navbar can suppress its club links.
         "is_marketing_org": org_is_outreach(club),

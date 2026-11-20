@@ -152,11 +152,20 @@ function emptyState(pal) {
   )
 }
 
-// One face: the player's photo, else the club crest, else the monogram.
+// One face: the player's photo, else their own club's crest (an association
+// workspace's team of the week spans every club in a grade), else the post's
+// club crest, else the monogram.
 function Face({ p, team, palette, fit = 'contain', pos = 'center top' }) {
   if (p.headshot) {
     return <img src={p.headshot} alt={`${p.first || ''} ${p.last || ''}`.trim()}
       style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: fit, objectPosition: pos }} />
+  }
+  if (p.crest) {
+    return (
+      <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>
+        <img src={p.crest} alt="club" style={{ width: '62%', height: '62%', objectFit: 'contain', opacity: 0.95 }} />
+      </div>
+    )
   }
   if (team.logo) {
     return (
