@@ -12,6 +12,9 @@ from alembic import op
 
 from app.services.association_crest_ddl import STATEMENTS, DOWNGRADE
 
+# 393 is the table alone; 394 adds the later columns.
+STATEMENTS = STATEMENTS[:1]
+
 revision = "393"
 down_revision = "392"
 branch_labels = None

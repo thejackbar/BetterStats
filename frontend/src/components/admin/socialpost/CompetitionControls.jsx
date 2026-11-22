@@ -151,11 +151,28 @@ export function TotwClubCap({ cap, onChange, busy, clubs = 0, size = 11 }) {
 
 // The workspace's crest library: every club a pull has named, with the crest a
 // post draws. Each crest is fetched once from Cricket Australia with its plain
-// background taken off; here a person can go back to the original picture, set
+// background taken off; here a person can pick how it is cut out (plain, on a
+// white edge, or the original picture), set
 // the club's colour, or put in a crest of their own (cut out in the image
 // editor). Nothing here is changed by a later pull. `version` re-reads the list
 // after a pull has added clubs; `onChanged` tells the editor to pull again so
 // the post shows the change.
+// How a kept crest is drawn. Auto picks the white edge for a crest whose dark
+// lettering or outline would disappear on a dark post, else the plain cut-out.
+const CUT_CHOICES = [
+  { key: 'auto', label: 'Auto' },
+  { key: 'plain', label: 'Cut out' },
+  { key: 'edge', label: 'White edge' },
+  { key: 'original', label: 'Original' },
+]
+const CUT_NOTE = {
+  auto: 'Background taken off, chosen for you',
+  plain: 'Background taken off',
+  edge: 'Background taken off, on a white edge',
+  original: 'Original picture',
+}
+const styleOf = (c) => (!c.useCleaned ? 'original' : (c.cutStyle || 'auto'))
+
 export function CrestLibrary({ version = 0, onChanged }) {
   const [state, setState] = useState({ status: 'loading', crests: [] })
   const [open, setOpen] = useState(false)
@@ -197,15 +214,27 @@ export function CrestLibrary({ version = 0, onChanged }) {
           <div className="min-w-0 flex-1">
             <div className="text-pb-text text-[12px] truncate">{c.name || 'Club'}</div>
             <div className="font-mono text-[9px] text-pb-faint">
-              {c.uploaded ? 'Your crest' : c.cleaned ? (c.useCleaned ? 'Background taken off' : 'Original picture') : 'As Cricket Australia has it'}
+              {c.uploaded ? 'Your crest' : c.cleaned ? (CUT_NOTE[styleOf(c)] || '') : 'As Cricket Australia has it'}
             </div>
+            {!c.uploaded && c.cleaned && (
+              <div className="flex flex-wrap gap-1 mt-1" role="group" aria-label={`${c.name} crest style`}>
+                {CUT_CHOICES.map((o) => {
+                  const on = styleOf(c) === o.key
+                  return (
+                    <button key={o.key} type="button" aria-pressed={on} disabled={busy === c.caOrgId}
+                      onClick={() => !on && patch(c, o.key === 'original' ? { use_cleaned: false } : { cut_style: o.key })}
+                      data-testid={`crest-style-${o.key}`}
+                      className="px-1.5 py-0.5 rounded border font-mono text-[9px]"
+                      style={on
+                        ? { background: 'var(--pb-accent)', color: 'var(--pb-on-accent, var(--pb-bg))', borderColor: 'var(--pb-accent)' }
+                        : { color: 'var(--pb-faint)', borderColor: 'var(--pb-hairline, currentColor)' }}>
+                      {o.label}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
             <div className="flex flex-wrap items-center gap-2 mt-1">
-              {!c.uploaded && c.cleaned && (
-                <button type="button" disabled={busy === c.caOrgId} onClick={() => patch(c, { use_cleaned: !c.useCleaned })}
-                  className="font-mono text-[9px] text-pb-faint hover:text-pb-text underline">
-                  {c.useCleaned ? 'Use the original' : 'Take the background off'}
-                </button>
-              )}
               <button type="button" disabled={busy === c.caOrgId} onClick={() => setEditing({ crest: c, source: src(c.uploaded || c.original || c.logo) })}
                 className="font-mono text-[9px] text-pb-faint hover:text-pb-text underline">Edit</button>
               <button type="button" disabled={busy === c.caOrgId} onClick={() => { pickFor.current = c; fileRef.current?.click() }}

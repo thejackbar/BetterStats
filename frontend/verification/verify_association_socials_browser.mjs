@@ -71,7 +71,7 @@ let CLUB_COUNT = new Set(CLUBS).size
 const CRESTS = [
   { caOrgId: 'c-app', name: 'Applecross Cricket Club', logo: '/api/images/association-crests/ws-1/c-app?v=1',
     original: '/api/images/association-crests/ws-1/c-app?variant=original&v=1', cleaned: '/api/images/association-crests/ws-1/c-app?variant=cleaned&v=1',
-    uploaded: null, useCleaned: true, colour: '#143ca0', colour2: null, colourByHand: false, uploadedAt: null },
+    uploaded: null, useCleaned: true, cutStyle: 'auto', colour: '#143ca0', colour2: null, colourByHand: false, uploadedAt: null },
 ]
 const totwFor = (search) => {
   const cap = Number(new URLSearchParams(search).get('cap') || 0)
@@ -120,7 +120,7 @@ async function open(path, viewport = { width: 1600, height: 1000 }, waitExport =
     if (/\/admin\/social\/crests/.test(url)) {
       if (route.request().method() === 'PATCH') {
         const body = JSON.parse(route.request().postData() || '{}')
-        return route.fulfill(json({ crests: CRESTS.map((c) => ({ ...c, useCleaned: body.use_cleaned ?? c.useCleaned })) }))
+        return route.fulfill(json({ crests: CRESTS.map((c) => ({ ...c, useCleaned: body.cut_style ? true : (body.use_cleaned ?? c.useCleaned), cutStyle: body.cut_style || c.cutStyle })) }))
       }
       return route.fulfill(json({ crests: CRESTS }))
     }
@@ -195,11 +195,16 @@ async function toData(page) {
   await press(page.getByTestId('crest-library').getByRole('button', { name: /Club crests/ }))
   await page.waitForTimeout(300)
   ck('fixtures: the library lists the kept crests', (await page.getByTestId('crest-row').count()) === 1)
-  await press(page.getByRole('button', { name: /Use the original/ }))
+  ck('fixtures: the crest style starts on Auto', (await page.getByTestId('crest-style-auto').getAttribute('aria-pressed').catch(() => null)) === 'true')
+  await press(page.getByTestId('crest-style-original'))
   await page.waitForTimeout(400)
   const patchC = calls.find((c) => c.method === 'PATCH' && c.path.endsWith('/admin/social/crests/c-app'))
-  ck('fixtures: "Use the original" sends only that choice', patchC && patchC.body === JSON.stringify({ use_cleaned: false }), patchC?.body)
-  ck('fixtures: the row then offers the cleaned crest back', await seen(page.getByRole('button', { name: /Take the background off/ })))
+  ck('fixtures: "Original" sends only that choice', patchC && patchC.body === JSON.stringify({ use_cleaned: false }), patchC?.body)
+  ck('fixtures: the row then shows Original as chosen', (await page.getByTestId('crest-style-original').getAttribute('aria-pressed').catch(() => null)) === 'true')
+  await press(page.getByTestId('crest-style-edge'))
+  await page.waitForTimeout(400)
+  const patchE = calls.filter((c) => c.method === 'PATCH' && c.path.endsWith('/admin/social/crests/c-app')).at(-1)
+  ck('fixtures: "White edge" sends cut_style edge', patchE && patchE.body === JSON.stringify({ cut_style: 'edge' }), patchE?.body)
   ck('fixtures: Milestones is not offered in a workspace', !(await seen(page.getByRole('button', { name: /^Milestones$/ }))))
   ck('fixtures: no page errors', errors.length === 0, errors.join(' | '))
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/fixtures.png` })

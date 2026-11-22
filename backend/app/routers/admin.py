@@ -2280,6 +2280,7 @@ async def get_social_crests(db: AsyncSession = Depends(get_db), club=Depends(get
 
 class CrestUpdate(BaseModel):
     use_cleaned: bool | None = None
+    cut_style: str | None = None   # auto, plain (background off) or edge (on a white die-cut edge)
     colour: str | None = None
     drop_upload: bool | None = None
 
@@ -2296,6 +2297,8 @@ async def patch_social_crest(
     from app.services.association_crests import update_crest, list_crests
     if not is_association(club):
         raise HTTPException(404, "Only an association workspace keeps a crest library")
+    if req.cut_style is not None and req.cut_style not in ("auto", "plain", "edge"):
+        raise HTTPException(422, "Cut style must be auto, plain or edge")
     if req.colour and not re.fullmatch(r"#[0-9a-fA-F]{6}", req.colour):
         raise HTTPException(422, "Colour must be a hex like #1a4eb8")
     fields = {k: getattr(req, k) for k in req.model_fields_set}

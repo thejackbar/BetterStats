@@ -270,7 +270,7 @@ async def fake_grade_matches(grade_id, *, force=False):
 # Crest pictures Cricket Australia would serve: each club's colour on a WHITE
 # square, so the library has a plain background to take off. Kalamunda's host
 # is down (the fetch fails), so its crest must fall back to the raw address.
-CREST_COLOUR = {"app": (20, 60, 160), "wsc": (200, 30, 30), "sub": (20, 110, 50), "ben": (240, 180, 0),
+CREST_COLOUR = {"app": (20, 60, 160), "wsc": (200, 30, 30), "sub": (20, 110, 50), "ben": (25, 30, 80),
                 "swv": (10, 120, 60), "kal": None}
 FETCHES: list[str] = []
 
@@ -330,6 +330,8 @@ async def setup():
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                 PRIMARY KEY (workspace_id, ca_org_id))
         """))
+        await conn.execute(text("ALTER TABLE association_crests ADD COLUMN IF NOT EXISTS cut_style TEXT NOT NULL DEFAULT 'auto'"))
+        await conn.execute(text("ALTER TABLE association_crests ADD COLUMN IF NOT EXISTS clean_version INTEGER NOT NULL DEFAULT 1"))
         # usage_events is a raw lifespan table (main.py), copied column for column;
         # All Clubs reads it for "last active".
         await conn.execute(text("""
@@ -529,6 +531,75 @@ async def main():
             wsc_id, admin_router.CrestUpdate(drop_upload=True, use_cleaned=True), db, ws, SuperUser()))
         served = await crests.crest_image(db, str(ws.id), wsc_id) if crests else None
         check("going back from an upload serves the cleaned crest again", (corner(served) or (0, 0, 0, 255))[3], 0)
+        print("\n[crests] how a crest is cut out")
+        ben_id = CLUBS["ben"][0]
+        ben_row = (await db.execute(text("SELECT cut_style, clean_version, cleaned_png, original_png FROM association_crests "
+                                          "WHERE ca_org_id = :c"), {"c": ben_id})).mappings().first() if crests else None
+        styles = crests.cut_styles(ben_row["original_png"]) if (crests and ben_row and hasattr(crests, "cut_styles")) else None
+        check("a dark crest (navy on white) is put on a white edge by itself, so it reads on a dark post",
+              bool(styles) and ben_row["cleaned_png"] == styles["edge"])
+        wsc_styles = crests.cut_styles((await db.execute(text("SELECT original_png FROM association_crests WHERE ca_org_id = :c"),
+                                                         {"c": wsc_id})).scalar()) if (crests and hasattr(crests, "cut_styles")) else None
+        check("a bright crest stays a plain cut-out", bool(wsc_styles) and wsc_styles["auto"] == wsc_styles["plain"])
+        await attempt("plain style", lambda: admin_router.patch_social_crest(
+            ben_id, admin_router.CrestUpdate(cut_style="plain"), db, ws, SuperUser()))
+        served = await crests.crest_image(db, str(ws.id), ben_id) if crests else None
+        check("choosing Cut out serves the plain cut-out", bool(styles) and served == styles["plain"])
+        bad_style = None
+        try:
+            await admin_router.patch_social_crest(ben_id, admin_router.CrestUpdate(cut_style="glow"), db, ws, SuperUser())
+        except HTTPException as e:
+            bad_style = e.status_code
+        except Exception:
+            bad_style = "crash"
+            await db.rollback()
+            await db.refresh(ws)
+            await db.refresh(club)
+        check("an unknown cut style is refused", bad_style, 422)
+        # A crest kept by the first clean-up is cleaned again from its original, with no fetch.
+        sub_id = CLUBS["sub"][0]
+        try:
+            await db.execute(text("UPDATE association_crests SET clean_version = 1, cleaned_png = original_png "
+                                  "WHERE ca_org_id = :c"), {"c": sub_id})
+            await db.commit()
+        except Exception:  # the control commit has no clean_version column
+            await db.rollback()
+            await db.refresh(ws)
+            await db.refresh(club)
+        before = len(FETCHES)
+        await attempt("fixtures re-clean", admin_router.get_social_fixtures(MATCH_LINK, db, ws))
+        sub_row = (await db.execute(text("SELECT * FROM association_crests WHERE ca_org_id = :c"), {"c": sub_id})).mappings().first()
+        check("a crest from an older clean-up is cleaned again", (sub_row or {}).get("clean_version"),
+              getattr(crests, "CLEAN_VERSION", "missing"))
+        check("its background is off again (corner see-through)", (corner((sub_row or {}).get("cleaned_png")) or (0, 0, 0, 255))[3], 0)
+        check("re-cleaning fetched nothing for that club (made from the kept original)",
+              [u for u in FETCHES[before:] if u == cdn("sub")], [])
+
+        def lettering(hole_px, disc=False):
+            import io as _i
+            from PIL import Image as _I, ImageDraw as _D
+            im = _I.new("RGBA", (300, 300), (255, 255, 255, 255))
+            d = _D.Draw(im)
+            d.ellipse((40, 40, 260, 260), fill=(120, 20, 40, 255))
+            if disc:
+                d.ellipse((60, 60, 240, 240), fill=(255, 255, 255, 255))   # a big white disc inside a ring
+            else:
+                d.ellipse((150 - hole_px, 150 - hole_px, 150 + hole_px, 150 + hole_px), fill=(255, 255, 255, 255))  # an O's hole
+            b = _i.BytesIO()
+            im.save(b, "PNG")
+            return b.getvalue()
+        if crests and hasattr(crests, "cut_styles"):
+            o_hole = crests.cut_styles(crests.original_png(lettering(8)))["plain"]
+            ring = crests.cut_styles(crests.original_png(lettering(0, disc=True)))["plain"]
+            check("the background showing through a letter's hole is cleared", centre(o_hole)[3], 0)
+            check("a big white disc inside a ring is the crest's own and stays", centre(ring)[:3], (255, 255, 255))
+            from PIL import Image as _I2
+            im = _I2.open(_io.BytesIO(o_hole)).convert("RGBA")
+            pale = [p for p in im.getdata() if p[3] > 40 and sum(p[:3]) > 3 * 200]
+            check("no pale fringe left on the crest's edge", len(pale), 0)
+        else:
+            check("cut styles exist", False)
+
         refused_lib = None
         try:
             await admin_router.get_social_crests(db, club)
