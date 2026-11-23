@@ -3,9 +3,10 @@ export default {
   date: '2026-11-23',
   // Above v9.149.0's sortKey (2026-11-23T12:00:00Z). Check origin/main at merge time.
   sortKey: '2026-11-23T15:00:00Z',
-  title: 'Round Review: every club shows its crest',
+  title: 'Games played keep counting after a career import',
   items: [
-    'Round Review posts and the Performance Tracker now take each club\'s crest from your crest library as it is now, so a crest you change to a white edge or upload shows on the next post without pulling the round again.',
-    'Clubs in a competition pulled before crests were kept (some PSWL rounds showed letters for Applecross, Willetton Crows and Kardinya Lakes) now show their crests too.',
+    'A career sheet you uploaded through BetterImport is now read as each player\'s career on the day you uploaded it. Games played since then add to the total each week, the same as runs and wickets.',
+    'Before this, a player whose sheet held more games than the online record could sit on the same games total round after round, while their runs and wickets kept going up.',
+    'If you have been adding games by hand in Manual Entries to keep up, check those players after the next sync, because the games you added will now count twice.',
   ],
 }

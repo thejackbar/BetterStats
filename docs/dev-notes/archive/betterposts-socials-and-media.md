@@ -1403,7 +1403,7 @@ Asked for straight after the podcast run sheet shipped: the hosts wanted posts m
 - The pull gained `team_id` on innings, spells and performers, `home_id`/`away_id` on results and fixtures, and `crests` (through the workspace crest library; a club would get Cricket Australia's address).
 - Proof: live WASTCA 2nd Grade Round 4 pull with crests (all reachable). `verify_performance_tracker.py` 46/46; v9.148.0 control 4 pass, 42 fail, no crash. `verify_performance_tracker_browser.mjs` 35/35 on the real pull and on the inline round. Route access audit passes. Posts checked by eye on the real round.
 
-## Round Review crests read from the crest library live (v9.149.1)
+## Round Review crests read from the crest library live (v9.149.2)
 
 Reported on PSWL South A Round 7: Applecross, Willetton Crows and Kardinya Lakes showed letters on Top Performers although Applecross was in the crest library beside the post.
 
