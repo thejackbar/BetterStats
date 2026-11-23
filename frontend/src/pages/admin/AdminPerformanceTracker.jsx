@@ -153,6 +153,8 @@ export default function AdminPerformanceTracker() {
   const [pulling, setPulling] = useState({})
   const [copied, setCopied] = useState(false)
   const [filter, setFilter] = useState('')
+  // The workspace crest library, read live (lib/performanceRound.crestLookup).
+  const [library, setLibrary] = useState([])
   const saveTimer = useRef(null)
   const pending = useRef(null)
 
@@ -169,6 +171,7 @@ export default function AdminPerformanceTracker() {
   }, [])
 
   useEffect(() => { loadList().then(list => { if (list.length) open(list[0].id) }) }, [loadList, open])
+  useEffect(() => { api.getSocialCrests().then(d => setLibrary(d?.crests || [])).catch(() => {}) }, [])
 
   const flush = useCallback(async () => {
     if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null }
@@ -253,7 +256,7 @@ export default function AdminPerformanceTracker() {
   }
 
   const data = round?.data
-  const v = useMemo(() => (data ? roundView(data) : null), [data])
+  const v = useMemo(() => (data ? roundView(data, library) : null), [data, library])
   const comps = data ? pulledComps(data) : []
   const inFilter = (x) => !filter || x.compKey === filter
 
@@ -370,7 +373,7 @@ export default function AdminPerformanceTracker() {
                 <Card title="At a glance" testid="glance">
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                     {v.potr && <Glance testid="glance-potr" label="Player of the round" big={v.potr.line} name={v.potr.name} logo={v.potr.logo} sub={`${v.potr.team} v ${v.potr.opp}`} comp={v.potr.comp} />}
-                    {v.topScore && <Glance label="Highest score" big={v.topScore.line} name={v.topScore.name} logo={v.topScore.logo} sub={`${v.topScore.team} v ${v.topScore.opp}`} comp={v.topScore.comp} />}
+                    {v.topScore && <Glance testid="glance-top" label="Highest score" big={v.topScore.line} name={v.topScore.name} logo={v.topScore.logo} sub={`${v.topScore.team} v ${v.topScore.opp}`} comp={v.topScore.comp} />}
                     {v.bestBowl && <Glance label="Best bowling" big={v.bestBowl.line} name={v.bestBowl.name} logo={v.bestBowl.logo} sub={`${v.bestBowl.team} v ${v.bestBowl.opp}`} comp={v.bestBowl.comp} />}
                     {v.biggest && <Glance label="Biggest win" big={winText(v.biggest).replace(/^.*?\bwon\s+/, '')} name={v.biggest.winner === 'home' ? v.biggest.home : v.biggest.away} logo={v.biggest.winner === 'home' ? v.biggest.homeLogo : v.biggest.awayLogo} sub={`against ${v.biggest.winner === 'home' ? v.biggest.away : v.biggest.home}`} comp={v.biggest.comp} url={v.biggest.url} />}
                     {v.closest && <Glance testid="glance-closest" label="Closest match" big={winText(v.closest).replace(/^.*?\bwon\s+/, '')} name={`${v.closest.home} ${v.closest.home_score} v ${v.closest.away} ${v.closest.away_score}`} sub={winText(v.closest)} comp={v.closest.comp} url={v.closest.url} />}

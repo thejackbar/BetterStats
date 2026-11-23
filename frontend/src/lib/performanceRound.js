@@ -23,37 +23,74 @@ export function winText(r) {
   return r.result || ''
 }
 
-const crestOf = (c, tid) => (tid && c.pull.crests && c.pull.crests[tid] && c.pull.crests[tid].logo) || null
+// A club name reduced to what tells it apart: "Applecross Cricket Club" and
+// the side "Applecross" both read "applecross".
+export function normClub(s) {
+  return String(s || '').toLowerCase()
+    .replace(/\b(district\s+)?cricket\s+(club|association)\b|\bc\.?c\.?(?=\s|$)|\binc\.?(?=\s|$)/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
+// The crest for a side, read from the workspace's crest library as it is NOW
+// (GET /admin/social/crests), so a crest changed after the pull (white edge,
+// uploaded) still reaches the page and the posts:
+//   1. the side's club id (`pull.clubs`, pulls from v9.149.1) in the library;
+//   2. the crest address the pull stored (`pull.crests`);
+//   3. the library entry whose club name the side's name starts with, longest
+//      first: a pull read before crests were stored has only the name.
+export function crestLookup(library) {
+  const byId = new Map()
+  const byName = []
+  for (const c of library || []) {
+    if (!c || !c.logo) continue
+    if (c.caOrgId) byId.set(String(c.caOrgId).toLowerCase(), c.logo)
+    const n = normClub(c.name)
+    if (n) byName.push([n, c.logo])
+  }
+  byName.sort((a, b) => b[0].length - a[0].length)
+  return (pull, tid, teamName) => {
+    const club = tid && pull.clubs ? pull.clubs[tid] : null
+    if (club && club.id && byId.has(String(club.id).toLowerCase())) return byId.get(String(club.id).toLowerCase())
+    const stored = tid && pull.crests && pull.crests[tid] && pull.crests[tid].logo
+    if (stored) return stored
+    const t = normClub((club && club.name) || teamName)
+    if (t) for (const [n, logo] of byName) if (t === n || t.startsWith(`${n} `)) return logo
+    return null
+  }
+}
 
 // Every list tagged with its competition (`comp`, `compKey`) and crest (`logo`).
-function tagged(comps, key) {
-  return comps.flatMap(c => (c.pull[key] || []).map(x => ({ ...x, comp: c.name, compKey: c.key, logo: crestOf(c, x.team_id) })))
+function tagged(comps, key, crest) {
+  return comps.flatMap(c => (c.pull[key] || []).map(x => ({ ...x, comp: c.name, compKey: c.key, logo: crest(c.pull, x.team_id, x.team) })))
 }
 
 export const byRuns = (a, b) => b.runs - a.runs || (a.balls || 999) - (b.balls || 999)
 export const byWickets = (a, b) => b.wickets - a.wickets || a.runs - b.runs
 
-export function roundView(data) {
+// `library` is the workspace crest library (GET /admin/social/crests); without it
+// a side shows the crest its pull stored, if any.
+export function roundView(data, library) {
+  const crest = crestLookup(library)
   const comps = pulledComps(data)
   const results = comps.flatMap(c => (c.pull.results || []).map(r => ({
-    ...r, comp: c.name, compKey: c.key, homeLogo: crestOf(c, r.home_id), awayLogo: crestOf(c, r.away_id),
+    ...r, comp: c.name, compKey: c.key, homeLogo: crest(c.pull, r.home_id, r.home), awayLogo: crest(c.pull, r.away_id, r.away),
   })))
-  const batting = tagged(comps, 'batting').sort(byRuns)
-  const bowling = tagged(comps, 'bowling').sort(byWickets)
-  const performers = tagged(comps, 'performers').sort((a, b) => b.points - a.points)
-  const milestones = tagged(comps, 'milestones')
-  const fielders = tagged(comps, 'fielders')
+  const batting = tagged(comps, 'batting', crest).sort(byRuns)
+  const bowling = tagged(comps, 'bowling', crest).sort(byWickets)
+  const performers = tagged(comps, 'performers', crest).sort((a, b) => b.points - a.points)
+  const milestones = tagged(comps, 'milestones', crest)
+  const fielders = tagged(comps, 'fielders', crest)
     .sort((a, b) => (b.catches + b.stumpings + b.run_outs) - (a.catches + a.stumpings + a.run_outs))
-  const catches = tagged(comps, 'catches')
-  const runOuts = tagged(comps, 'run_outs')
-  const upsets = tagged(comps, 'upsets').sort((a, b) => (b.winner_rank - b.loser_rank) - (a.winner_rank - a.loser_rank))
+  const catches = tagged(comps, 'catches', crest)
+  const runOuts = tagged(comps, 'run_outs', crest)
+  const upsets = tagged(comps, 'upsets', crest).sort((a, b) => (b.winner_rank - b.loser_rank) - (a.winner_rank - a.loser_rank))
   const margined = results.filter(r => r.margin && r.margin.closeness !== null && r.margin.closeness !== undefined)
   const closest = [...margined].sort((a, b) => a.margin.closeness - b.margin.closeness)[0] || null
   const biggest = [...results].filter(r => r.margin && r.margin.runs).sort((a, b) => b.margin.runs - a.margin.runs)[0]
     || [...results].filter(r => r.margin && r.margin.wickets).sort((a, b) => b.margin.wickets - a.margin.wickets)[0] || null
   const nextRound = comps.map(c => {
     const n = c.pull.next_round || {}
-    const fixtures = (n.fixtures || []).map(f => ({ ...f, homeLogo: crestOf(c, f.home_id), awayLogo: crestOf(c, f.away_id) }))
+    const fixtures = (n.fixtures || []).map(f => ({ ...f, homeLogo: crest(c.pull, f.home_id, f.home), awayLogo: crest(c.pull, f.away_id, f.away) }))
     return { comp: c.name, compKey: c.key, round: n.round || '', fixtures, pick: typeof n.match_of_round === 'number' ? fixtures[n.match_of_round] || null : null }
   })
   const ladders = comps.map(c => ({ comp: c.name, compKey: c.key, grade: c.pull.grade, rows: c.pull.ladder || [] }))

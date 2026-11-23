@@ -39,6 +39,10 @@ const PULL = process.env.PULL_JSON ? JSON.parse(readFileSync(process.env.PULL_JS
 const LINK = 'https://play.cricket.com.au/match/bf35fc33-02b9-4c55-84aa-fed719f64422/smcc-v-swan-valley'
 const SETTINGS = { id: 'ws-1', name: 'Hills Association', short_name: 'HILLS', slug: null, workspace_kind: 'association', logo_url: null, primary_color: '#0b1530', accent_color: '#ffc233', theme_config: null }
 
+// The workspace crest library the stub serves (GET /admin/social/crests).
+let LIBRARY = []
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR42mP8z8BQz0AEYBxVSF+FABJADveWkH6oAAAAAElFTkSuQmCC', 'base64')
+
 const browser = await chromium.launch(existsSync(EXECUTABLE) ? { executablePath: EXECUTABLE } : {})
 
 async function open(path, viewport, store) {
@@ -70,7 +74,9 @@ async function open(path, viewport, store) {
       if (req.method() === 'PATCH') Object.assign(r, JSON.parse(req.postData() || '{}'))
       return route.fulfill(json(r))
     }
-    if (/\/admin\/social\/templates|\/admin\/social\/media|\/admin\/social\/crests/.test(url)) return route.fulfill(json(/crests/.test(url) ? { crests: [] } : []))
+    if (/\/images\/association-crests\//.test(url)) return route.fulfill({ status: 200, contentType: 'image/png', body: PNG })
+    if (/\/admin\/social\/crests/.test(url)) return route.fulfill(json({ crests: LIBRARY }))
+    if (/\/admin\/social\/templates|\/admin\/social\/media/.test(url)) return route.fulfill(json([]))
     if (/\/club-admin\/settings/.test(url)) return route.fulfill(json(SETTINGS))
     if (/\/club-admin\/players/.test(url)) return route.fulfill(json([]))
     if (/sponsors/.test(url)) return route.fulfill(json([]))
@@ -165,6 +171,46 @@ for (const [id, ok, not] of [
   ck(`${id}: no page errors`, errors.length === 0, errors.join(' | '))
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/${id.toLowerCase()}.png` })
   await ctx.close()
+}
+
+// ── Crests come from the crest library as it is now ──────────────────────────
+// PSWL_JSON is a real pull with club ids; PSWL_OLD_JSON the same round as a pull
+// read before crests were stored (no team ids, crests or clubs). Both must show
+// the library's crest for the top score's club, found by club id on the first
+// and by club name on the second.
+if (process.env.PSWL_JSON && process.env.PSWL_OLD_JSON) {
+  const fresh = JSON.parse(readFileSync(process.env.PSWL_JSON, 'utf8'))
+  const old = JSON.parse(readFileSync(process.env.PSWL_OLD_JSON, 'utf8'))
+  const topTeamId = fresh.batting[0].team_id
+  const club = fresh.clubs[topTeamId]
+  const kept = `/api/images/association-crests/ws-1/${club.id}?v=7`
+  LIBRARY = [
+    { caOrgId: club.id, name: club.name, logo: kept },
+    { caOrgId: 'someone-else', name: 'Applecross Districts Juniors', logo: '/api/images/association-crests/ws-1/someone-else?v=1' },
+  ]
+  for (const [label, pull] of [['by club id', fresh], ['by club name, on a round pulled before crests were stored', old]]) {
+    const rs = [{ id: 'p1', round_label: pull.round, round_date: pull.date, data: { competitions: [{ key: 'south', name: 'South A', link: LINK, pull }] } }]
+    const { ctx, page, errors } = await open(`/admin/social-post?template=RV2&round=p1`, { width: 1600, height: 1000 }, rs)
+    await page.getByRole('button', { name: /DOWNLOAD PNG|SLIDES/ }).first().waitFor({ timeout: 25000 })
+    await page.waitForTimeout(1500)
+    const srcs = await page.evaluate(() => {
+      const holder = [...document.querySelectorAll('div')].find((d) => d.style.left === '-9999px' && d.style.position === 'absolute')
+      return holder ? [...holder.querySelectorAll('img')].map((i) => i.getAttribute('src') || '') : []
+    })
+    ck(`RV2 top score shows the library crest ${label}`, srcs.includes(kept.replace('/api', '/api')) || srcs.some(x => x.endsWith(`${club.id}?v=7`)), srcs.slice(0, 4).join(' | '))
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/rv2-${pull === fresh ? 'id' : 'name'}.png` })
+    ck(`RV2 ${label}: no page errors`, errors.length === 0, errors.join(' | '))
+    await ctx.close()
+    const t = await open('/admin/performance', { width: 1400, height: 1000 }, rs)
+    // The highest score card: its own test id, else (an older build) the card that says so.
+    await t.page.getByTestId('glance').waitFor({ timeout: 25000 })
+    await t.page.waitForTimeout(500)
+    const card = (await t.page.getByTestId('glance-top').count()) ? t.page.getByTestId('glance-top') : t.page.getByTestId('glance').locator('div', { hasText: /^HIGHEST SCORE/ }).first()
+    const gsrc = await card.locator('img').first().getAttribute('src', { timeout: 3000 }).catch(() => '')
+    ck(`tracker highest score shows the library crest ${label}`, (gsrc || '').endsWith(`${club.id}?v=7`), gsrc)
+    await t.ctx.close()
+  }
+  LIBRARY = []
 }
 
 // ── A club has no Round Review ────────────────────────────────────────────────

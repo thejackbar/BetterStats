@@ -14,9 +14,9 @@ function splitName(name) {
 }
 
 // Every candidate for Player of the Round, best first, each with a stable key.
-export function reviewPerformers(round) {
+export function reviewPerformers(round, library) {
   if (!round) return []
-  return roundView(round.data).performers.map(p => ({ ...p, key: `${p.compKey}:${p.match_id}:${p.name}` }))
+  return roundView(round.data, library).performers.map(p => ({ ...p, key: `${p.compKey}:${p.match_id}:${p.name}` }))
 }
 
 // The round's headlines, one line each, in the order a wrap reads.
@@ -33,15 +33,17 @@ export function defaultHeadlines(round) {
   return out.slice(0, 5)
 }
 
-export function reviewPost(round, opts = {}) {
+// `library` is the workspace crest library, read live so the posts show the
+// crests as they are now (see lib/performanceRound.crestLookup).
+export function reviewPost(round, opts = {}, library) {
   if (!round) return {}
-  const v = roundView(round.data)
+  const v = roundView(round.data, library)
   const scores = v.batting.map(b => ({
     name: b.name, team: b.team, opp: b.opp, comp: b.comp, logo: b.logo,
     figure: `${b.runs}${b.not_out ? '*' : ''}` + (b.balls ? ` (${b.balls})` : ''),
   }))
   const bowling = v.bowling.map(b => ({ name: b.name, team: b.team, opp: b.opp, comp: b.comp, logo: b.logo, figure: `${b.wickets}/${b.runs}` }))
-  const perf = reviewPerformers(round)
+  const perf = reviewPerformers(round, library)
   const chosen = perf.find(p => p.key === opts.potrKey) || perf[0] || null
   const potr = chosen ? { ...splitName(chosen.name), name: chosen.name, team: chosen.team, opp: chosen.opp, comp: chosen.comp, line: chosen.line, logo: chosen.logo, key: chosen.key } : null
   const ahead = v.nextRound.filter(n => n.pick).map(n => ({

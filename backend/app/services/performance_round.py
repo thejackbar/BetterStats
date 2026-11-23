@@ -394,10 +394,17 @@ def match_of_round(fixtures: list[dict]) -> int | None:
     return best
 
 
-async def _team_crests(db: AsyncSession, org, matches: list[dict]) -> dict[str, dict]:
-    """team id -> ``{logo, colour}`` for every side in the grade, through the
-    workspace crest library (social_competition._crests). A club has no library,
-    so it gets Cricket Australia's crest address as it is."""
+async def _team_crests(db: AsyncSession, org, matches: list[dict]) -> tuple[dict[str, dict], dict[str, dict]]:
+    """``(crests, clubs)`` for every side in the grade. ``crests`` is team id ->
+    ``{logo, colour}`` through the workspace crest library
+    (social_competition._crests); a club has no library, so it gets Cricket
+    Australia's crest address as it is. ``clubs`` is team id -> ``{id, name}``,
+    the club behind the side, which the page and the posts use to read the
+    crest library as it is NOW (a crest set to white edge or uploaded after the
+    pull still reaches the post).
+
+    ``matches`` should include the round's scorecards: a scorecard's teams carry
+    their club even where a grade list item does not."""
     from app.services.social_competition import _crests, is_association
     teams: dict[str, dict] = {}
     for m in matches:
@@ -406,13 +413,14 @@ async def _team_crests(db: AsyncSession, org, matches: list[dict]) -> dict[str, 
             if tid and _club_of(t)["id"] and tid not in teams:
                 teams[tid] = _club_of(t)
     if not teams:
-        return {}
+        return {}, {}
     ids = list(teams)
+    clubs = {t: {"id": teams[t]["id"], "name": teams[t]["name"]} for t in ids}
     if is_association(org):
         got = await _crests(db, org, [(teams[t]["id"], teams[t]["logo"], teams[t]["name"]) for t in ids])
     else:
         got = [{"logo": teams[t]["logo"], "colour": None} for t in ids]
-    return {t: {"logo": c.get("logo"), "colour": c.get("colour")} for t, c in zip(ids, got)}
+    return {t: {"logo": c.get("logo"), "colour": c.get("colour")} for t, c in zip(ids, got)}, clubs
 
 
 # ── The pull ──────────────────────────────────────────────────────────────────
@@ -544,7 +552,7 @@ async def pull_competition(db: AsyncSession, org, raw: str) -> dict:
     catches.sort(key=lambda c: (c["clip"] is None, c["keeper"]))
     run_outs.sort(key=lambda c: c["clip"] is None)
 
-    crests = await _team_crests(db, org, all_matches + ctx["matches"])
+    crests, clubs = await _team_crests(db, org, all_matches + ctx["matches"] + [sc for _, sc in pairs])
 
     last_day = max((r["date"] for r in results if r["date"]), default="")
     first_day = min((r["date"] for r in results if r["date"]), default="")
@@ -571,6 +579,8 @@ async def pull_competition(db: AsyncSession, org, raw: str) -> dict:
         "ladder": ladder,
         # team id -> {logo, colour}: the workspace's crest library, the same crests its posts use.
         "crests": crests,
+        # team id -> {id, name}: the club behind each side, to read the crest library live.
+        "clubs": clubs,
         "upsets": upsets,
         "upset_gap": UPSET_GAP,
         "next_round": {

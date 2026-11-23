@@ -320,6 +320,7 @@ async def main():
         check("a crest the library cannot fetch falls back to its address",
               g(d, "crests", alpha, "logo"), "https://res.cloudinary.com/playhq/alpha.png")
         check("innings carry their side's id (crest lookup)", g(d, "batting", 0, "team_id"), alpha)
+        check("each side names its club (the crest library's key)", g(d, "clubs", alpha), {"id": TEAM["Alpha"][1], "name": "Alpha Cricket Club"})
         check("performers carry their side's id", g(d, "performers", 0, "team_id"), alpha)
         check("fixtures carry both sides' ids", (g(mor, "home_id"), g(mor, "away_id")), (alpha, TEAM["Bravo"][0]))
         bad = await attempt("pull with a PlayHQ link", lambda: pod.pull("https://www.playhq.com/x/game-centre/abcd1234", db, ws)) if pod else None

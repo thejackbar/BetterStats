@@ -3037,7 +3037,7 @@ export default function AdminSocialPost() {
   // Round Review (association workspaces): the rounds saved in the Performance
   // Tracker, and the one the posts read. A ?round= link from the tracker's Make
   // posts button opens on that round; otherwise the newest.
-  const [review, setReview] = useState({ rounds: null, round: null, status: '', opts: {} })
+  const [review, setReview] = useState({ rounds: null, round: null, status: '', opts: {}, library: [] })
   const openReviewRound = useCallback(async (id) => {
     if (!id) return
     try {
@@ -3050,6 +3050,9 @@ export default function AdminSocialPost() {
   const patchReviewOpts = (patch) => setReview(s => ({ ...s, opts: { ...s.opts, ...patch } }))
   useEffect(() => {
     if (IS_AFL || !isAssoc || TAB_MAP[templateId] !== 'review' || review.rounds !== null) return
+    // The crest library as it is now: the posts read crests from it, not from the
+    // addresses the round stored when it was pulled.
+    api.getSocialCrests().then((d) => setReview(s => ({ ...s, library: d?.crests || [] }))).catch(() => {})
     api.performanceRounds().then((d) => {
       const list = d.rounds || []
       setReview(s => ({ ...s, rounds: list }))
@@ -3894,7 +3897,7 @@ export default function AdminSocialPost() {
   }
 
   // What the Round Review layouts draw, from the picked tracker round.
-  const reviewData = activeTab === 'review' ? reviewPost(review.round, review.opts) : {}
+  const reviewData = activeTab === 'review' ? reviewPost(review.round, review.opts, review.library) : {}
 
   // The milestone cards the post prints, in post order. Built once: the built-in layouts and a template's
   // {{milestone N ...}} words both read them.
