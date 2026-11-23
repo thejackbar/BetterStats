@@ -36,6 +36,10 @@ from app.models.db import Base, Organisation  # noqa: E402
 from app.services import grassroots_scores_client as gr  # noqa: E402
 
 try:
+    from app.services import performance_season as pss  # noqa: E402
+except Exception:  # the control commit has no season reading
+    pss = None
+try:
     from app.routers import performance as pod  # noqa: E402
     from app.services.performance_ddl import STATEMENTS as POD_DDL  # noqa: E402
 except Exception:  # the control commit has neither
@@ -326,6 +330,103 @@ async def main():
         bad = await attempt("pull with a PlayHQ link", lambda: pod.pull("https://www.playhq.com/x/game-centre/abcd1234", db, ws)) if pod else None
         check("a PlayHQ link says what to paste instead", g(bad, "kind"), "playhq")
 
+        print("\n[season] leaderboards, season and career milestones")
+        # Cricket Australia's published totals, stubbed by address. Season totals
+        # are set so each crossing is known: A One 160 runs (105 this round, so
+        # past 100), Fox Quick 12 wickets (5 this round, past 10), Bra Bat 250 runs
+        # (55 this round, past 200), Fox Bat 95 runs (crosses nothing).
+        def srow(name, club, **st):
+            return {"id": pid(name), "name": name, "organisation": {"id": TEAM[club][1], "name": f"{club} Cricket Club"},
+                    "statistics": {"matches": 4, **st}}
+        GRADE2 = str(uuid.uuid4())
+        STATS = {
+            f"grades/{GRADE}/batting": [srow("a one", "Alpha", battingInnings=4, battingAggregate=160, battingHighScore=105),
+                                        srow("Bra Bat", "Bravo", battingInnings=4, battingAggregate=250, battingHighScore=90, battingNotOuts=1),
+                                        srow("Fox Bat", "Foxtrot", battingInnings=3, battingAggregate=95, battingHighScore=60, isBattingHSNotOut=True)],
+            f"grades/{GRADE}/bowling": [srow("Fox Quick", "Foxtrot", bowlingWickets=12, bowlingRuns=90, bowlingBestInnings="5-20"),
+                                        srow("Ech Bowl", "Echo", bowlingWickets=9, bowlingRuns=70, bowlingBestInnings="4-30")],
+            f"grades/{GRADE}/fielding": [srow("Fox Keep", "Foxtrot", fieldingTotalCatches=6, fieldingStumpings=1)],
+            # A second competition where Bra Bat also played: the all-competitions board adds them.
+            f"grades/{GRADE2}/batting": [srow("Bra Bat", "Bravo", battingInnings=2, battingAggregate=40, battingHighScore=30)],
+            f"grades/{GRADE2}/bowling": [], f"grades/{GRADE2}/fielding": [],
+            # Club careers: A One reaches 100 games and 1,000 runs this round, Fox Quick 50 wickets.
+            f"organisations/{TEAM['Alpha'][1]}/batting": [{"id": pid("a one"), "name": "One, A", "statistics": {"matches": 100, "battingAggregate": 1010}}],
+            f"organisations/{TEAM['Alpha'][1]}/bowling": [], f"organisations/{TEAM['Alpha'][1]}/fielding": [],
+            f"organisations/{TEAM['Foxtrot'][1]}/batting": [],
+            f"organisations/{TEAM['Foxtrot'][1]}/bowling": [{"id": pid("Fox Quick"), "name": "Quick, Fox", "statistics": {"matches": 30, "bowlingWickets": 52}}],
+            f"organisations/{TEAM['Foxtrot'][1]}/fielding": [],
+        }
+        READS = []
+
+        async def fake_pages(client, url, max_pages, pause=0.0):
+            key = url.split("/participants/", 1)[1].replace("-statistics", "")
+            READS.append(key)
+            if key not in STATS:
+                if key.startswith("organisations/"):
+                    return []
+                raise RuntimeError("stats read failed")
+            return [dict(r) for r in STATS[key]]
+        if pss is not None:
+            pss._stats_pages = fake_pages
+            pss.CAREER_PAGE_PAUSE = 0
+            pss._season_cache.clear()
+        pull2 = {**d, "grade_id": GRADE2, "results": []}
+        rd = {"competitions": [{"key": "north", "name": "North", "pull": d}, {"key": "east", "name": "East", "pull": pull2}]}
+        se = await attempt("season", lambda: pss.round_season(db, rd)) if pss else None
+        north = next((b for b in g(se, "competitions", default=[]) if b.get("key") == "north"), {})
+        check("runs leaderboard, most first", [r["name"] for r in g(north, "leaders", "runs", default=[])], ["Bra Bat", "A One", "Fox Bat"])
+        check("wickets leaderboard", [(r["name"], r["value"]) for r in g(north, "leaders", "wickets", default=[])], [("Fox Quick", 12), ("Ech Bowl", 9)])
+        check("best bowling read from 5-20", g(north, "leaders", "best_bowling", 0, "value"), "5/20")
+        check("highest score marks a not out", [r["value"] for r in g(north, "leaders", "high_score", default=[])], ["105", "90", "60*"])
+        check("the latest round is known as latest", g(north, "latest"), True)
+        sms = sorted(m["text"] for m in g(north, "season_milestones", default=[]))
+        check("season marks crossed this round, and only those", sms, sorted([
+            "A One (Alpha) passed 100 runs for the season (160)",
+            "Bra Bat (Bravo) passed 200 runs for the season (250)",
+            "Fox Quick (Foxtrot) passed 10 wickets for the season (12)"]))
+        check("all competitions add a player's grades together",
+              next((r["value"] for r in g(se, "all", "leaders", "runs", default=[]) if r["name"] == "Bra Bat"), None), 290)
+        check("career records start as pending, never guessed", sorted(g(se, "career", "pending", default=[])),
+              sorted(["Alpha", "Bravo", "Echo", "Foxtrot"]))
+        check("no career milestones while records are pending", g(north, "career_milestones", default=["x"]), [])
+        for _ in range(50):  # the background read, on its own session
+            await asyncio.sleep(0.1)
+            if not (pss and pss._inflight):
+                break
+        await db.commit()
+        se2 = await attempt("season again", lambda: pss.round_season(db, rd)) if pss else None
+        north2 = next((b for b in g(se2, "competitions", default=[]) if b.get("key") == "north"), {})
+        check("career records read in the background", sorted(g(se2, "career", "ready", default=[])), sorted(["Alpha", "Bravo", "Echo", "Foxtrot"]))
+        check("career marks crossed this round", sorted(m["text"] for m in g(north2, "career_milestones", default=[])), sorted([
+            "A One played game 100 for Alpha",
+            "A One passed 1,000 career runs for Alpha (1,010)",
+            "Fox Quick passed 50 career wickets for Foxtrot (52)"]))
+        before = len(READS)
+        await attempt("season a third time", lambda: pss.round_season(db, rd)) if pss else None
+        check("a fresh career record is not read again", [r for r in READS[before:] if r.startswith("organisations/")], [])
+        # A later round has been played: subtraction would be wrong, so no milestones.
+        later = item(str(uuid.uuid4()), R2, "Round 2", "2026-11-21", "Alpha", "Bravo", "COMPLETED", 3, "Alpha won")
+        GRADE_LIST.append(later)
+        pss._season_cache.clear() if pss else None
+        se3 = await attempt("season after a later round", lambda: pss.round_season(db, rd)) if pss else None
+        n3 = next((b for b in g(se3, "competitions", default=[]) if b.get("key") == "north"), {})
+        check("a round that is not the latest says so", g(n3, "latest"), False)
+        check("and works out no milestones", (g(n3, "season_milestones"), g(n3, "career_milestones")), ([], []))
+        check("its leaderboards still show", len(g(n3, "leaders", "runs", default=[])), 3)
+        GRADE_LIST.remove(later)
+        STATS.pop(f"grades/{GRADE2}/bowling")
+        pss._season_cache.clear() if pss else None
+        se4 = await attempt("season with one competition failing", lambda: pss.round_season(db, rd)) if pss else None
+        check("a competition Cricket Australia fails on says so", bool(next((b for b in g(se4, "competitions", default=[]) if b.get("key") == "east"), {}).get("error")), True)
+        check("and the others still show", len(next((b for b in g(se4, "competitions", default=[]) if b.get("key") == "north"), {}).get("leaders", {}).get("runs", [])), 3)
+        r_id = g(await attempt("round for the route", lambda: pod.create_round(db, ws, user)) if pod else None, "id")
+        if r_id:
+            await pod.save_round(r_id, pod.RoundPatch(data=rd), db, ws, user)
+        routed = await attempt("season route", lambda: pod.round_season(r_id, db, ws)) if (pod and r_id and hasattr(pod, "round_season")) else None
+        check("the route reads a saved round", len(g(routed, "competitions", default=[])), 2)
+        if r_id:
+            await pod.archive_round(r_id, db, ws)
+
         print("\n[rounds] create, save, carry over, scope, archive")
         r1 = await attempt("create round", lambda: pod.create_round(db, ws, user)) if pod else None
         rid = g(r1, "id")
@@ -356,7 +457,7 @@ async def main():
         await attempt("archive", lambda: pod.archive_round(rid, db, ws)) if rid else None
         lst = await attempt("list after archive", lambda: pod.list_rounds(db, ws)) if pod else None
         check("archived round leaves the list", [r["id"] for r in g(lst, "rounds", default=[])], [g(r2, "id")])
-        kept = await db.scalar(text("SELECT count(*) FROM performance_rounds WHERE archived_at IS NOT NULL")) if pod else 0
+        kept = await db.scalar(text("SELECT count(*) FROM performance_rounds WHERE archived_at IS NOT NULL AND id = CAST(:id AS uuid)"), {"id": rid}) if (pod and rid) else 0
         check("archived round row is kept, not deleted", kept, 1)
 
         print("\n[carry] the run sheet's saved episodes come across once")

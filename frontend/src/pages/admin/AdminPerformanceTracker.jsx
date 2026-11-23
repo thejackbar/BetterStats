@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../lib/api'
 import BetterSocialsLayout from '../../components/admin/BetterSocialsLayout'
-import { roundView, roundText, winText, ordinal, pulledComps } from '../../lib/performanceRound'
+import { roundView, roundText, winText, ordinal, pulledComps, LEADER_TABLES } from '../../lib/performanceRound'
 
 // Performance Tracker (Association Socials). One page per round across every
 // competition the association follows. Each competition takes ONE
@@ -142,6 +142,40 @@ function ResultsBlock({ comp }) {
   )
 }
 
+function Leaders({ board }) {
+  return (
+    <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      {LEADER_TABLES.map(([label, key]) => (
+        <div key={key} className="min-w-0" data-testid={`leaders-${key}`}>
+          <h3 className="font-mono text-[10px] tracking-wide2 text-pb-faint mb-1">{label.toUpperCase()}</h3>
+          {(board[key] || []).length ? (
+            <ol className="text-sm text-pb-text">
+              {board[key].slice(0, 5).map((r, i) => (
+                <li key={r.pid} className="flex items-baseline gap-2 py-0.5 border-b pb-hairline last:border-b-0 min-w-0">
+                  <span className="font-mono text-[10px] text-pb-faint w-4 shrink-0">{i + 1}</span>
+                  <span className="min-w-0 flex-1 truncate">{r.name} <span className="text-pb-dim">{r.club}</span></span>
+                  <span className="font-mono shrink-0">{r.value}</span>
+                </li>
+              ))}
+            </ol>
+          ) : <p className="text-xs text-pb-dim">None yet.</p>}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function MilestoneList({ title, items, empty, testid }) {
+  return (
+    <div className="min-w-0" data-testid={testid}>
+      <h3 className="font-mono text-[10px] tracking-wide2 text-pb-faint mb-1">{title}</h3>
+      {items.length
+        ? <ul className="space-y-1 text-sm text-pb-text">{items.map((m, i) => <li key={i}>{m.text} {m.comp ? <span className="text-pb-faint text-xs">{m.comp}</span> : null}</li>)}</ul>
+        : <p className="text-sm text-pb-dim">{empty}</p>}
+    </div>
+  )
+}
+
 // ── The page ─────────────────────────────────────────────────────────────────
 
 export default function AdminPerformanceTracker() {
@@ -155,6 +189,9 @@ export default function AdminPerformanceTracker() {
   const [filter, setFilter] = useState('')
   // The workspace crest library, read live (lib/performanceRound.crestLookup).
   const [library, setLibrary] = useState([])
+  // Season leaderboards and milestones (GET .../season): null not read, 'loading', or the payload.
+  const [season, setSeason] = useState(null)
+  const [board, setBoard] = useState('all')
   const saveTimer = useRef(null)
   const pending = useRef(null)
 
@@ -172,6 +209,31 @@ export default function AdminPerformanceTracker() {
 
   useEffect(() => { loadList().then(list => { if (list.length) open(list[0].id) }) }, [loadList, open])
   useEffect(() => { api.getSocialCrests().then(d => setLibrary(d?.crests || [])).catch(() => {}) }, [])
+
+  // The season reading follows the round's pulls: a new pull reads it again.
+  const pullStamp = round ? (round.data?.competitions || []).map(c => c.pulled_at || '').join('|') : ''
+  const roundId = round?.id
+  useEffect(() => {
+    if (!roundId || !pullStamp.replace(/\|/g, '')) { setSeason(null); return undefined }
+    let dead = false
+    let timer = null
+    let tries = 0
+    const read = async () => {
+      try {
+        await new Promise(r => setTimeout(r, 1200)) // let the autosave of a fresh pull land first
+        const d = await api.performanceSeason(roundId)
+        if (dead) return
+        setSeason(d)
+        // Career totals are read in the background the first time: look again while any are pending.
+        if ((d.career?.pending || []).length && tries++ < 20) timer = setTimeout(read, 20000)
+      } catch (e) {
+        if (!dead) setSeason({ error: e.message || 'Could not read the season' })
+      }
+    }
+    setSeason('loading')
+    read()
+    return () => { dead = true; if (timer) clearTimeout(timer) }
+  }, [roundId, pullStamp])
 
   const flush = useCallback(async () => {
     if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null }
@@ -262,13 +324,13 @@ export default function AdminPerformanceTracker() {
 
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(roundText(round))
+      await navigator.clipboard.writeText(roundText(round, season))
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
     } catch { setError('Your browser blocked copying. Use Download instead.') }
   }
   const download = () => {
-    const blob = new Blob([roundText(round)], { type: 'text/plain;charset=utf-8' })
+    const blob = new Blob([roundText(round, season)], { type: 'text/plain;charset=utf-8' })
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
     a.download = fileName(round)
@@ -280,7 +342,7 @@ export default function AdminPerformanceTracker() {
     if (!w) return
     w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(round.round_label || 'Round')} performance</title>
       <style>body{font-family:Georgia,serif;max-width:780px;margin:24px auto;padding:0 16px;color:#111}pre{white-space:pre-wrap;font:14px/1.45 Georgia,serif}</style>
-      </head><body><pre>${escapeHtml(roundText(round))}</pre><script>window.onload=function(){window.print()}</script></body></html>`)
+      </head><body><pre>${escapeHtml(roundText(round, season))}</pre><script>window.onload=function(){window.print()}</script></body></html>`)
     w.document.close()
   }
   const makePosts = async () => { await flush(); navigate(`/admin/social-post?type=review&round=${round.id}`) }
@@ -410,7 +472,57 @@ export default function AdminPerformanceTracker() {
                   </div>
                 </Card>
 
+                <Card title="Season leaderboards" testid="season"
+                  right={season && season.competitions ? (
+                    <div className="flex flex-wrap gap-1" role="group" aria-label="Leaderboard">
+                      {[...(season.all ? [{ key: 'all', name: 'All competitions' }] : []), ...season.competitions.filter(b => !b.error)].map(b => {
+                        const k = b.key || 'all'
+                        const on = board === k || (board === 'all' && !season.all && k === season.competitions[0]?.key)
+                        return <button key={k} type="button" onClick={() => setBoard(k)} aria-pressed={on}
+                          className={`px-2 py-0.5 rounded border text-xs ${on ? 'border-pb-accent text-pb-accent' : 'pb-hairline text-pb-dim'}`}>{b.name}</button>
+                      })}
+                    </div>
+                  ) : null}>
+                  {season === 'loading' || season === null ? <p className="text-sm text-pb-dim">Reading the season from play.cricket.com.au…</p>
+                    : season.error ? <p className="text-sm text-red-500">{season.error}</p>
+                      : (() => {
+                        const chosen = board === 'all' && season.all ? season.all
+                          : season.competitions.find(b => b.key === board && !b.error) || season.all || season.competitions.find(b => !b.error)
+                        return chosen ? (
+                          <>
+                            <Leaders board={chosen.leaders} />
+                            <p className="text-[11px] text-pb-faint mt-2">
+                              Season to date as play.cricket.com.au shows it today{chosen === season.all ? ', every competition added together (a player in two grades counts both)' : `, ${chosen.grade}`}.
+                            </p>
+                          </>
+                        ) : <p className="text-sm text-pb-dim">No season totals yet.</p>
+                      })()}
+                </Card>
+
                 <Card title="Milestones and moments" testid="moments">
+                  {season && season.competitions ? (() => {
+                    const latest = season.competitions.filter(b => !b.error && inFilter({ compKey: b.key }))
+                    const seasonMs = latest.flatMap(b => (b.season_milestones || []).map(m => ({ ...m, comp: b.name })))
+                    const careerMs = latest.flatMap(b => (b.career_milestones || []).map(m => ({ ...m, comp: b.name })))
+                    const notLatest = season.competitions.filter(b => !b.error && !b.latest).map(b => b.name)
+                    const pending = season.career?.pending || []
+                    const failed = season.career?.failed || []
+                    return (
+                      <div className="grid md:grid-cols-2 gap-x-6 gap-y-3 mb-4 pb-4 border-b pb-hairline">
+                        <MilestoneList testid="season-milestones" title="SEASON MILESTONES THIS ROUND" items={seasonMs}
+                          empty="Nobody passed a season mark this round (100 runs, 10 wickets, 10 catches and up)." />
+                        <div className="min-w-0">
+                          <MilestoneList testid="career-milestones" title="CAREER MILESTONES THIS ROUND" items={careerMs}
+                            empty={pending.length ? 'Waiting for career records (below).' : 'Nobody passed a career mark this round (50 games, 1,000 runs, 50 wickets, 50 catches and up).'} />
+                          {pending.length > 0 && <p className="text-[11px] text-pb-dim mt-1" data-testid="career-pending">Reading career records for {pending.join(', ')}. This takes a few minutes the first time and the page updates itself.</p>}
+                          {failed.length > 0 && <p className="text-[11px] text-amber-600 mt-1">Career records could not be read for {failed.join(', ')}. They are tried again next time.</p>}
+                          <p className="text-[11px] text-pb-faint mt-1">Careers are each club's own record on play.cricket.com.au, every grade and season it holds there. That is complete where a competition has always been scored on it, and short where a club's older seasons were not.</p>
+                        </div>
+                        {notLatest.length > 0 && <p className="md:col-span-2 text-[11px] text-amber-600">{notLatest.join(', ')}: games have been played since this round, so season and career milestones cannot be worked out for it. Leaderboards show the season as it stands today.</p>}
+                      </div>
+                    )
+                  })() : null}
+                  <h3 className="font-mono text-[10px] tracking-wide2 text-pb-faint mb-1">IN THE MATCH</h3>
                   {v.milestones.filter(inFilter).length
                     ? <ul className="space-y-1 mb-3">{v.milestones.filter(inFilter).map((m, i) => <li key={i} className="text-sm text-pb-text">{m.text} <span className="text-pb-faint text-xs">{m.comp}</span></li>)}</ul>
                     : <p className="text-sm text-pb-dim mb-3">No fifties, hundreds, five-fors or hat-tricks this round.</p>}

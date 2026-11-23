@@ -103,7 +103,14 @@ export function roundView(data, library) {
 
 // The whole round as plain text, for pasting into a run sheet, a newsletter or
 // an email somewhere else.
-export function roundText(round) {
+// The five season tables, in the order the page and the text show them.
+export const LEADER_TABLES = [
+  ['Most runs', 'runs'], ['Most wickets', 'wickets'], ['Most catches', 'catches'],
+  ['Highest score', 'high_score'], ['Best bowling', 'best_bowling'],
+]
+
+// `season` is GET /admin/performance/rounds/{id}/season, when it has been read.
+export function roundText(round, season) {
   const v = roundView(round.data)
   const L = []
   const head = [round.round_label || 'Round', round.round_date].filter(Boolean).join(', ')
@@ -139,6 +146,23 @@ export function roundText(round) {
     if (n && n.fixtures.length) {
       L.push(`Next: ${n.round}`)
       n.fixtures.forEach(f => L.push(`  ${f.home} (${ordinal(f.home_rank)}) v ${f.away} (${ordinal(f.away_rank)}), ${f.label}${f.venue ? `, ${f.venue}` : ''}${n.pick === f ? '  [match of the round]' : ''}`))
+    }
+  }
+  if (season) {
+    const lead = (title, board) => {
+      if (!board) return
+      L.push('', title)
+      for (const [label, key] of LEADER_TABLES) {
+        const rows = (board[key] || []).slice(0, 5)
+        if (rows.length) L.push(`${label}: ${rows.map(r => `${r.name} (${r.club}) ${r.value}`).join('; ')}`)
+      }
+    }
+    if (season.all) lead('SEASON LEADERS, ALL COMPETITIONS', season.all.leaders)
+    for (const b of season.competitions || []) {
+      if (b.error) continue
+      lead(`SEASON LEADERS, ${String(b.name).toUpperCase()}`, b.leaders)
+      const ms = [...(b.season_milestones || []), ...(b.career_milestones || [])]
+      if (ms.length) { L.push(`Season and career milestones, ${b.name}`); ms.forEach(m => L.push(`  ${m.text}`)) }
     }
   }
   const notes = String((round.data && round.data.notes) || '').trim()

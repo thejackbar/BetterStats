@@ -9,6 +9,7 @@ Routes, all under the association workspace the caller is acting in:
   GET    /admin/performance/rounds/{id}         one round
   PATCH  /admin/performance/rounds/{id}         save; an absent key is left alone
   POST   /admin/performance/rounds/{id}/archive
+  GET    /admin/performance/rounds/{id}/season  leaderboards and milestones (services/performance_season)
 
 Only an association socials workspace has a tracker (services/social_competition
 .is_association); a club gets 404. Every read and write is scoped by
@@ -178,6 +179,23 @@ async def save_round(round_id: str, body: RoundPatch, db: AsyncSession = Depends
         ), params)
         await db.commit()
     return _full(await _load(db, club.id, round_id))
+
+
+@router.get("/rounds/{round_id}/season")
+async def round_season(round_id: str, db: AsyncSession = Depends(get_db), club=Depends(get_current_club)):
+    """Season leaderboards (each competition, and all of them together), and the
+    season and career milestones crossed this round. Reads Cricket Australia's
+    published totals; a club's career totals are read in the background the
+    first time, so ``career.pending`` names clubs still being read."""
+    from app.services.performance_season import round_season as build
+    r = await _load(db, club.id, round_id)
+    try:
+        return await build(db, _data(r))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.exception("performance season failed for %s", round_id)
+        raise HTTPException(500, f"Could not read the season: {exc}") from exc
 
 
 @router.post("/rounds/{round_id}/archive")

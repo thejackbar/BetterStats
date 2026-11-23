@@ -264,6 +264,8 @@ export const api = {
   performanceRound: (id) => request(`/admin/performance/rounds/${id}`),
   performanceSaveRound: (id, fields) => request(`/admin/performance/rounds/${id}`, { method: 'PATCH', body: JSON.stringify(fields) }),
   performanceArchiveRound: (id) => request(`/admin/performance/rounds/${id}/archive`, { method: 'POST' }),
+  // Leaderboards and season and career milestones for a tracked round (services/performance_season.py).
+  performanceSeason: (id) => request(`/admin/performance/rounds/${id}/season`),
   getSocialTotw: (q, { dateFrom = '', dateTo = '', scope = 'all', basis = 'week', cap = 0 } = {}) => {
     const p = new URLSearchParams()
     if (q) p.set('q', q)

@@ -4779,7 +4779,8 @@ async def lifespan(app: FastAPI):
         for _stmt in _PODCAST_DDL:
             await conn.execute(text(_stmt))
 
-        # Migration 396: the Performance Tracker's rounds, which copy the run sheet's rows once.
+        # Migrations 396 and 397: the Performance Tracker's rounds (which copy the run sheet's rows once)
+        # and the club career cache.
         # Same one-copy rule: this and alembic's 396 both run services/performance_ddl. It runs
         # after 395's list so the copy can find the table it reads.
         from app.services.performance_ddl import STATEMENTS as _PERFORMANCE_DDL

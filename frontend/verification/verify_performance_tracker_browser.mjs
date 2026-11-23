@@ -35,6 +35,13 @@ const INLINE = {
   upsets: [], upset_gap: 3, crests: {},
   next_round: { round: 'Round 5', match_of_round: 0, fixtures: [{ match_id: 'f1', url: '', home: 'Swan Valley', away: 'Bedford Morley', home_id: 't1', away_id: 't6', home_rank: 1, away_rank: 6, date: '2026-11-21', label: 'SAT 21 NOV', time: '12:30 PM', venue: 'Swan Valley Sporting Club' }] },
 }
+// A season reading (GET .../season). SEASON_JSON takes a real one; inline otherwise.
+const SEASON = process.env.SEASON_JSON ? JSON.parse(readFileSync(process.env.SEASON_JSON, 'utf8')) : {
+  competitions: [{ key: 'north', name: 'North', grade: '1st Grade', latest: true, players: 2,
+    leaders: { runs: [{ pid: 'p1', name: 'Heshan Perera', club: 'Swan Valley', value: 280, sub: '4 inns' }], wickets: [], catches: [], high_score: [], best_bowling: [] },
+    season_milestones: [{ pid: 'p1', name: 'Heshan Perera', club: 'Swan Valley', kind: 'season_runs', mark: 200, text: 'Heshan Perera (Swan Valley) passed 200 runs for the season (280)' }],
+    career_milestones: [] }],
+  all: null, career: { ready: [], pending: ['Swan Valley'], failed: [] }, as_at: '2026-11-23T00:00:00Z' }
 const PULL = process.env.PULL_JSON ? JSON.parse(readFileSync(process.env.PULL_JSON, 'utf8')) : INLINE
 const LINK = 'https://play.cricket.com.au/match/bf35fc33-02b9-4c55-84aa-fed719f64422/smcc-v-swan-valley'
 const SETTINGS = { id: 'ws-1', name: 'Hills Association', short_name: 'HILLS', slug: null, workspace_kind: 'association', logo_url: null, primary_color: '#0b1530', accent_color: '#ffc233', theme_config: null }
@@ -68,6 +75,7 @@ async function open(path, viewport, store) {
       store.unshift(r)
       return route.fulfill(json(r))
     }
+    if (/\/admin\/performance\/rounds\/[^/]+\/season$/.test(u.pathname)) return route.fulfill(json(SEASON))
     const m = u.pathname.match(/\/admin\/performance\/rounds\/([^/]+)$/)
     if (m) {
       const r = store.find(x => x.id === m[1])
@@ -116,6 +124,18 @@ const POTR = [...PULL.performers].sort((a, b) => b.points - a.points)[0]
   ck('ladder shown', (await page.getByTestId('ladders').locator('tbody tr').count()) === PULL.ladder.length)
   const mor = MOR
   ck('next round marks the match of the round', (await page.getByTestId('next').getByText(`${mor.home} (`, { exact: false }).first().innerText()).includes('MATCH OF THE ROUND'))
+  // Season leaderboards and milestones, from GET .../season.
+  await page.getByTestId('leaders-runs').waitFor({ timeout: 8000 })
+  const sb = SEASON.competitions[0]
+  ck('season call made for this round', calls.some(c => /\/rounds\/[^/]+\/season$/.test(c.path)))
+  ck('most runs leaderboard led by the season leader', (await page.getByTestId('leaders-runs').locator('li').first().innerText()).includes(sb.leaders.runs[0].name))
+  ck('season milestones listed', sb.season_milestones.length
+    ? (await page.getByTestId('season-milestones').innerText()).includes(sb.season_milestones[0].text)
+    : (await page.getByTestId('season-milestones').innerText()).includes('Nobody passed'))
+  ck('career milestones explain themselves', (await page.getByTestId('career-milestones').innerText()).length > 20)
+  ck('pending career clubs are named', SEASON.career.pending.length
+    ? (await page.getByTestId('career-pending').innerText()).includes(SEASON.career.pending[0])
+    : (await page.getByTestId('career-pending').count()) === 0)
   await page.getByLabel('Notes').fill('Bentley clubrooms reopening Saturday')
   await page.waitForTimeout(1500)
   const patch = calls.filter(c => c.method === 'PATCH').pop()
@@ -127,6 +147,8 @@ const POTR = [...PULL.performers].sort((a, b) => b.points - a.points)[0]
   const txt = readFileSync(await dl.path(), 'utf8')
   ck('download names the file after the round', /round-\d+-performance\.txt|performance\.txt$/.test(dl.suggestedFilename()), dl.suggestedFilename())
   ck('download holds results, top batting, ladder and notes', txt.includes('Results') && txt.includes(PULL.batting[0].name) && txt.includes('Ladder') && txt.includes('Bentley clubrooms reopening Saturday'))
+  ck('download holds the season leaders and milestones', txt.includes('SEASON LEADERS') && txt.includes(SEASON.competitions[0].leaders.runs[0].name)
+    && (!SEASON.competitions[0].season_milestones.length || txt.includes(SEASON.competitions[0].season_milestones[0].text)))
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/tracker.png`, fullPage: true })
   await Promise.all([page.waitForURL(/social-post/), page.getByRole('button', { name: 'Make posts' }).click()])
   ck('Make posts opens Round Review on this round', /type=review/.test(page.url()) && page.url().includes(`round=${store[0].id}`), page.url())

@@ -10,11 +10,18 @@ A round is archived (`archived_at`), never deleted: it holds what people typed.
 The tracker began as a podcast run sheet (migration 395, `podcast_episodes`).
 Its rows are copied across once, by id, and that table is left as it was.
 
-One copy: alembic migration 396 and main.py's lifespan both run STATEMENTS. Every
-statement is idempotent.
+`ca_club_careers` (migration 397) keeps each Cricket Australia club's career
+totals, per player, as Cricket Australia publishes them (all grades, every
+season the club holds on play.cricket.com.au). It is public data keyed by the
+club's own id, shared by every workspace, refreshed in the background at most
+weekly (services/performance_season.py). It is a cache: a row can be refetched
+at any time, and nobody types into it.
+
+One copy: alembic migrations 396 and 397 and main.py's lifespan run these lists.
+Every statement is idempotent.
 """
 
-STATEMENTS = [
+STATEMENTS_396 = [
     """
     CREATE TABLE IF NOT EXISTS performance_rounds (
         id UUID PRIMARY KEY,
@@ -45,6 +52,27 @@ STATEMENTS = [
     """,
 ]
 
-DOWNGRADE = [
+STATEMENTS_397 = [
+    """
+    CREATE TABLE IF NOT EXISTS ca_club_careers (
+        ca_org_id TEXT PRIMARY KEY,
+        name TEXT,
+        data JSONB NOT NULL DEFAULT '{}'::jsonb,
+        players INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'new',
+        error TEXT,
+        started_at TIMESTAMPTZ,
+        fetched_at TIMESTAMPTZ
+    )
+    """,
+]
+
+STATEMENTS = STATEMENTS_396 + STATEMENTS_397
+
+DOWNGRADE_396 = [
     "DROP TABLE IF EXISTS performance_rounds",
 ]
+DOWNGRADE_397 = [
+    "DROP TABLE IF EXISTS ca_club_careers",
+]
+DOWNGRADE = DOWNGRADE_397 + DOWNGRADE_396
