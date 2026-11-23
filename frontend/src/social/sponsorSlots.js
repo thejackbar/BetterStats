@@ -31,8 +31,9 @@ import { SPONSOR_SLOTS as ROUND } from './round-templates'
 import { SPONSOR_SLOTS as TOTW } from './totw-templates'
 import { SPONSOR_SLOTS as MILESTONES } from './milestone-templates'
 import { SPONSOR_SLOTS as EVENT } from './event-templates'
+import { SPONSOR_SLOTS as REVIEW } from './round-review-templates'
 
-const SLOTS = { ...CRICKET, ...SPLIT, ...CARD, ...GLASS, ...COVER, ...HIGHLIGHTS, ...GIANT, ...ROUND, ...TOTW, ...MILESTONES, ...EVENT }
+const SLOTS = { ...CRICKET, ...SPLIT, ...CARD, ...GLASS, ...COVER, ...HIGHLIGHTS, ...GIANT, ...ROUND, ...TOTW, ...MILESTONES, ...EVENT, ...REVIEW }
 
 /** Does this layout reserve a sponsor slot of its own? */
 export function hasSponsorSlot(templateId) {

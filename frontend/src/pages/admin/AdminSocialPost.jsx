@@ -41,6 +41,9 @@ import { RoundCover } from '../../social/round-cover-template'
 import { ResultHighlights, HIGHLIGHTS_FOCUS } from '../../social/highlights-cover-template'
 import { GiantType } from '../../social/giant-type-template'
 import { MilestoneCards, MilestoneBoard, MILESTONE_MAX } from '../../social/milestone-templates'
+import { ReviewWrap, ReviewPerformers, ReviewPlayer, ReviewMatch } from '../../social/round-review-templates'
+import { reviewPost } from '../../social/roundReviewPost'
+import RoundReviewControls from '../../components/admin/socialpost/RoundReviewControls'
 import {
   DEFAULT_MILESTONE_WINDOW, achievedMilestones, defaultPicks, milestoneUnit, milestoneValueText, formatMilestoneDate,
 } from '../../social/milestoneItems'
@@ -139,6 +142,11 @@ const ALL_TEMPLATES = [
   // Player milestones — the club ticks which recorded milestones to feature.
   { id: 'MS1', name: 'Milestone Cards', component: MilestoneCards,    desc: 'Photo cards with the big number', maxPlayers: 0, kind: 'milestones' },
   { id: 'MS2', name: 'Milestone Board', component: MilestoneBoard,    desc: 'One row per milestone',           maxPlayers: 0, kind: 'milestones' },
+  // Round review (association workspaces): read from a round saved in the Performance Tracker.
+  { id: 'RV1', name: 'Round Wrap',      component: ReviewWrap,        desc: "The round's headlines",           maxPlayers: 0, kind: 'review' },
+  { id: 'RV2', name: 'Top Performers',  component: ReviewPerformers,  desc: 'Top scores and best bowling',     maxPlayers: 0, kind: 'review' },
+  { id: 'RV3', name: 'Player of the Round', component: ReviewPlayer,  desc: 'One player, figures and crest',   maxPlayers: 0, kind: 'review' },
+  { id: 'RV4', name: 'Match of the Round', component: ReviewMatch,    desc: "Next week's pick per competition", maxPlayers: 0, kind: 'review' },
   { id: 'SC1', name: 'Broadcast',      component: SC1_Broadcast,      desc: 'TV-style full scorecard',         maxPlayers: 0, isScorecard: true },
   { id: 'SC2', name: 'Brutalist',      component: SC2_Brutalist,      desc: 'Bold type, heavy rules',          maxPlayers: 0, isScorecard: true },
   { id: 'SC3', name: 'Dashboard',      component: SC3_Dashboard,      desc: 'Soft cards, app-style',           maxPlayers: 0, isScorecard: true },
@@ -159,7 +167,7 @@ const ALL_TEMPLATES = [
 // The football build drops the layouts that only mean anything with cricket
 // data: the batting order, the results wrap's batting/bowling leaders, and
 // every layout of the three hidden post types (toss, scorecard, final score).
-const AFL_HIDDEN_TEMPLATES = new Set([...CUSTOM_LAYOUT_IDS, 'T4', 'T11', 'T12', 'T13', 'C5', 'RR7', 'C2', 'C4', 'RS1', 'RS2', 'RS3', 'RS4', 'RS5', 'RS6', 'RS7', 'RS8', 'RS9', 'SC1', 'SC2', 'SC3', 'TW1', 'TW2', 'TW3', 'MS1', 'MS2'])
+const AFL_HIDDEN_TEMPLATES = new Set([...CUSTOM_LAYOUT_IDS, 'T4', 'T11', 'T12', 'T13', 'C5', 'RR7', 'C2', 'C4', 'RS1', 'RS2', 'RS3', 'RS4', 'RS5', 'RS6', 'RS7', 'RS8', 'RS9', 'SC1', 'SC2', 'SC3', 'TW1', 'TW2', 'TW3', 'MS1', 'MS2', 'RV1', 'RV2', 'RV3', 'RV4'])
 const TEMPLATES = IS_AFL ? ALL_TEMPLATES.filter(t => !AFL_HIDDEN_TEMPLATES.has(t.id)) : ALL_TEMPLATES
 
 // The lineup templates that crop the hero photo into a fixed box, and the shape
@@ -198,6 +206,7 @@ const TAB_MAP = {
   RR1: 'results', RR2: 'results', RR3: 'results', RR4: 'results', RR5: 'results', RR6: 'results', RR7: 'results',
   TW1: 'totw', TW2: 'totw', TW3: 'totw',
   MS1: 'milestones', MS2: 'milestones',
+  RV1: 'review', RV2: 'review', RV3: 'review', RV4: 'review',
   SC1: 'scorecard', SC2: 'scorecard', SC3: 'scorecard',
   EV1: 'events', EV2: 'events', EV3: 'events', EV4: 'events', EV5: 'events', EV6: 'events',
   EV7: 'events', EV8: 'events', EV9: 'events', EV10: 'events', EV11: 'events',
@@ -209,10 +218,12 @@ const TAB_MAP = {
 // Final Score layouts (overs, run rates, batting and bowling columns). Every
 // other type takes football data as it is; fixtures, results, lineups and the
 // player spotlight are fed from the football backend's own /admin/social/*.
-const AFL_HIDDEN_TABS = new Set(['toss', 'scorecard', 'result', 'totw', 'milestones'])
+const AFL_HIDDEN_TABS = new Set(['toss', 'scorecard', 'result', 'totw', 'milestones', 'review'])
 // An association socials workspace (services/social_competition.py) has no club
 // records, so the post types that read them are left out.
 const ASSOC_HIDDEN_TABS = new Set(['milestones'])
+// Round Review reads the Performance Tracker, which only an association workspace has.
+const ASSOC_ONLY_TABS = new Set(['review'])
 const TABS = [
   { key: 'lineup',       label: 'Lineup' },
   { key: 'fixtures',     label: 'Fixtures' },
@@ -221,6 +232,7 @@ const TABS = [
   { key: 'motm',         label: IS_AFL ? 'Best on Ground' : 'Player of Match' },
   { key: 'totw',         label: 'Team of the Week' },
   { key: 'milestones',   label: 'Milestones' },
+  { key: 'review',       label: 'Round Review' },
   { key: 'announcement', label: 'Announcement' },
   { key: 'toss',         label: 'Toss' },
   { key: 'scorecard',    label: 'Scorecard' },
@@ -228,7 +240,7 @@ const TABS = [
   { key: 'blank',        label: 'Blank' },
 ].filter(t => !IS_AFL || !AFL_HIDDEN_TABS.has(t.key))
 const TAB_FIRST = {
-  lineup: LINEUP_DEFAULT, fixtures: 'FX1', announcement: 'C1', toss: 'C2', motm: 'C3', totw: 'TW1', milestones: 'MS1',
+  lineup: LINEUP_DEFAULT, fixtures: 'FX1', announcement: 'C1', toss: 'C2', motm: 'C3', totw: 'TW1', milestones: 'MS1', review: 'RV1',
   result: 'C4', results: 'RR1', scorecard: 'SC1', events: 'EV1', blank: 'BL1',
 }
 // Icon per post type (from the app's own kit) for the post-type bar and the
@@ -236,7 +248,7 @@ const TAB_FIRST = {
 const TAB_ICON = {
   lineup: 'teams', fixtures: 'fixtures', result: 'ladders', results: 'list',
   motm: 'player', totw: 'teams', milestones: 'selection', announcement: 'share', toss: 'bolt', scorecard: 'sheet',
-  events: 'availability', blank: 'plus',
+  events: 'availability', blank: 'plus', review: 'list',
 }
 // Post types that pull from external data (BetterSelect / a match link / a round
 // import). These open on the "Get your data" step so the source is collected first.
@@ -249,11 +261,12 @@ const IMPORT_NEXT_STEP = {
   motm: 'Now choose the player and their stats in Data or Content.',
   totw: 'Now pull the round in Data, then adjust the team in Content.',
   milestones: 'Now tick the milestones to feature in Data.',
+  review: 'Now pick a tracked round in Data.',
   announcement: 'Now choose the player and the words in Content.',
   toss: 'Now choose who won the toss and what they chose in Content.',
   events: 'Now fill in the event in Content.',
 }
-const DATA_TABS = ['lineup', 'fixtures', 'results', 'result', 'scorecard', 'motm', 'totw', 'milestones']
+const DATA_TABS = ['lineup', 'fixtures', 'results', 'result', 'scorecard', 'motm', 'totw', 'milestones', 'review']
 // The Data step's help line in an association workspace, where every pull is a
 // whole grade from a link and nothing is one club's own.
 const ASSOC_SOURCE_HELP = {
@@ -264,6 +277,7 @@ const ASSOC_SOURCE_HELP = {
   scorecard: 'Paste any match link from the grade to pull the full scorecard for both sides.',
   motm: 'Paste any match link. Players from both sides are ranked, and the post features the chosen player\'s club.',
   totw: 'Paste a match or grade link. Both sides of every match in that grade round are ranked together, and each player shows their club\'s crest.',
+  review: 'Pick a round you pulled in the Performance Tracker. Every competition in it feeds the four layouts: the round wrap, top performers, player of the round and next week\'s match of the round.',
 }
 const SOURCE_HELP = {
   lineup: 'Pick a saved BetterSelect XI or a Play.Cricket published team list below to pull the players, captain, keeper and match details — or add players yourself in Content.',
@@ -1673,7 +1687,7 @@ export default function AdminSocialPost() {
   // and crest; null shows the workspace.
   const isAssoc = settings?.workspace_kind === 'association'
   const [compTeam, setCompTeam] = useState(null)
-  const visibleTabs = isAssoc ? TABS.filter(t => !ASSOC_HIDDEN_TABS.has(t.key)) : TABS
+  const visibleTabs = isAssoc ? TABS.filter(t => !ASSOC_HIDDEN_TABS.has(t.key)) : TABS.filter(t => !ASSOC_ONLY_TABS.has(t.key))
   const [allPlayers, setAllPlayers] = useState([])
   const [manualPlayerOpen, setManualPlayerOpen] = useState(false)
   const [adminSponsors, setAdminSponsors] = useState([])
@@ -3020,6 +3034,36 @@ export default function AdminSocialPost() {
     for (const r of shown) { if (next.length >= MILESTONE_MAX) break; if (!next.includes(r.key)) next.push(r.key) }
     return next
   })
+  // Round Review (association workspaces): the rounds saved in the Performance
+  // Tracker, and the one the posts read. A ?round= link from the tracker's Make
+  // posts button opens on that round; otherwise the newest.
+  const [review, setReview] = useState({ rounds: null, round: null, status: '', opts: {} })
+  const openReviewRound = useCallback(async (id) => {
+    if (!id) return
+    try {
+      const r = await api.performanceRound(id)
+      setReview(s => ({ ...s, round: r, status: '', opts: {} }))
+    } catch (e) {
+      setReview(s => ({ ...s, status: e?.message || 'Could not open that round' }))
+    }
+  }, [])
+  const patchReviewOpts = (patch) => setReview(s => ({ ...s, opts: { ...s.opts, ...patch } }))
+  useEffect(() => {
+    if (IS_AFL || !isAssoc || TAB_MAP[templateId] !== 'review' || review.rounds !== null) return
+    api.performanceRounds().then((d) => {
+      const list = d.rounds || []
+      setReview(s => ({ ...s, rounds: list }))
+      const want = new URLSearchParams(window.location.search).get('round')
+      const id = (want && list.some(r => r.id === want)) ? want : list[0]?.id
+      if (id) openReviewRound(id)
+    }).catch((e) => setReview(s => ({ ...s, rounds: [], status: e?.message || 'Could not read the tracked rounds' })))
+  }, [templateId, isAssoc, review.rounds, openReviewRound])
+  // A club has no tracker, so a Round Review layout left over from a workspace
+  // session opens the club on its lineups instead.
+  useEffect(() => {
+    if (settings && !isAssoc && TAB_MAP[templateId] === 'review') setTemplateId(LINEUP_DEFAULT)
+  }, [settings, isAssoc, templateId])
+
   // Load once, the first time the Milestones post type is opened.
   useEffect(() => {
     if (!IS_AFL && TAB_MAP[templateId] === 'milestones' && msImport.status === null) loadMilestones()
@@ -3849,6 +3893,9 @@ export default function AdminSocialPost() {
     season: match.season || '2025–26',
   }
 
+  // What the Round Review layouts draw, from the picked tracker round.
+  const reviewData = activeTab === 'review' ? reviewPost(review.round, review.opts) : {}
+
   // The milestone cards the post prints, in post order. Built once: the built-in layouts and a template's
   // {{milestone N ...}} words both read them.
   const milestoneCards = activeTab !== 'milestones' ? [] : (() => {
@@ -4013,6 +4060,7 @@ export default function AdminSocialPost() {
       basis: totwImport.data?.mode === 'round' ? 'round' : undefined,
     }
   }
+  if (tmpl.kind === 'review') extraProps.review = reviewData
   if (tmpl.kind === 'milestones') {
     extraProps.milestones = milestoneCards
     // Typed as it is: no 'ROUND 1' placeholder on a post that is not about a round.
@@ -4371,7 +4419,7 @@ export default function AdminSocialPost() {
   // A template with eleven places holds eleven players; a built-in lineup holds its own ceiling.
   const playerCap = (templateId === CUSTOM_LAYOUT_ID || tmpl.maxPlayers === 0) && boundSlots > 0 ? boundSlots : tmpl.maxPlayers
   const showMatchInfo = !['scorecard', 'events', 'blank'].includes(activeTab) || hasBound
-  const showOpponent  = !['scorecard', 'fixtures', 'results', 'totw', 'milestones', 'events', 'blank'].includes(activeTab) || hasBound
+  const showOpponent  = !['scorecard', 'fixtures', 'results', 'totw', 'milestones', 'review', 'events', 'blank'].includes(activeTab) || hasBound
   const showPlayers   = (activeTab !== 'scorecard' && activeTab !== 'blank' && tmpl.maxPlayers > 0) || boundSlots > 0
   const showHeroImage = HERO_SLOT_TEMPLATES.includes(templateId)
   const HERO_SLOT_LAYOUT_NAMES = HERO_SLOT_TEMPLATES
@@ -4404,6 +4452,9 @@ export default function AdminSocialPost() {
       { label: 'Headline', value: announcement.headline, onChange: (v) => setAnnouncement((a) => ({ ...a, headline: v })) },
       { label: 'Subheadline', value: announcement.subheadline, onChange: (v) => setAnnouncement((a) => ({ ...a, subheadline: v })) },
     ]
+    else if (activeTab === 'review') mFields = [
+      { label: 'Heading (optional)', value: review.opts.title || '', onChange: (v) => patchReviewOpts({ title: v }), placeholder: "Leave blank for the layout's own" },
+    ]
     else if (activeTab === 'milestones') mFields = [
       { label: 'Heading (optional)', value: msOpts.title, onChange: (v) => setMsOpts((o) => ({ ...o, title: v })), placeholder: 'MILESTONES' },
       { label: 'Round', value: match.round, onChange: (v) => patchMatch({ round: v }), placeholder: 'ROUND 7' },
@@ -4421,7 +4472,22 @@ export default function AdminSocialPost() {
     ]
     // Milestones: which ones to feature, and the layout. The picker is the same one
     // the full editor uses, so a tick made on a phone is the same tick.
-    const mExtra = activeTab === 'milestones' ? {
+    const mExtra = activeTab === 'review' ? {
+      label: 'Round and layout',
+      node: (
+        <div className="flex flex-col gap-3">
+          <div className="grid grid-cols-2 gap-2" role="group" aria-label="Round review layout">
+            {TEMPLATES.filter((t) => t.kind === 'review').map((t) => (
+              <button key={t.id} type="button" onClick={() => selectTemplate(t.id)} aria-pressed={templateId === t.id}
+                className={`min-h-11 px-3 rounded-lg border font-mono text-[10px] tracking-wide2 uppercase ${templateId === t.id ? 'text-pb-accent' : 'border-pb-hairline2 text-pb-faint'}`}
+                style={templateId === t.id ? { borderColor: 'var(--pb-accent)', background: 'color-mix(in srgb, var(--pb-accent) 12%, transparent)' } : undefined}>{t.name}</button>
+            ))}
+          </div>
+          <RoundReviewControls rounds={review.rounds} round={review.round} status={review.status} opts={review.opts}
+            onPickRound={openReviewRound} onOpts={patchReviewOpts} />
+        </div>
+      ),
+    } : activeTab === 'milestones' ? {
       label: 'Which milestones',
       node: (
         <div className="flex flex-col gap-3">
@@ -5269,6 +5335,13 @@ export default function AdminSocialPost() {
                 {activeTab === 'totw' && (
                   <div className="pb-card p-4">
                     <TotwControls t={totwControls} />
+                  </div>
+                )}
+
+                {activeTab === 'review' && (
+                  <div className="pb-card p-4">
+                    <RoundReviewControls rounds={review.rounds} round={review.round} status={review.status} opts={review.opts}
+                      onPickRound={openReviewRound} onOpts={patchReviewOpts} />
                   </div>
                 )}
 

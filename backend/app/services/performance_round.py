@@ -1,13 +1,13 @@
-"""Podcast run sheet: one competition's round, read from one pasted match link.
+"""Performance Tracker: one competition's round, read from one pasted match link.
 
-The hosts paste a play.cricket.com.au match link (or a grade link with the round
-picked) for each competition they cover. That link names a grade and a round, and
+An association workspace pastes a play.cricket.com.au match link (or a grade link
+with the round picked) for each competition it follows. That link names a grade and a round, and
 this reads the WHOLE round the same way an association workspace's posts do
 (services/social_competition.resolve_round): every finished match in the grade
 with that round id. Nothing here reads or writes a club's own data, and no side
 is "ours", so a club and an association workspace get the same answer.
 
-What one pull gives the run sheet:
+What one pull gives the tracker:
 
   results        every finished match, home side first, with the scores, the
                  result text and the margin as a number (for "closest match")
@@ -231,7 +231,7 @@ def _card_lines(m: dict, sc: dict, names: dict[str, str]) -> dict:
             balls = int(b.get("ballsFaced") or 0)
             not_out = (b.get("dismissalTypeId") == _NOT_OUT_ID) or dt == "not out"
             bats.append({
-                "name": name, "team": names.get(bat_tid, ""), "opp": names.get(fld_tid, ""),
+                "name": name, "team": names.get(bat_tid, ""), "team_id": bat_tid, "opp": names.get(fld_tid, ""),
                 "runs": runs, "balls": balls,
                 "fours": int(b.get("foursScored") or 0), "sixes": int(b.get("sixesScored") or 0),
                 "not_out": not_out, "match_id": mid,
@@ -264,7 +264,7 @@ def _card_lines(m: dict, sc: dict, names: dict[str, str]) -> dict:
             pid = (bw.get("participantId") or "").lower()
             name = roster.get(pid) or _tidy(bw.get("playerShortName") or "")
             bowls.append({
-                "name": name, "team": names.get(fld_tid, ""), "opp": names.get(bat_tid, ""),
+                "name": name, "team": names.get(fld_tid, ""), "team_id": fld_tid, "opp": names.get(bat_tid, ""),
                 "overs": str(bw.get("oversBowled") or 0), "maidens": int(bw.get("maidensBowled") or 0),
                 "runs": int(bw.get("runsConceded") or 0), "wickets": int(bw.get("wicketsTaken") or 0),
                 "hat_tricks": int(bw.get("hatTricks") or 0), "match_id": mid,
@@ -394,6 +394,27 @@ def match_of_round(fixtures: list[dict]) -> int | None:
     return best
 
 
+async def _team_crests(db: AsyncSession, org, matches: list[dict]) -> dict[str, dict]:
+    """team id -> ``{logo, colour}`` for every side in the grade, through the
+    workspace crest library (social_competition._crests). A club has no library,
+    so it gets Cricket Australia's crest address as it is."""
+    from app.services.social_competition import _crests, is_association
+    teams: dict[str, dict] = {}
+    for m in matches:
+        for t in list(_sides(m)) + list(m.get("teams") or []):
+            tid = (t.get("id") or "").lower()
+            if tid and _club_of(t)["id"] and tid not in teams:
+                teams[tid] = _club_of(t)
+    if not teams:
+        return {}
+    ids = list(teams)
+    if is_association(org):
+        got = await _crests(db, org, [(teams[t]["id"], teams[t]["logo"], teams[t]["name"]) for t in ids])
+    else:
+        got = [{"logo": teams[t]["logo"], "colour": None} for t in ids]
+    return {t: {"logo": c.get("logo"), "colour": c.get("colour")} for t, c in zip(ids, got)}
+
+
 # ── The pull ──────────────────────────────────────────────────────────────────
 
 async def pull_competition(db: AsyncSession, org, raw: str) -> dict:
@@ -439,7 +460,7 @@ async def pull_competition(db: AsyncSession, org, raw: str) -> dict:
         results.append({
             "match_id": m.get("id"),
             "url": MATCH_URL.format(m.get("id")),
-            "home": names.get(hid, ""), "away": names.get(aid, ""),
+            "home": names.get(hid, ""), "away": names.get(aid, ""), "home_id": hid, "away_id": aid,
             "home_score": _score_str(inn_by_team.get(hid)) or "",
             "away_score": _score_str(inn_by_team.get(aid)) or "",
             "winner": winner,
@@ -463,7 +484,7 @@ async def pull_competition(db: AsyncSession, org, raw: str) -> dict:
             for p in ranked["players"][:3]:
                 performers.append({
                     "name": _tidy(" ".join(x for x in (p.get("first"), p.get("last")) if x)) or p.get("short"),
-                    "team": names.get(tid, ""), "opp": names.get(aid if tid == hid else hid, ""),
+                    "team": names.get(tid, ""), "team_id": tid, "opp": names.get(aid if tid == hid else hid, ""),
                     "points": p["points"], "line": _performer_line(p), "match_id": m.get("id"),
                 })
 
@@ -509,7 +530,7 @@ async def pull_competition(db: AsyncSession, org, raw: str) -> dict:
         day, tm = _match_day_time(m)
         fixtures.append({
             "match_id": m.get("id"), "url": MATCH_URL.format(m.get("id")),
-            "home": names.get(hid, home.get("displayName") or ""),
+            "home": names.get(hid, home.get("displayName") or ""), "home_id": hid, "away_id": aid,
             "away": names.get(aid, away.get("displayName") or ""),
             "home_rank": rank_of.get(hid), "away_rank": rank_of.get(aid),
             "date": day, "label": _label(day) if day else "", "time": _to_12h(tm),
@@ -522,6 +543,8 @@ async def pull_competition(db: AsyncSession, org, raw: str) -> dict:
     # Filmed dismissals first: a host can watch them before picking the best.
     catches.sort(key=lambda c: (c["clip"] is None, c["keeper"]))
     run_outs.sort(key=lambda c: c["clip"] is None)
+
+    crests = await _team_crests(db, org, all_matches + ctx["matches"])
 
     last_day = max((r["date"] for r in results if r["date"]), default="")
     first_day = min((r["date"] for r in results if r["date"]), default="")
@@ -546,6 +569,8 @@ async def pull_competition(db: AsyncSession, org, raw: str) -> dict:
         "catches_total": len(catches),
         "run_outs": run_outs[:_MAX_CLIPS],
         "ladder": ladder,
+        # team id -> {logo, colour}: the workspace's crest library, the same crests its posts use.
+        "crests": crests,
         "upsets": upsets,
         "upset_gap": UPSET_GAP,
         "next_round": {

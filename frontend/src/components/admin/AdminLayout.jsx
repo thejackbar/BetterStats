@@ -433,7 +433,7 @@ export default function AdminLayout({ children }) {
         <div className="text-center font-mono text-[10px] tracking-wide2 py-1.5 px-4 bg-pb-surface2 text-pb-dim" data-testid="association-workspace-banner">
           ASSOCIATION SOCIALS WORKSPACE · posts cover a whole grade from a match link ·{' '}
           <Link to="/admin/social-post" className="underline hover:no-underline">BetterPosts</Link>{' · '}
-          <Link to="/admin/podcast" className="underline hover:no-underline">Podcast</Link>{' · '}
+          <Link to="/admin/performance" className="underline hover:no-underline">Performance Tracker</Link>{' · '}
           <Link to="/admin/settings" className="underline hover:no-underline">Branding</Link>
         </div>
       )}

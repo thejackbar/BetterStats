@@ -17,7 +17,7 @@ from app.auth.modules import require_module
 from app.routers import instructional_videos
 from app.routers import audit as audit_router
 from app.routers import admin_broadcasts
-from app.routers import podcast as podcast_router
+from app.routers import performance as performance_router
 from app.routers import support_chat as support_chat_router
 from app.routers import product_updates
 from app.routers import club_links as club_links_router
@@ -4779,6 +4779,13 @@ async def lifespan(app: FastAPI):
         for _stmt in _PODCAST_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 396: the Performance Tracker's rounds, which copy the run sheet's rows once.
+        # Same one-copy rule: this and alembic's 396 both run services/performance_ddl. It runs
+        # after 395's list so the copy can find the table it reads.
+        from app.services.performance_ddl import STATEMENTS as _PERFORMANCE_DDL
+        for _stmt in _PERFORMANCE_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 391: a club marking a player as not having played a synced game, and the
         # "Games to check" suggestions it kept. Same one-copy rule: this and alembic's 391 both run
         # services/game_exclusion_ddl.STATEMENTS. The last statement writes every mark back onto its
@@ -6704,7 +6711,7 @@ app.include_router(leaderboard.router)
 app.include_router(records.router)
 app.include_router(honours.router)
 app.include_router(webhooks.router)
-app.include_router(podcast_router.router)  # BetterSocials podcast run sheet (before admin's /admin/* routes)
+app.include_router(performance_router.router)  # Association Socials Performance Tracker (before admin's /admin/* routes)
 app.include_router(admin.router)
 app.include_router(social_media.router)   # BetterSocials media library + brand kit
 app.include_router(achievements.router)

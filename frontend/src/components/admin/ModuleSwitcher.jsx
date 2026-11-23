@@ -25,7 +25,7 @@ const CORE = { key: 'stats', name: 'Dashboard', to: '/admin', title: 'Admin dash
 // mounts for it.
 const AFL_TILES = [
   { key: 'select', name: 'BetterSelect', to: '/admin/betterselect', paths: ['/admin/betterselect'], modules: ['select'] },
-  { key: 'socials', name: 'BetterSocials', to: '/admin/bettersocials', paths: ['/admin/bettersocials', '/admin/social-post', '/admin/podcast'], modules: ['socials'] },
+  { key: 'socials', name: 'BetterSocials', to: '/admin/bettersocials', paths: ['/admin/bettersocials', '/admin/social-post', '/admin/performance'], modules: ['socials'] },
   { key: 'admin', name: 'BetterAdmin', to: '/admin/clubhouse', paths: ['/admin/clubhouse', '/admin/fees', '/admin/comms', '/admin/merch', '/admin/committee', '/admin/events', '/admin/assets', '/admin/club-diary'], modules: ['fees', 'comms', 'merch', 'crm'] },
 ]
 

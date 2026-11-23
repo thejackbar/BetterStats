@@ -1,6 +1,6 @@
-"""Podcast run sheet (Association Socials), against a real Postgres.
+"""Performance Tracker (Association Socials), against a real Postgres.
 
-Runs the SHIPPED route bodies in routers/podcast.py with only the Cricket
+Runs the SHIPPED route bodies in routers/performance.py with only the Cricket
 Australia client stubbed, on a hand-built grade:
 
   Round 1 (done)      ALPHA v FOXTROT     Foxtrot (6th) won by 2 wickets: an upset, 5 places
@@ -13,9 +13,9 @@ row, a filmed catch by the keeper (named in the dismissal by short name), a
 filmed run out by two fielders, and a hat-trick five-for.
 
 Run:  DATABASE_URL=postgresql+asyncpg://postgres@/podcast_verify?host=/var/tmp/pgv/sock&port=5544 \\
-      python verification/verify_podcast_run_sheet.py
+      python verification/verify_performance_tracker.py
 A control run on the commit before this feature reports every check as FAIL
-without crashing (no podcast module, no table).
+without crashing (no tracker module, no table).
 """
 from __future__ import annotations
 
@@ -36,10 +36,19 @@ from app.models.db import Base, Organisation  # noqa: E402
 from app.services import grassroots_scores_client as gr  # noqa: E402
 
 try:
-    from app.routers import podcast as pod  # noqa: E402
-    from app.services.podcast_ddl import STATEMENTS as POD_DDL  # noqa: E402
+    from app.routers import performance as pod  # noqa: E402
+    from app.services.performance_ddl import STATEMENTS as POD_DDL  # noqa: E402
 except Exception:  # the control commit has neither
     pod, POD_DDL = None, []
+# The run sheet's table (migration 395), copied column for column, so the copy
+# into the tracker can be shown to carry its rows across.
+OLD_DDL = """
+    CREATE TABLE IF NOT EXISTS podcast_episodes (
+        id UUID PRIMARY KEY, organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+        episode_no INTEGER, recording_date DATE, round_label TEXT, data JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_by UUID, archived_at TIMESTAMPTZ)
+"""
 
 engine = create_async_engine(os.environ["DATABASE_URL"], echo=False)
 Session = async_sessionmaker(engine, expire_on_commit=False)
@@ -91,7 +100,7 @@ def pid(name):
 def team(n, home, players=None):
     tid, cid = TEAM[n]
     t = {"id": tid, "displayName": f"{n} 1st XI", "isHome": home,
-         "owningOrganisation": {"id": cid, "name": f"{n} Cricket Club", "logoUrl": None}}
+         "owningOrganisation": {"id": cid, "name": f"{n} Cricket Club", "logoUrl": f"https://res.cloudinary.com/playhq/{n.lower()}.png"}}
     if players is not None:
         t["players"] = [{"participantId": pid(p), "displayName": p} for p in players]
     return t
@@ -197,6 +206,14 @@ gr.get_grade_matches = fake_grade_matches
 gr.get_match_detail = fake_detail
 gr.get_match_scorecard = fake_scorecard
 gr.get_grade_ladder = fake_ladder
+try:
+    from app.services import association_crests as _crest_lib  # noqa: E402
+
+    async def _no_fetch(url, *, client=None):
+        return None  # the crest host is down: every crest falls back to its address
+    _crest_lib.fetch_logo = _no_fetch
+except Exception:  # noqa: BLE001
+    pass
 
 LINK = f"https://play.cricket.com.au/match/{M_BE}/bravo-v-echo"
 
@@ -213,6 +230,18 @@ async def setup():
         await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS workspace_kind TEXT"))
         for stmt in POD_DDL:
             await conn.execute(text(stmt))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS association_crests (
+                workspace_id UUID NOT NULL, ca_org_id TEXT NOT NULL, name TEXT, src_url TEXT,
+                original_png BYTEA, cleaned_png BYTEA, uploaded_png BYTEA,
+                use_cleaned BOOLEAN NOT NULL DEFAULT TRUE, colour TEXT, colour2 TEXT,
+                colour_by_hand BOOLEAN NOT NULL DEFAULT FALSE, version TEXT, uploaded_by UUID,
+                uploaded_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                cut_style TEXT NOT NULL DEFAULT 'auto', clean_version INTEGER NOT NULL DEFAULT 1,
+                PRIMARY KEY (workspace_id, ca_org_id))
+        """))
+        await conn.execute(text(OLD_DDL))
         for stmt in POD_DDL:  # the lifespan runs it on every boot: it must be idempotent
             await conn.execute(text(stmt))
 
@@ -242,7 +271,7 @@ async def main():
                 await pod.require_association(club)
             except HTTPException as e:
                 refused = e.status_code
-        check("a club is refused the run sheet (404)", refused, 404)
+        check("a club is refused the tracker (404)", refused, 404)
         allowed = await attempt("workspace passes the gate", lambda: pod.require_association(ws)) if pod else None
         check("a workspace passes the gate", allowed is ws)
 
@@ -285,48 +314,67 @@ async def main():
         # 105 runs is 105 points; five wickets is 5 x 20 = 100, plus nothing with the bat.
         check("player of the round ranked by match points", [(p["name"], p["points"]) for p in g(d, "performers", default=[])[:2]],
               [("A One", 105), ("Fox Quick", 100)])
+        print("\n[posts] what the round posts read")
+        alpha = TEAM["Alpha"][0]
+        check("crest for every side in the grade", len(g(d, "crests", default={})), 6)
+        check("a crest the library cannot fetch falls back to its address",
+              g(d, "crests", alpha, "logo"), "https://res.cloudinary.com/playhq/alpha.png")
+        check("innings carry their side's id (crest lookup)", g(d, "batting", 0, "team_id"), alpha)
+        check("performers carry their side's id", g(d, "performers", 0, "team_id"), alpha)
+        check("fixtures carry both sides' ids", (g(mor, "home_id"), g(mor, "away_id")), (alpha, TEAM["Bravo"][0]))
         bad = await attempt("pull with a PlayHQ link", lambda: pod.pull("https://www.playhq.com/x/game-centre/abcd1234", db, ws)) if pod else None
         check("a PlayHQ link says what to paste instead", g(bad, "kind"), "playhq")
 
-        print("\n[episodes] create, save, carry over, scope, archive")
-        e1 = await attempt("create episode 1", lambda: pod.create_episode(db, ws, user)) if pod else None
-        check("first episode is number 1", g(e1, "episode_no"), 1)
-        eid = g(e1, "id")
-        data = {"competitions": [{"key": "north", "name": "North", "link": LINK, "pull": d}],
-                "hosts": [{"name": "Sam", "prep": "Stats"}], "notes": {"story": "Foxtrot stun Alpha"}}
-        saved = await attempt("save", lambda: pod.save_episode(
-            eid, pod.EpisodePatch(round_label="Round 1", recording_date="2026-11-16", data=data), db, ws, user)) if eid else None
+        print("\n[rounds] create, save, carry over, scope, archive")
+        r1 = await attempt("create round", lambda: pod.create_round(db, ws, user)) if pod else None
+        rid = g(r1, "id")
+        check("a round is created", bool(rid))
+        data = {"competitions": [{"key": "north", "name": "North", "link": LINK, "pull": d}], "notes": "Foxtrot stun Alpha"}
+        saved = await attempt("save", lambda: pod.save_round(
+            rid, pod.RoundPatch(round_label="Round 1", round_date="2026-11-14", data=data), db, ws, user)) if rid else None
         check("round label saved", g(saved, "round_label"), "Round 1")
-        check("notes saved", g(saved, "data", "notes", "story"), "Foxtrot stun Alpha")
-        again = await attempt("save one field", lambda: pod.save_episode(
-            eid, pod.EpisodePatch(episode_no=7), db, ws, user)) if eid else None
-        check("an absent key is left alone (round label kept)", g(again, "round_label"), "Round 1")
-        check("an absent key is left alone (data kept)", g(again, "data", "notes", "story"), "Foxtrot stun Alpha")
-        cleared = await attempt("clear a field", lambda: pod.save_episode(
-            eid, pod.EpisodePatch(recording_date=None), db, ws, user)) if eid else None
-        check("an explicit null clears it", (g(cleared, "recording_date", default="x"), g(again, "recording_date")),
-              (None, "2026-11-16"))
-        e2 = await attempt("create episode 2", lambda: pod.create_episode(db, ws, user)) if pod else None
-        check("next episode numbered past the highest", g(e2, "episode_no"), 8)
-        check("carries competition name and link", (g(e2, "data", "competitions", 0, "name"), g(e2, "data", "competitions", 0, "link")),
+        check("the pull is kept on the round", len(g(saved, "data", "competitions", 0, "pull", "results", default=[])), 2)
+        again = await attempt("save one field", lambda: pod.save_round(
+            rid, pod.RoundPatch(round_date=None), db, ws, user)) if rid else None
+        check("an explicit null clears it", (g(again, "round_date", default="x"), g(saved, "round_date")), (None, "2026-11-14"))
+        check("an absent key is left alone", (g(again, "round_label"), g(again, "data", "notes")), ("Round 1", "Foxtrot stun Alpha"))
+        r2 = await attempt("create next round", lambda: pod.create_round(db, ws, user)) if pod else None
+        check("carries competition name and link", (g(r2, "data", "competitions", 0, "name"), g(r2, "data", "competitions", 0, "link")),
               ("North", LINK))
-        check("does not carry last round's figures", g(e2, "data", "competitions", 0, "pull", default="absent"), "absent")
-        check("does not carry notes", g(e2, "data", "notes", default="absent"), "absent")
-        check("carries hosts", g(e2, "data", "hosts", 0, "name"), "Sam")
+        check("does not carry last round's figures", g(r2, "data", "competitions", 0, "pull", default="absent"), "absent")
+        check("does not carry notes", g(r2, "data", "notes", default="absent"), "absent")
         other = None
-        if eid and pod:
+        if rid and pod:
             try:
-                await pod.get_episode(eid, db, ws2)
+                await pod.get_round(rid, db, ws2)
             except HTTPException as e:
                 other = e.status_code
-        check("another workspace cannot open this episode", other, 404)
-        lst = await attempt("list", lambda: pod.list_episodes(db, ws)) if pod else None
-        check("list newest first", [e["episode_no"] for e in g(lst, "episodes", default=[])], [8, 7])
-        await attempt("archive", lambda: pod.archive_episode(eid, db, ws)) if eid else None
-        lst = await attempt("list after archive", lambda: pod.list_episodes(db, ws)) if pod else None
-        check("archived episode leaves the list", [e["episode_no"] for e in g(lst, "episodes", default=[])], [8])
-        kept = await db.scalar(text("SELECT count(*) FROM podcast_episodes WHERE archived_at IS NOT NULL")) if pod else 0
-        check("archived episode row is kept, not deleted", kept, 1)
+        check("another workspace cannot open this round", other, 404)
+        lst = await attempt("list", lambda: pod.list_rounds(db, ws)) if pod else None
+        check("list newest first", [r["id"] for r in g(lst, "rounds", default=[])], [g(r2, "id"), rid])
+        await attempt("archive", lambda: pod.archive_round(rid, db, ws)) if rid else None
+        lst = await attempt("list after archive", lambda: pod.list_rounds(db, ws)) if pod else None
+        check("archived round leaves the list", [r["id"] for r in g(lst, "rounds", default=[])], [g(r2, "id")])
+        kept = await db.scalar(text("SELECT count(*) FROM performance_rounds WHERE archived_at IS NOT NULL")) if pod else 0
+        check("archived round row is kept, not deleted", kept, 1)
+
+        print("\n[carry] the run sheet's saved episodes come across once")
+        old_id = uuid.uuid4()
+        await db.execute(text(
+            "INSERT INTO podcast_episodes (id, organisation_id, episode_no, recording_date, round_label, data) "
+            "VALUES (:id, :org, 3, '2026-11-08', 'Round 3', '{\"notes\": {\"story\": \"kept\"}}')"),
+            {"id": old_id, "org": ws.id})
+        await db.commit()
+        for _ in range(2):  # every boot runs it again: twice must still be one row
+            for stmt in POD_DDL:
+                await db.execute(text(stmt))
+            await db.commit()
+        got = (await db.execute(text(
+            "SELECT round_label, round_date, data->'notes'->>'story' FROM performance_rounds WHERE id = :id"),
+            {"id": old_id})).all() if pod else []
+        check("an episode becomes a round, once", [(r[0], str(r[1]), r[2]) for r in got], [("Round 3", "2026-11-08", "kept")])
+        still = await db.scalar(text("SELECT count(*) FROM podcast_episodes"))
+        check("the old table is left as it was", still, 1)
 
     print(f"\n{PASS} passed, {FAIL} failed")
     await engine.dispose()

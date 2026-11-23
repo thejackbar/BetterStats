@@ -256,14 +256,14 @@ export const api = {
   patchSocialCrest: (caOrgId, fields) => request(`/admin/social/crests/${encodeURIComponent(caOrgId)}`, { method: 'PATCH', body: JSON.stringify(fields) }),
   uploadSocialCrest: (caOrgId, file) => uploadFile(`/admin/social/crests/${encodeURIComponent(caOrgId)}/upload`, file),
   getSocialCompetitionMatches: (q) => request(`/admin/social/competition/matches?q=${encodeURIComponent(q || '')}`),
-  // Podcast run sheet (routers/podcast.py): one competition's round from a match
-  // link, and the saved episodes. A PATCH changes only the keys sent.
-  podcastPull: (q) => request(`/admin/podcast/pull?q=${encodeURIComponent(q || '')}`),
-  podcastEpisodes: () => request('/admin/podcast/episodes'),
-  podcastCreateEpisode: () => request('/admin/podcast/episodes', { method: 'POST' }),
-  podcastEpisode: (id) => request(`/admin/podcast/episodes/${id}`),
-  podcastSaveEpisode: (id, fields) => request(`/admin/podcast/episodes/${id}`, { method: 'PATCH', body: JSON.stringify(fields) }),
-  podcastArchiveEpisode: (id) => request(`/admin/podcast/episodes/${id}/archive`, { method: 'POST' }),
+  // Performance Tracker (routers/performance.py): one competition's round from a
+  // match link, and the tracked rounds. A PATCH changes only the keys sent.
+  performancePull: (q) => request(`/admin/performance/pull?q=${encodeURIComponent(q || '')}`),
+  performanceRounds: () => request('/admin/performance/rounds'),
+  performanceCreateRound: () => request('/admin/performance/rounds', { method: 'POST' }),
+  performanceRound: (id) => request(`/admin/performance/rounds/${id}`),
+  performanceSaveRound: (id, fields) => request(`/admin/performance/rounds/${id}`, { method: 'PATCH', body: JSON.stringify(fields) }),
+  performanceArchiveRound: (id) => request(`/admin/performance/rounds/${id}/archive`, { method: 'POST' }),
   getSocialTotw: (q, { dateFrom = '', dateTo = '', scope = 'all', basis = 'week', cap = 0 } = {}) => {
     const p = new URLSearchParams()
     if (q) p.set('q', q)
