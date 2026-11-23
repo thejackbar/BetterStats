@@ -183,6 +183,7 @@ const AdminPlayerDashboard = lazy(() => import('./pages/admin/AdminPlayerDashboa
 const AdminClubRoom = lazy(() => import('./pages/admin/AdminClubRoom'))
 const ClubRoomPlayer = lazy(() => import('./pages/admin/ClubRoomPlayer'))
 const AdminSocialPost = lazy(() => import('./pages/admin/AdminSocialPost'))
+const AdminPodcastRunSheet = lazy(() => import('./pages/admin/AdminPodcastRunSheet'))
 const AdminYearbook = lazy(() => import('./pages/admin/AdminYearbook'))
 const AdminYearbookDetail = lazy(() => import('./pages/admin/AdminYearbookDetail'))
 const SuperOverview = lazy(() => import('./pages/admin/SuperOverview'))
@@ -595,6 +596,7 @@ export default function App() {
           <Route path="/admin/club-room/play" element={<ProtectedRoute requireCore><ClubRoomPlayer /></ProtectedRoute>} />
           <Route path="/admin/website" element={<ProtectedRoute requireCore><AdminWebsite /></ProtectedRoute>} />
           <Route path="/admin/social-post" element={<ProtectedRoute requireModule="socials"><AdminSocialPost /></ProtectedRoute>} />
+          <Route path="/admin/podcast" element={<ProtectedRoute requireModule="socials"><AdminPodcastRunSheet /></ProtectedRoute>} />
           <Route path="/admin/yearbook" element={<ProtectedRoute requireCore><AdminYearbook /></ProtectedRoute>} />
           <Route path="/admin/yearbook/:seasonId" element={<ProtectedRoute requireCore><AdminYearbookDetail /></ProtectedRoute>} />
           <Route path="/admin/usage" element={<ProtectedRoute requireRole="super_admin"><AdminUsage /></ProtectedRoute>} />

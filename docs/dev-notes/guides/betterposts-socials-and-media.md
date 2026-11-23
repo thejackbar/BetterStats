@@ -172,6 +172,7 @@
 88k. On Lineup, Player of the Match and Final Score in a workspace, `brandLogo` (the workspace's own crest) is the background watermark; the featured side's crest is `team.logo`, which the layout draws where the hero photo goes.
 88l. The background travels in `socials_style` (`bg_url`, `bg_tint`, `bg_texture`, `bg_logo`, `bg_logo_op`, `bg_text`, `bg_text_op`). A stored style without one of those keys is an older one: keep the browser's value, never clear it. A `blob:` URL is never saved.
 88g. Cricket Australia sometimes serves a finished match with no innings. `_round_cards` re-reads such a card once with `force=True` and names any still bare in `skipped`; the editor shows it (`SkippedNote`). A club Results margin reads `matchSummary.resultText` (Cricket Australia's name for it), after `result`.
+88m. Podcast run sheet (v9.148.0, `routers/podcast.py`, `services/podcast_round.py`, migration 395): association workspaces only (`require_association` 404s a club; the sidebar item shows only when `workspace_kind = 'association'`). One match link per competition reads the round through `resolve_round` and `_round_cards`, never a second "which round" rule. Player of the round reuses `_rank_our_side` points. Upsets and match of the round are read off the CURRENT ladder (Cricket Australia has no ladder as it stood before the round), and the page says so. A pull is stored inside the episode's `data` so an episode reopens as recorded; a new episode carries competitions (name and link only), hosts and timings, never figures or notes. Episodes are archived, never deleted. Dismissal text names fielders by short name; `_short_to_full` maps it to the full name through that side's own scorecard rows (the team sheet has no short name).
 
 ## Traps and failure signatures
 - Geometry checks pass but a layout reads wrong (black bands, clumped story names). Judge from real screenshots.
@@ -195,6 +196,7 @@
 - Control runs must report, not crash: anchor on the export button, read new elements through `textOf`/`seen`/`press`.
 - Fonts: check on the club's real site (`VITE_PROXY_TARGET=https://betterat.cricket/api`). Videos: diagnose from response headers and directory modes.
 
+- Podcast run sheet: `backend/verification/verify_podcast_run_sheet.py` (real Postgres, shipped route bodies, Cricket Australia stubbed: 42 checks; the previous commit fails 39 without crashing, the 3 it passes are "not carried over" checks each paired with a presence check) and `frontend/verification/verify_podcast_run_sheet_browser.mjs` (production build, API stubbed, `PULL_JSON` takes a real pull: 29 checks incl. 390px).
 - Association workspaces: `backend/verification/verify_association_socials.py` (real Postgres, shipped route bodies, Cricket Australia and the crest fetch stubbed: 89 checks; the v9.147.1 control fails exactly the 34 new ones) and `frontend/verification/verify_association_socials_browser.mjs` (production build, API stubbed, reads the export node: 61 checks; the v9.147.0 build fails the 22 new ones).
 
 ## Operator commands and scripts
@@ -216,6 +218,7 @@
 - Story slots on some footers sit at the very bottom, not lifted clear of the app's reply bar.
 
 - Crest library: the scorecard's `merge_logs` lookup and the crest library both swallow errors; a workspace scorecard passes `workspace` to `rollback_keeping` so it stays readable. Crest edits reach a post only after the link is fetched again (the post holds versioned URLs). The phone quick-post has no crest library.
+- Podcast run sheet: milestones are this round's scores and hauls only (a workspace holds no career figures). Filmed dismissals link to the match page, not the clip itself (Cricket Australia serves HLS, which only Safari plays directly). One host per prediction box, not per fixture.
 - Association workspaces: no "Association Socials" role yet (super admin only; a role would need the socials capability and the workspace as its club). FX2, FX4 and FX6 print names only for both sides, as they do for a club, so a workspace post on them has no crests. Ladder posts are not built. The phone quick-post has no workspace pulls.
 
 ## Flags: conflicting, superseded or possibly obsolete guidance
