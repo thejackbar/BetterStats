@@ -396,7 +396,13 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
 
     ungraded_pids = [uuid.UUID(pid) for pid, grade in items_by_player_grade if grade is None]
     grade_labels = sorted({grade for _pid, grade in items_by_player_grade if grade is not None})
-    gr_by_player = await recon.fetch_gr_by_player(db, org_id, ungraded_pids, through_year=cut)
+    # An ordinary sheet is the career as at today's upload, as the commit will
+    # read it (recon.seasons_after_upload): a season the club has not started yet
+    # is not in it.
+    after_upload = (await recon.seasons_after_upload(db, org_id, date.today())
+                    if cut is None else None)
+    gr_by_player = await recon.fetch_gr_by_player(db, org_id, ungraded_pids, through_year=cut,
+                                                  exclude_season_ids=after_upload)
     # Everything the online sources hold, for the part after the cut-off.
     gr_all_by_player = (await recon.fetch_gr_by_player(db, org_id, ungraded_pids)
                         if cut is not None else gr_by_player)

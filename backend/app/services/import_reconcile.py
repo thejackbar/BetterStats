@@ -216,7 +216,80 @@ def summarize(club: dict, gr: dict, import_seasons, gr_season_ids) -> dict:
     }
 
 
-async def fetch_gr_by_player(session, org_uuid, pids, through_year: Optional[int] = None) -> dict:
+async def seasons_after_upload(session, org_uuid, uploaded_at) -> set:
+    """The club's own season rows a whole-career sheet uploaded at ``uploaded_at`` cannot hold.
+
+    An ordinary import (no cut-off) is the career as at the day it was uploaded,
+    not as at today. Compared against the WHOLE online record, every game synced
+    after the upload took one game off the residual, so the career total sat
+    still while runs and wickets kept moving (Kalamunda, Brian Smith on 249 for
+    weeks: the club had to add +1 by hand after each round).
+
+    A season is after the upload when the club's first game in it (any club game
+    filed under a season of the same year and kind, since a shared fixture sits
+    under whichever club synced first) is on or after the upload date. A season
+    the club holds no games for at all (an aggregate-only year) is after the
+    upload only when its year is the upload's year or later. A season that cannot
+    be judged (no year, no upload date) is never returned, so it stays inside:
+    that is how every ordinary import was reconciled before.
+
+    A season already under way at the upload counts as inside, so the rest of
+    that one season is still read against the sheet. Nothing finer is possible:
+    the online season totals carry no per-game dates.
+    """
+    from app.models.db import Season
+    from app.services.season_kind import season_kind
+    from app.services.season_resolve import season_of
+    from sqlalchemy import select, text
+
+    if uploaded_at is None:
+        return set()
+    upload_day = uploaded_at.date() if hasattr(uploaded_at, "date") else uploaded_at
+    # Only "had the club started this season by then", never who a game belongs
+    # to: a game in one of our seasons, or one we were either side of.
+    first_rows = (await session.execute(text("""
+        SELECT gr.season_id, MIN(g.played_at) AS first_played
+        FROM games g
+        JOIN grades gr ON gr.id = g.grade_id
+        JOIN seasons s ON s.id = gr.season_id
+        WHERE g.played_at IS NOT NULL
+          AND (s.organisation_id = CAST(:org AS UUID)
+               OR g.home_org_id = CAST(:org AS UUID) OR g.away_org_id = CAST(:org AS UUID))
+        GROUP BY gr.season_id
+    """), {"org": str(org_uuid)})).all()
+    first_by_season = {r[0]: r[1] for r in first_rows}
+    wanted = set(first_by_season)
+    own = (await session.execute(select(Season).where(Season.organisation_id == org_uuid))).scalars().all()
+    others = (await session.execute(select(Season).where(Season.id.in_(list(wanted - {s.id for s in own})))
+                                    )).scalars().all() if wanted else []
+
+    def key(s):
+        year = season_of(s)
+        return (year, season_kind(s.name)) if year is not None else None
+
+    first_by_key: dict = {}
+    for s in list(own) + list(others):
+        k, first = key(s), first_by_season.get(s.id)
+        if k is None or first is None:
+            continue
+        if k not in first_by_key or first < first_by_key[k]:
+            first_by_key[k] = first
+
+    after = set()
+    for s in own:
+        k = key(s)
+        if k is None:
+            continue
+        if k in first_by_key:
+            if first_by_key[k] >= upload_day:
+                after.add(s.id)
+        elif k[0] >= upload_day.year:
+            after.add(s.id)
+    return after
+
+
+async def fetch_gr_by_player(session, org_uuid, pids, through_year: Optional[int] = None,
+                             exclude_season_ids: Optional[set] = None) -> dict:
     """Per-player GR coverage for an org: {pid: {"season_ids": set, "totals": dict}}.
 
     Scoped exactly like the effective view's ``api`` branch (player's org ==
@@ -233,6 +306,10 @@ async def fetch_gr_by_player(session, org_uuid, pids, through_year: Optional[int
     strays past its own cut-off must not be added on top of a season GR has. A
     season whose year cannot be read counts as inside the cut-off: GR wins, so
     the book never adds to something online might already hold.
+
+    ``exclude_season_ids`` (an ordinary sheet's seasons after its upload, from
+    ``seasons_after_upload``) leaves those seasons out of ``totals`` the same way,
+    and for the same reason keeps them in ``season_ids``.
     """
     from sqlalchemy import select, or_
     from app.models.db import Player, Season, PlayerSeasonStats
@@ -254,6 +331,8 @@ async def fetch_gr_by_player(session, org_uuid, pids, through_year: Optional[int
     for pss in rows:
         g = out.setdefault(pss.player_id, {"season_ids": set(), "totals": None})
         g["season_ids"].add(pss.season_id)
+        if exclude_season_ids and pss.season_id in exclude_season_ids:
+            continue
         if within_cutoff(year_by_season.get(pss.season_id), through_year):
             g["totals"] = accumulate(g["totals"], pss_to_metrics(pss))
     return out
@@ -797,7 +876,7 @@ async def reconcile_imported_totals(org_id_str: str) -> int:
     """
     import uuid as _uuid
 
-    from sqlalchemy import select, delete
+    from sqlalchemy import select, delete, func
     from app.models.db import ImportBatch, ImportedStat, ImportEffectiveDelta, async_session_maker
 
     try:
@@ -810,13 +889,15 @@ async def reconcile_imported_totals(org_id_str: str) -> int:
         # Each row carries its batch's cut-off (None = an ordinary import).
         truth_pairs = (
             await session.execute(
-                select(ImportedStat, ImportBatch.through_year)
+                select(ImportedStat, ImportBatch.through_year,
+                       func.coalesce(ImportBatch.committed_at, ImportBatch.created_at))
                 .join(ImportBatch, ImportBatch.id == ImportedStat.import_batch_id)
                 .where(ImportedStat.organisation_id == org_uuid)
             )
         ).all()
-        truth_rows = [r for r, _cut in truth_pairs]
-        cut_by_row = {r.id: cut for r, cut in truth_pairs}
+        truth_rows = [r for r, _cut, _at in truth_pairs]
+        cut_by_row = {r.id: cut for r, cut, _at in truth_pairs}
+        uploaded_by_row = {r.id: at for r, _cut, at in truth_pairs}
 
         # Always clear the org's derived deltas first (so undoing the last import
         # leaves a clean slate).
@@ -845,9 +926,25 @@ async def reconcile_imported_totals(org_id_str: str) -> int:
         ungraded_pids = sorted({pid for pid, grade, cut in by_group.keys() if grade is None and cut is None})
         grade_labels = sorted({grade for _pid, grade, _cut in by_group.keys() if grade is not None})
 
-        # Ungraded GR fetch (existing all-grades comparison), only for players
-        # who actually have an ungraded group.
-        gr_by_player = await fetch_gr_by_player(session, org_uuid, ungraded_pids)
+        # Ungraded GR fetch (the all-grades comparison), only for players who
+        # actually have an ungraded group. The sheet is the career as at its
+        # upload, so it is compared only against the online seasons the club had
+        # started by then (`seasons_after_upload`); games synced later add on top
+        # instead of being absorbed into the residual. The player's latest upload
+        # is the snapshot (a re-import replaces the player's earlier rows anyway).
+        upload_by_pid: dict = {}
+        for (pid, grade, cut), rows in by_group.items():
+            if grade is None and cut is None:
+                times = [uploaded_by_row.get(r.id) for r in rows if uploaded_by_row.get(r.id) is not None]
+                upload_by_pid[pid] = max(times) if times else None
+        pids_by_day: dict = {}
+        for pid in ungraded_pids:
+            at = upload_by_pid.get(pid)
+            pids_by_day.setdefault(at.date() if at is not None else None, []).append(pid)
+        gr_by_player: dict = {}
+        for day, day_pids in pids_by_day.items():
+            after = await seasons_after_upload(session, org_uuid, day) if day is not None else set()
+            gr_by_player.update(await fetch_gr_by_player(session, org_uuid, day_pids, exclude_season_ids=after))
         # The club's own typed games, for the same players (whole-book comparisons only: a
         # sheet scoped to one grade cannot be compared to a season's games across grades).
         typed_by_player = await fetch_typed_by_player(session, org_uuid, ungraded_pids)
