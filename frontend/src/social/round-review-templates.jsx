@@ -291,5 +291,194 @@ ReviewPerformers.displayName = 'ReviewPerformers'
 ReviewPlayer.displayName = 'ReviewPlayer'
 ReviewMatch.displayName = 'ReviewMatch'
 
+// ═══════════════════════════════════════════════════════════════════════════
+// RV5 to RV9: one row list each (results, season leaders, milestones, ladder,
+// next round fixtures). They share a frame: the masthead, a body that splits
+// its height between the rows, the sponsor strip. Row type sizes off the row's
+// own height, so five rows get big type and twelve still fit.
+// ═══════════════════════════════════════════════════════════════════════════
+function listFrame({ pal, width, height, team, review, parts, kicker, title1, title2, layer, rows, max, emptyText, renderRow, header, id }) {
+  const F = bandFrame(width, height)
+  const R = rows.slice(0, max)
+  const headH = header ? 34 : 0
+  const bodyH = height - F.top - F.bottom - headH
+  const rowH = Math.floor(bodyH / Math.max(1, Math.max(R.length, 4)))
+  return (
+    <LayerRoot style={{ width, height, position: 'relative', overflow: 'hidden', background: pal.primary, color: pal.ink, fontFamily: BODY }}>
+      <Halftone color={pal.ink} opacity={0.05} size={12} />
+      {masthead({ pal, team, kicker, title1: review.title || title1, title2: review.title ? '' : title2, width, big: pick(F.A, { square: 78, portrait: 90, story: 104 }), parts })}
+      <div data-layer={layer} style={{ position: 'absolute', left: 56, right: 56, top: F.top, bottom: F.bottom, display: 'flex', flexDirection: 'column', justifyContent: R.length < 4 ? 'center' : 'flex-start' }}>
+        {header ? <div style={{ height: headH, flexShrink: 0, display: 'flex', alignItems: 'flex-end', paddingBottom: 6, borderBottom: `3px solid ${pc(parts, 'ruleColor', pal.accent)}`, fontFamily: MONO, fontSize: 13, letterSpacing: 2, fontWeight: 700, color: pc(parts, 'roundColor', pal.accent) }}>{header}</div> : null}
+        {R.length === 0 ? empty(pal, emptyText) : null}
+        {R.map((r, i) => (
+          <div key={i} style={{ height: rowH, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 16, minWidth: 0, borderBottom: i < R.length - 1 ? `1px solid ${pc(parts, 'dividerColor', `${pal.ink}1f`)}` : 'none' }}>
+            {renderRow(r, i, rowH)}
+          </div>
+        ))}
+      </div>
+      {bandFooter({ pal, width, height, parts })}
+      <Grain opacity={0.3} id={`${id}-g`} />
+    </LayerRoot>
+  )
+}
+
+const sizes = (rowH) => ({
+  crest: Math.max(30, Math.min(84, Math.round(rowH * 0.62))),
+  name: Math.max(16, Math.min(40, Math.round(rowH * 0.34))),
+  sub: Math.max(10, Math.min(16, Math.round(rowH * 0.15))),
+  fig: Math.max(20, Math.min(60, Math.round(rowH * 0.46))),
+})
+
+// RV5 — Results: every result, winner lit, margin under
+export function ReviewResults({ palette: pal, width = 1080, height = 1080, team = {}, review = {}, parts }) {
+  const rows = review.results || []
+  const many = new Set(rows.map(r => r.comp)).size > 1
+  return listFrame({
+    pal, width, height, team, review, parts, id: 'rv5', layer: 'Results', max: 10,
+    kicker: kickerOf(review, 'ROUND REVIEW'), title1: 'THE', title2: 'RESULTS', rows, emptyText: 'PULL THE ROUND IN THE TRACKER',
+    renderRow: (r, i, rowH) => {
+      const z = sizes(rowH)
+      const nm = Math.max(14, Math.min(32, Math.round(rowH * 0.27)))
+      const side = (name, score, logo, won, right) => (
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 10, flexDirection: right ? 'row-reverse' : 'row', opacity: won ? 1 : 0.62 }}>
+          <Crest src={logo} name={name} size={Math.round(z.crest * 0.8)} pal={pal} />
+          <div style={{ minWidth: 0, flex: 1, textAlign: right ? 'right' : 'left' }}>
+            <AutoFitText text={up(name)} max={nm} min={12} lines={1} style={{ fontFamily: DISPLAY, lineHeight: 1, color: pc(parts, 'nameColor', undefined), maxWidth: '100%', textAlign: right ? 'right' : 'left' }} />
+          </div>
+          <div style={{ fontFamily: DISPLAY, fontSize: Math.round(nm * 1.1), color: won ? pc(parts, 'statColor', pal.accent) : pc(parts, 'nameColor', pal.ink), flexShrink: 0 }}>{score}</div>
+        </div>
+      )
+      return (
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0 }}>
+            {side(r.home, r.homeScore, r.homeLogo, r.winner === 'home', false)}
+            <div style={{ fontFamily: MONO, fontSize: z.sub, opacity: 0.6, flexShrink: 0 }}>V</div>
+            {side(r.away, r.awayScore, r.awayLogo, r.winner === 'away', true)}
+          </div>
+          <div style={{ fontFamily: MONO, fontSize: z.sub, letterSpacing: 1.2, opacity: 0.7, textAlign: 'center', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'subColor', undefined) }}>
+            {up([r.margin, many ? r.comp : ''].filter(Boolean).join(' · '))}
+          </div>
+        </div>
+      )
+    },
+  })
+}
+
+// One ranked row: rank, crest, name and a second line, the figure right.
+function rankedRow(pal, parts, rowH, { rank, logo, name, sub, value, valueSmall }) {
+  const z = sizes(rowH)
+  return (
+    <>
+      {rank !== undefined ? <div style={{ fontFamily: MONO, fontSize: Math.round(z.sub * 1.3), fontWeight: 700, color: pc(parts, 'numColor', pal.accent), width: Math.round(z.sub * 2.4), flexShrink: 0 }}>{rank}</div> : null}
+      <Crest src={logo} name={name} size={z.crest} pal={pal} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <AutoFitText text={up(name)} max={z.name} min={13} lines={1} style={{ fontFamily: DISPLAY, letterSpacing: 0.5, lineHeight: 1, color: pc(parts, 'nameColor', undefined), maxWidth: '100%' }} />
+        {sub ? <div style={{ fontFamily: MONO, fontSize: z.sub, letterSpacing: 1, opacity: 0.65, marginTop: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'subColor', undefined) }}>{up(sub)}</div> : null}
+      </div>
+      <div style={{ flexShrink: 0, textAlign: 'right', maxWidth: '45%' }}>
+        <div style={{ fontFamily: DISPLAY, fontSize: valueSmall ? Math.round(z.fig * 0.7) : z.fig, lineHeight: 1, letterSpacing: -0.5, color: pc(parts, 'statColor', pal.accent), whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{up(value)}</div>
+      </div>
+    </>
+  )
+}
+
+// RV6 — Season leaders: one leaderboard (most runs, most wickets ...)
+export function ReviewLeaders({ palette: pal, width = 1080, height = 1080, team = {}, review = {}, parts }) {
+  const b = review.board || { label: 'Most runs', rows: [] }
+  return listFrame({
+    pal, width, height, team, review, parts, id: 'rv6', layer: 'Leaders', max: 8,
+    kicker: kickerOf({ ...review, date: '' }, `SEASON · ${up(b.label)}`), title1: 'SEASON', title2: 'LEADERS', rows: b.rows,
+    emptyText: 'OPEN THE TRACKER TO READ THE SEASON',
+    renderRow: (r, i, rowH) => rankedRow(pal, parts, rowH, { rank: i + 1, logo: r.logo, name: r.name, sub: [r.club, r.sub].filter(Boolean).join(' · '), value: r.value }),
+  })
+}
+
+// RV7 — Milestones: what was reached this round, in the match, the season or a career
+export function ReviewMilestones({ palette: pal, width = 1080, height = 1080, team = {}, review = {}, parts }) {
+  return listFrame({
+    pal, width, height, team, review, parts, id: 'rv7', layer: 'Milestones', max: 8,
+    kicker: kickerOf(review, 'ROUND REVIEW'), title1: 'MILE', title2: 'STONES', rows: review.milestones || [],
+    emptyText: 'NO MILESTONES WITH THESE FILTERS',
+    renderRow: (m, i, rowH) => rankedRow(pal, parts, rowH, { logo: m.logo, name: m.name, sub: [m.club, m.detail].filter(Boolean).join(' · '), value: m.title, valueSmall: true }),
+  })
+}
+
+// RV8 — Ladder: one grade's table
+export function ReviewLadder({ palette: pal, width = 1080, height = 1080, team = {}, review = {}, parts }) {
+  const l = review.ladder || { comp: '', rows: [] }
+  return listFrame({
+    pal, width, height, team, review, parts, id: 'rv8', layer: 'Ladder', max: 12,
+    kicker: kickerOf({ ...review, date: '' }, l.comp || 'LADDER'), title1: 'THE', title2: 'LADDER', rows: l.rows,
+    emptyText: 'NO LADDER PUBLISHED',
+    header: <div style={{ display: 'flex', width: '100%', gap: 16 }}><span style={{ flex: 1 }}>TEAM</span><span style={{ width: 70, textAlign: 'right' }}>P</span><span style={{ width: 90, textAlign: 'right' }}>W-L</span><span style={{ width: 90, textAlign: 'right' }}>PTS</span></div>,
+    renderRow: (r, i, rowH) => {
+      const z = sizes(rowH)
+      const num = { fontFamily: DISPLAY, fontSize: Math.round(z.name * 0.95), textAlign: 'right', flexShrink: 0 }
+      return (
+        <>
+          <div style={{ fontFamily: MONO, fontSize: Math.round(z.sub * 1.3), fontWeight: 700, color: pc(parts, 'numColor', pal.accent), width: Math.round(z.sub * 2.4), flexShrink: 0 }}>{r.rank}</div>
+          <Crest src={r.logo} name={r.team} size={Math.round(z.crest * 0.85)} pal={pal} />
+          <div style={{ flex: 1, minWidth: 0 }}><AutoFitText text={up(r.team)} max={z.name} min={13} lines={1} style={{ fontFamily: DISPLAY, lineHeight: 1, color: pc(parts, 'nameColor', undefined), maxWidth: '100%' }} /></div>
+          <div style={{ ...num, width: 70, opacity: 0.7 }}>{r.played ?? ''}</div>
+          <div style={{ ...num, width: 90, opacity: 0.7 }}>{`${r.won ?? 0}-${r.lost ?? 0}`}</div>
+          <div style={{ ...num, width: 90, color: pc(parts, 'statColor', pal.accent) }}>{r.points ?? 0}</div>
+        </>
+      )
+    },
+  })
+}
+
+// RV9 — Next round fixtures
+export function ReviewFixtures({ palette: pal, width = 1080, height = 1080, team = {}, review = {}, parts }) {
+  const rows = review.fixtures || []
+  const many = new Set(rows.map(r => r.comp)).size > 1
+  return listFrame({
+    pal, width, height, team, review, parts, id: 'rv9', layer: 'Fixtures', max: 10,
+    kicker: kickerOf({ ...review, round: review.nextRound || 'NEXT ROUND', date: '' }, 'COMING UP'), title1: 'NEXT', title2: 'ROUND', rows,
+    emptyText: 'NO FIXTURES PUBLISHED',
+    renderRow: (f, i, rowH) => {
+      const z = sizes(rowH)
+      const nm = Math.max(14, Math.min(32, Math.round(rowH * 0.27)))
+      const side = (name, rank, logo, right) => (
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 10, flexDirection: right ? 'row-reverse' : 'row', opacity: name === 'Bye' ? 0.55 : 1 }}>
+          {name === 'Bye' ? null : <Crest src={logo} name={name} size={Math.round(z.crest * 0.8)} pal={pal} />}
+          <div style={{ minWidth: 0, flex: 1, textAlign: right ? 'right' : 'left' }}>
+            <AutoFitText text={up(name)} max={nm} min={12} lines={1} style={{ fontFamily: DISPLAY, lineHeight: 1, color: pc(parts, 'nameColor', undefined), maxWidth: '100%', textAlign: right ? 'right' : 'left' }} />
+            {rank ? <div style={{ fontFamily: MONO, fontSize: Math.max(9, z.sub - 2), opacity: 0.6, letterSpacing: 1 }}>{up(rank)}</div> : null}
+          </div>
+        </div>
+      )
+      return (
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0 }}>
+            {side(f.home, f.homeRank, f.homeLogo, false)}
+            <div style={{ fontFamily: DISPLAY, fontSize: nm, color: pc(parts, 'numColor', pal.accent), flexShrink: 0 }}>V</div>
+            {side(f.away, f.awayRank, f.awayLogo, true)}
+          </div>
+          <div style={{ fontFamily: MONO, fontSize: z.sub, letterSpacing: 1.2, textAlign: 'center', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: f.pick ? pc(parts, 'roundColor', pal.accent) : pc(parts, 'subColor', pal.ink), opacity: f.pick ? 1 : 0.7, fontWeight: f.pick ? 700 : 400 }}>
+            {up([f.pick ? 'MATCH OF THE ROUND' : '', many ? f.comp : '', f.bye ? '' : f.when, f.bye ? '' : f.venue].filter(Boolean).join(' · '))}
+          </div>
+        </div>
+      )
+    },
+  })
+}
+
+const listParts = (extra = []) => [...headParts(),
+  colorPart('ruleColor', 'Line over the list', P_BODY, (p) => p.accent),
+  colorPart('nameColor', 'Names', P_BODY, (p) => p.ink),
+  colorPart('subColor', 'Second lines', P_BODY, (p) => p.ink),
+  colorPart('statColor', 'Figures', P_BODY, (p) => p.accent),
+  colorPart('numColor', 'Ranks and the V', P_BODY, (p) => p.accent),
+  colorPart('dividerColor', 'Row dividers', P_BODY, (p) => p.ink),
+  ...extra, ...footParts()]
+registerParts({ RV5: listParts(), RV6: listParts(), RV7: listParts(), RV8: listParts(), RV9: listParts() })
+
+ReviewResults.displayName = 'ReviewResults'
+ReviewLeaders.displayName = 'ReviewLeaders'
+ReviewMilestones.displayName = 'ReviewMilestones'
+ReviewLadder.displayName = 'ReviewLadder'
+ReviewFixtures.displayName = 'ReviewFixtures'
+
 // Same sponsor strip as the team of the week, so the room kept is the same.
-export const SPONSOR_SLOTS = { RV1: slotTW, RV2: slotTW, RV3: slotTW, RV4: slotTW }
+export const SPONSOR_SLOTS = { RV1: slotTW, RV2: slotTW, RV3: slotTW, RV4: slotTW, RV5: slotTW, RV6: slotTW, RV7: slotTW, RV8: slotTW, RV9: slotTW }

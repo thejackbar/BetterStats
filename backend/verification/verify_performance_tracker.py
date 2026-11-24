@@ -384,6 +384,13 @@ async def main():
             "A One (Alpha) passed 100 runs for the season (160)",
             "Bra Bat (Bravo) passed 200 runs for the season (250)",
             "Fox Quick (Foxtrot) passed 10 wickets for the season (12)"]))
+        _rows = g(north, "players", default=[])
+        pl = {p["name"]: p for p in (_rows if isinstance(_rows, list) else []) if isinstance(p, dict)}
+        check("every season player comes back, so any set of grades can be ranked", sorted(pl), sorted(["A One", "Bra Bat", "Fox Bat", "Fox Quick", "Ech Bowl", "Fox Keep"]))
+        check("a player row carries their club and best", (g(pl, "Fox Quick", "club_id"), g(pl, "Fox Quick", "best")), (TEAM["Foxtrot"][1], [5, 20]))
+        ms0 = next((m for m in g(north, "season_milestones", default=[]) if m.get("name") == "A One"), {})
+        check("a season milestone says what, how far and where", (ms0.get("scope"), ms0.get("stat"), ms0.get("mark"), ms0.get("value"), ms0.get("club_id")),
+              ("season", "runs", 100, 160, TEAM["Alpha"][1]))
         check("all competitions add a player's grades together",
               next((r["value"] for r in g(se, "all", "leaders", "runs", default=[]) if r["name"] == "Bra Bat"), None), 290)
         check("career records start as pending, never guessed", sorted(g(se, "career", "pending", default=[])),
@@ -397,6 +404,9 @@ async def main():
         se2 = await attempt("season again", lambda: pss.round_season(db, rd)) if pss else None
         north2 = next((b for b in g(se2, "competitions", default=[]) if b.get("key") == "north"), {})
         check("career records read in the background", sorted(g(se2, "career", "ready", default=[])), sorted(["Alpha", "Bravo", "Echo", "Foxtrot"]))
+        cm = next((m for m in g(north2, "career_milestones", default=[]) if m.get("stat") == "matches"), {})
+        check("a career milestone says what, how far and where", (cm.get("scope"), cm.get("mark"), cm.get("value"), cm.get("club_id")),
+              ("career", 100, 100, TEAM["Alpha"][1]))
         check("career marks crossed this round", sorted(m["text"] for m in g(north2, "career_milestones", default=[])), sorted([
             "A One played game 100 for Alpha",
             "A One passed 1,000 career runs for Alpha (1,010)",

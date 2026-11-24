@@ -41,7 +41,7 @@ import { RoundCover } from '../../social/round-cover-template'
 import { ResultHighlights, HIGHLIGHTS_FOCUS } from '../../social/highlights-cover-template'
 import { GiantType } from '../../social/giant-type-template'
 import { MilestoneCards, MilestoneBoard, MILESTONE_MAX } from '../../social/milestone-templates'
-import { ReviewWrap, ReviewPerformers, ReviewPlayer, ReviewMatch } from '../../social/round-review-templates'
+import { ReviewWrap, ReviewPerformers, ReviewPlayer, ReviewMatch, ReviewResults, ReviewLeaders, ReviewMilestones, ReviewLadder, ReviewFixtures } from '../../social/round-review-templates'
 import { reviewPost } from '../../social/roundReviewPost'
 import RoundReviewControls from '../../components/admin/socialpost/RoundReviewControls'
 import {
@@ -147,6 +147,11 @@ const ALL_TEMPLATES = [
   { id: 'RV2', name: 'Top Performers',  component: ReviewPerformers,  desc: 'Top scores and best bowling',     maxPlayers: 0, kind: 'review' },
   { id: 'RV3', name: 'Player of the Round', component: ReviewPlayer,  desc: 'One player, figures and crest',   maxPlayers: 0, kind: 'review' },
   { id: 'RV4', name: 'Match of the Round', component: ReviewMatch,    desc: "Next week's pick per competition", maxPlayers: 0, kind: 'review' },
+  { id: 'RV5', name: 'Results',         component: ReviewResults,     desc: 'Every result, winner lit',         maxPlayers: 0, kind: 'review' },
+  { id: 'RV6', name: 'Season Leaders',  component: ReviewLeaders,     desc: 'One season leaderboard',           maxPlayers: 0, kind: 'review' },
+  { id: 'RV7', name: 'Milestones',      component: ReviewMilestones,  desc: 'Match, season and career marks',   maxPlayers: 0, kind: 'review' },
+  { id: 'RV8', name: 'Ladder',          component: ReviewLadder,      desc: "One grade's ladder",               maxPlayers: 0, kind: 'review' },
+  { id: 'RV9', name: 'Next Round',      component: ReviewFixtures,    desc: "Next round's fixtures",            maxPlayers: 0, kind: 'review' },
   { id: 'SC1', name: 'Broadcast',      component: SC1_Broadcast,      desc: 'TV-style full scorecard',         maxPlayers: 0, isScorecard: true },
   { id: 'SC2', name: 'Brutalist',      component: SC2_Brutalist,      desc: 'Bold type, heavy rules',          maxPlayers: 0, isScorecard: true },
   { id: 'SC3', name: 'Dashboard',      component: SC3_Dashboard,      desc: 'Soft cards, app-style',           maxPlayers: 0, isScorecard: true },
@@ -167,7 +172,7 @@ const ALL_TEMPLATES = [
 // The football build drops the layouts that only mean anything with cricket
 // data: the batting order, the results wrap's batting/bowling leaders, and
 // every layout of the three hidden post types (toss, scorecard, final score).
-const AFL_HIDDEN_TEMPLATES = new Set([...CUSTOM_LAYOUT_IDS, 'T4', 'T11', 'T12', 'T13', 'C5', 'RR7', 'C2', 'C4', 'RS1', 'RS2', 'RS3', 'RS4', 'RS5', 'RS6', 'RS7', 'RS8', 'RS9', 'SC1', 'SC2', 'SC3', 'TW1', 'TW2', 'TW3', 'MS1', 'MS2', 'RV1', 'RV2', 'RV3', 'RV4'])
+const AFL_HIDDEN_TEMPLATES = new Set([...CUSTOM_LAYOUT_IDS, 'T4', 'T11', 'T12', 'T13', 'C5', 'RR7', 'C2', 'C4', 'RS1', 'RS2', 'RS3', 'RS4', 'RS5', 'RS6', 'RS7', 'RS8', 'RS9', 'SC1', 'SC2', 'SC3', 'TW1', 'TW2', 'TW3', 'MS1', 'MS2', 'RV1', 'RV2', 'RV3', 'RV4', 'RV5', 'RV6', 'RV7', 'RV8', 'RV9'])
 const TEMPLATES = IS_AFL ? ALL_TEMPLATES.filter(t => !AFL_HIDDEN_TEMPLATES.has(t.id)) : ALL_TEMPLATES
 
 // The lineup templates that crop the hero photo into a fixed box, and the shape
@@ -206,7 +211,7 @@ const TAB_MAP = {
   RR1: 'results', RR2: 'results', RR3: 'results', RR4: 'results', RR5: 'results', RR6: 'results', RR7: 'results',
   TW1: 'totw', TW2: 'totw', TW3: 'totw',
   MS1: 'milestones', MS2: 'milestones',
-  RV1: 'review', RV2: 'review', RV3: 'review', RV4: 'review',
+  RV1: 'review', RV2: 'review', RV3: 'review', RV4: 'review', RV5: 'review', RV6: 'review', RV7: 'review', RV8: 'review', RV9: 'review',
   SC1: 'scorecard', SC2: 'scorecard', SC3: 'scorecard',
   EV1: 'events', EV2: 'events', EV3: 'events', EV4: 'events', EV5: 'events', EV6: 'events',
   EV7: 'events', EV8: 'events', EV9: 'events', EV10: 'events', EV11: 'events',
@@ -1700,7 +1705,9 @@ export default function AdminSocialPost() {
   // "Get your data" step so the source is collected before editing; everything
   // else starts on Content.
   const [tool, setTool] = useState(() => {
-    const t = new URLSearchParams(window.location.search).get('type')
+    // A ?template= link (a tracker section's Make post) opens its tab's data step too.
+    const q = new URLSearchParams(window.location.search)
+    const t = q.get('type') || TAB_MAP[q.get('template')]
     return t && DATA_TABS.includes(t) ? 'source' : 'content'
   })
   // Post types whose data step has already been shown this session (so switching
@@ -3111,12 +3118,22 @@ export default function AdminSocialPost() {
   // Round Review (association workspaces): the rounds saved in the Performance
   // Tracker, and the one the posts read. A ?round= link from the tracker's Make
   // posts button opens on that round; otherwise the newest.
-  const [review, setReview] = useState({ rounds: null, round: null, status: '', opts: {}, library: [] })
+  // Opened from a tracker section's Make post: its grades and that section's own pick.
+  const reviewOptsFromUrl = () => {
+    const q = new URLSearchParams(window.location.search)
+    const list = (k) => (q.get(k) ? q.get(k).split(',').filter(Boolean) : undefined)
+    const o = { grades: list('grades'), board: q.get('board') || undefined, scopes: list('scopes'), stats: list('stats'), ladder: q.get('ladder') || undefined }
+    return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined))
+  }
+  const [review, setReview] = useState(() => ({ rounds: null, round: null, status: '', opts: reviewOptsFromUrl(), library: [], season: null }))
   const openReviewRound = useCallback(async (id) => {
     if (!id) return
     try {
       const r = await api.performanceRound(id)
-      setReview(s => ({ ...s, round: r, status: '', opts: {} }))
+      // The first round opened keeps what the link asked for; another round starts clean.
+      setReview(s => ({ ...s, round: r, status: '', season: null, opts: s.round ? {} : s.opts }))
+      // Leaderboards and season and career milestones, for the layouts that show them.
+      api.performanceSeason(id).then((d) => setReview(s => (s.round && s.round.id === id ? { ...s, season: d } : s))).catch(() => {})
     } catch (e) {
       setReview(s => ({ ...s, status: e?.message || 'Could not open that round' }))
     }
@@ -3984,7 +4001,7 @@ export default function AdminSocialPost() {
   }
 
   // What the Round Review layouts draw, from the picked tracker round.
-  const reviewData = activeTab === 'review' ? reviewPost(review.round, review.opts, review.library) : {}
+  const reviewData = activeTab === 'review' ? reviewPost(review.round, review.opts, review.library, review.season) : {}
 
   // The milestone cards the post prints, in post order. Built once: the built-in layouts and a template's
   // {{milestone N ...}} words both read them.
@@ -4573,7 +4590,7 @@ export default function AdminSocialPost() {
                 style={templateId === t.id ? { borderColor: 'var(--pb-accent)', background: 'color-mix(in srgb, var(--pb-accent) 12%, transparent)' } : undefined}>{t.name}</button>
             ))}
           </div>
-          <RoundReviewControls rounds={review.rounds} round={review.round} status={review.status} opts={review.opts}
+          <RoundReviewControls layout={templateId} season={review.season} rounds={review.rounds} round={review.round} status={review.status} opts={review.opts}
             onPickRound={openReviewRound} onOpts={patchReviewOpts} />
         </div>
       ),
@@ -5430,7 +5447,7 @@ export default function AdminSocialPost() {
 
                 {activeTab === 'review' && (
                   <div className="pb-card p-4">
-                    <RoundReviewControls rounds={review.rounds} round={review.round} status={review.status} opts={review.opts}
+                    <RoundReviewControls layout={templateId} season={review.season} rounds={review.rounds} round={review.round} status={review.status} opts={review.opts}
                       onPickRound={openReviewRound} onOpts={patchReviewOpts} />
                   </div>
                 )}

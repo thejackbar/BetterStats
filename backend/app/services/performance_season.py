@@ -345,6 +345,12 @@ def leaderboards(players: list[dict]) -> dict:
     }
 
 
+def _compact(p: dict) -> dict:
+    return {k: p[k] for k in ("pid", "name", "club", "club_id", "matches", "inns", "runs", "not_outs", "hs",
+                              "hs_not_out", "fifties", "hundreds", "wickets", "bowl_runs", "five_fors",
+                              "catches", "stumpings", "run_outs")} | {"best": list(p["best"]) if p.get("best") else None}
+
+
 def _merge(players_by_comp: list[dict[str, dict]]) -> list[dict]:
     """One row a player across competitions: totals added, bests the best."""
     out: dict[str, dict] = {}
@@ -374,7 +380,8 @@ def season_milestones(season: dict[str, dict], figs: dict[str, dict]) -> list[di
             now = p[key]
             mark = _crossed(now - f[key], now, SEASON_MARKS[key])
             if mark:
-                out.append({"pid": pid, "name": p["name"], "club": p["club"], "kind": f"season_{key}", "mark": mark,
+                out.append({"pid": pid, "name": p["name"], "club": p["club"], "club_id": p.get("club_id"),
+                            "kind": f"season_{key}", "stat": key, "scope": "season", "mark": mark, "value": now,
                             "text": f"{p['name']} ({p['club']}) passed {mark} {word} for the season ({now})"})
     out.sort(key=lambda m: (m["kind"], -m["mark"], m["name"]))
     return out
@@ -403,7 +410,9 @@ def career_milestones(careers: dict[str, dict], season: dict[str, dict], figs: d
         ):
             mark = _crossed(now - f[key], now, CAREER_MARKS[key])
             if mark:
-                out.append({"pid": pid, "name": p["name"], "club": club, "kind": f"career_{key}", "mark": mark, "text": text_of(mark)})
+                out.append({"pid": pid, "name": p["name"], "club": club, "club_id": p.get("club_id"),
+                            "kind": f"career_{key}", "stat": key, "scope": "career", "mark": mark, "value": now,
+                            "text": text_of(mark)})
     out.sort(key=lambda m: (m["kind"], -m["mark"], m["name"]))
     return out
 
@@ -468,8 +477,10 @@ async def round_season(db: AsyncSession, round_data: dict) -> dict:
         blocks.append({
             "key": c.get("key"), "name": c.get("name"), "grade": pull.get("grade"), "round": pull.get("round"),
             "latest": latest,
-            "players": len(season),
             "leaders": leaderboards(list(season.values())),
+            # Every player's season totals, so the page and the posts can rank any
+            # set of grades together (a player in two grades counts both).
+            "players": [_compact(p) for p in season.values()],
             "season_milestones": season_milestones(season, figs) if latest else [],
             "career_milestones": career_milestones(usable, season, figs) if latest else [],
         })
