@@ -999,6 +999,9 @@ _SOCIALS_STYLE_KEYS = {
     # the club's photo, the veil and texture over it, the crest watermark and
     # the background word, with their strengths.
     "bg_url", "bg_tint", "bg_texture", "bg_logo", "bg_logo_op", "bg_text", "bg_text_op",
+    # Each texture's own strength over the background (dots, stripes, grain and
+    # the background's diagonal lines).
+    "bg_finish",
     # Saved Templates ride the same blob as palettes and designs. Left off this
     # allowlist they were stripped on the way in, so a saved template only ever
     # lived in the one browser that made it and never reached another admin.

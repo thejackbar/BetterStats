@@ -12,8 +12,8 @@ import { LayerRoot } from './postLayers'
 import brandBlack from '../assets/bettercricket-black.svg'
 import brandWhite from '../assets/bettercricket-white.svg'
 import { IS_AFL, PLATFORM_NAME } from '../lib/sport'
-import { pc, pt, inkOn, registerParts, colorPart, textPart, picked as partPicked } from './layoutParts'
-import { usePostLook } from './postLook'
+import { pc, pt, pcAlpha, inkOn, registerParts, colorPart, textPart, alphaPart, picked as partPicked } from './layoutParts'
+import { usePostLook, finishOpacity } from './postLook'
 import { clubOfTeamName } from './clubNames'
 import { pickHero } from '../lib/playerShots'
 
@@ -152,8 +152,9 @@ export function AutoFitText({ text, children, max, min = 8, lines = 1, pad = 0, 
 // `style` is spread last so a LayerRoot can put a z-index on it — a root-level
 // child that silently drops the prop would keep painting in markup order while
 // the panel said otherwise.
-export function GrainSVG({ opacity = 0.35, id = 'grain', style = {} }) {
-  if (usePostLook().texture === false) return null
+export function GrainSVG({ opacity: base = 0.35, id = 'grain', style = {} }) {
+  const opacity = finishOpacity(usePostLook(), 'grain', base)
+  if (opacity == null) return null
   return (
     <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', mixBlendMode: 'overlay', opacity, ...style }}>
       <filter id={id}>
@@ -165,8 +166,9 @@ export function GrainSVG({ opacity = 0.35, id = 'grain', style = {} }) {
   )
 }
 
-export function Halftone({ color = '#fff', size = 14, opacity = 0.12, angle = 0, style = {} }) {
-  if (usePostLook().texture === false) return null
+export function Halftone({ color = '#fff', size = 14, opacity: base = 0.12, angle = 0, style = {} }) {
+  const opacity = finishOpacity(usePostLook(), 'dots', base)
+  if (opacity == null) return null
   return (
     <div style={{
       position: 'absolute', inset: 0, pointerEvents: 'none', opacity,
@@ -179,8 +181,9 @@ export function Halftone({ color = '#fff', size = 14, opacity = 0.12, angle = 0,
   )
 }
 
-export function Stripes({ color = '#fff', angle = -45, gap = 14, opacity = 0.06, style = {} }) {
-  if (usePostLook().texture === false) return null
+export function Stripes({ color = '#fff', angle = -45, gap = 14, opacity: base = 0.06, style = {} }) {
+  const opacity = finishOpacity(usePostLook(), 'stripes', base)
+  if (opacity == null) return null
   return (
     <div style={{
       position: 'absolute', inset: 0, pointerEvents: 'none', opacity,
@@ -2694,16 +2697,21 @@ const NAMES_WEIGHT = 'var(--social-names-font-weight, inherit)'
 // portrait post the square's top-anchored rows left the bottom half of the box
 // empty. Batting holds the top of the panel and bowling the bottom, which is
 // also the reading order a scorecard already has.
+//
+// A group with nobody in it is left out, heading and all. Midway through a
+// two-day game only one side has batted, so one panel has batters and no
+// bowlers and the other the reverse; drawing the empty group's heading pushed
+// the bowlers down a row and the two panels no longer lined up.
 function PerfPanel({ title, titleColor, titleOpacity = 1, edge, batters = [], bowlers = [], palette, Perf, tall = false, parts }) {
   const Label = ({ children }) => (
     <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 1.5, color: pc(parts, 'c4LabelColor', palette.ink), opacity: 0.6, marginBottom: 6 }}>{children}</div>
   )
   return (
-    <div style={{ padding: '24px 26px', background: pc(parts, 'cardBg', `${palette.ink}08`), borderLeft: `4px solid ${edge}`, display: 'flex', flexDirection: 'column', gap: 16, minHeight: 0 }}>
+    <div style={{ padding: '24px 26px', background: pcAlpha(parts, 'cardBg', 'c4PanelAlpha', `${palette.ink}08`), borderLeft: `4px solid ${edge}`, display: 'flex', flexDirection: 'column', gap: 16, minHeight: 0 }}>
       <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 27, letterSpacing: 2, lineHeight: 1, color: titleColor, opacity: titleOpacity, flexShrink: 0 }}>{title}</div>
       <div style={{ ...(tall ? { flex: 1, minHeight: 0, justifyContent: 'space-between' } : null), display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <div><Label>{pt(parts, 'c4BattingLabel', 'BATTING')}</Label>{batters.slice(0, 3).map((p, i) => <Perf key={i} p={p} />)}</div>
-        <div><Label>{pt(parts, 'c4BowlingLabel', 'BOWLING')}</Label>{bowlers.slice(0, 3).map((p, i) => <Perf key={i} p={p} />)}</div>
+        {batters.length || !bowlers.length ? <div><Label>{pt(parts, 'c4BattingLabel', 'BATTING')}</Label>{batters.slice(0, 3).map((p, i) => <Perf key={i} p={p} />)}</div> : null}
+        {bowlers.length || !batters.length ? <div><Label>{pt(parts, 'c4BowlingLabel', 'BOWLING')}</Label>{bowlers.slice(0, 3).map((p, i) => <Perf key={i} p={p} />)}</div> : null}
       </div>
     </div>
   )
@@ -2777,7 +2785,7 @@ export function C4_FinalScore({ width = 1080, height = 1080, result, team, oppon
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
               <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={84} shape="shield" />
               <div style={{ textAlign: 'left' }}>
-                <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 22, letterSpacing: 1, color: pc(parts, 'c4TeamName', palette.ink), lineHeight: 1 }}>{team.name}</div>
+                <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 22, letterSpacing: 1, color: pc(parts, 'c4TeamName', palette.ink), lineHeight: 1 }}>{pt(parts, 'c4ScoreName', '').trim() || team.name}</div>
                 <div style={{ fontFamily: NAMES_FONT, fontWeight: NAMES_WEIGHT, fontSize: 46, letterSpacing: -0.5, lineHeight: 1, color: pc(parts, 'statColor', palette.ink), marginTop: 4 }}>{result?.teamScore || '—'}</div>
               </div>
             </div>
@@ -2847,6 +2855,7 @@ registerParts({
     colorPart('headerRule', 'Line under the header', 'Header', (p) => p.accent),
     colorPart('winColor', 'Winning side outline', 'Scores', (p) => p.accent),
     colorPart('lossColor', 'Other side outline', 'Scores', (p) => `${p.ink}22`),
+    textPart('c4ScoreName', 'Your name by the score (default: the club name)', 'Scores', () => ''),
     colorPart('c4TeamName', 'Team names', 'Scores', (p) => p.ink),
     colorPart('statColor', 'Scores', 'Scores', (p) => p.ink),
     colorPart('c4VsColor', 'The "VS"', 'Scores', (p) => p.accent),
@@ -2854,6 +2863,7 @@ registerParts({
     textPart('c4TeamLabel', 'Your panel label (default: your short code)', 'Top performers', () => ''),
     textPart('c4OppLabel', 'Opposition panel label (default: their short code)', 'Top performers', () => ''),
     colorPart('cardBg', 'Panels', 'Top performers', null, { autoLabel: 'Soft tint' }),
+    alphaPart('c4PanelAlpha', 'Panel opacity', 'Top performers', 'cardBg'),
     colorPart('cardBorder', 'Your panel edge', 'Top performers', (p) => p.accent),
     colorPart('c4OppEdge', 'Opposition panel edge', 'Top performers', (p) => `${p.ink}55`),
     colorPart('c4TeamTitle', 'Your panel title', 'Top performers', (p) => p.accent),

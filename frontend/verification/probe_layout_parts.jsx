@@ -77,8 +77,9 @@ for (const id of Object.keys(LAYOUT_PARTS)) {
   ck(`${id}: has a fixture`, !!FIXTURES[id] || only.length > 0)
   const seen = new Set()
   for (const p of spec) {
-    const okSpec = p.key && p.label && (p.kind === 'color' || p.kind === 'text') && p.group && !seen.has(p.key)
-      && (p.kind === 'text' ? typeof p.auto === 'function' : (typeof p.auto === 'function' || (p.auto === null && p.autoLabel)))
+    const okSpec = p.key && p.label && (p.kind === 'color' || p.kind === 'text' || p.kind === 'alpha') && p.group && !seen.has(p.key)
+      && (p.kind === 'alpha' ? spec.some((q) => q.key === p.of && q.kind === 'color')
+        : p.kind === 'text' ? typeof p.auto === 'function' : (typeof p.auto === 'function' || (p.auto === null && p.autoLabel)))
     ck(`${id}.${p.key}: spec is complete`, !!okSpec, JSON.stringify({ ...p, auto: typeof p.auto }))
     seen.add(p.key)
     const fam = PARTS_FAMILY[id] || id
@@ -109,11 +110,16 @@ for (const id of ids) {
   const sq = sizesOf(opts)[0]
   const plain = render(id, [C, props], sq)
   spec.forEach((p, n) => {
-    const v = p.kind === 'text' ? `ZZ${p.key.toUpperCase()}ZZ` : marker(n + 1 + id.length)
+    // An alpha part acts on its colour, so it is checked with that colour picked:
+    // the colour at half strength must be in the output, and differ from it alone.
+    const v = p.kind === 'text' ? `ZZ${p.key.toUpperCase()}ZZ` : p.kind === 'alpha' ? 0.5 : marker(n + 1 + id.length)
+    const colour = p.kind === 'alpha' ? marker(n + 1 + id.length) : null
+    const set = p.kind === 'alpha' ? { [p.of]: colour, [p.key]: v } : { [p.key]: v }
+    const ref = p.kind === 'alpha' ? render(id, [C, props], sq, { parts: { [p.of]: colour } }) : plain
     let html = ''
-    try { html = render(id, [C, props], sq, { parts: { [p.key]: v } }) } catch (e) { html = `ERROR ${e.message}` }
-    const changed = html !== plain
-    const shows = p.kind === 'text' ? html.includes(v) : html.toLowerCase().includes(v.toLowerCase())
+    try { html = render(id, [C, props], sq, { parts: set }) } catch (e) { html = `ERROR ${e.message}` }
+    const changed = html !== ref
+    const shows = p.kind === 'text' ? html.includes(v) : p.kind === 'alpha' ? html.toLowerCase().includes(`${colour}80`) : html.toLowerCase().includes(v.toLowerCase())
     ck(`${id}.${p.key}: setting it changes the post`, changed && shows, !changed ? 'output did not change (not wired, or not on the fixture)' : !shows ? 'changed but the value is not in the output' : html.slice(0, 100))
   })
   if (!spec.length) info(`${id}: no parts declared`)

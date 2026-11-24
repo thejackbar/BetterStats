@@ -17,7 +17,9 @@
 // right under the layout, so a layout and its part list are edited together.
 // This file imports nothing from the templates (they import it).
 
-export const PART_KINDS = ['color', 'text']
+// 'alpha' is how solid a picked colour is drawn (0 to 1), tied to that colour
+// part by `of`. It means nothing while the colour is on Auto.
+export const PART_KINDS = ['color', 'text', 'alpha']
 
 // id -> [{ key, label, kind, group, auto, autoLabel? }]
 export const LAYOUT_PARTS = {}
@@ -64,6 +66,7 @@ export function registerParts(map) {
 // Spec helpers, so a layout's list reads as a list.
 export const colorPart = (key, label, group, auto, extra) => ({ key, label, kind: 'color', group, auto, ...extra })
 export const textPart = (key, label, group, auto, extra) => ({ key, label, kind: 'text', group, auto, ...extra })
+export const alphaPart = (key, label, group, of, extra) => ({ key, label, kind: 'alpha', group, of, ...extra })
 
 export function partsFor(templateId) {
   return LAYOUT_PARTS[templateId] || null
@@ -85,6 +88,18 @@ export function pc(parts, key, fallback) {
 export function pt(parts, key, fallback) {
   const v = parts && parts[key]
   return typeof v === 'string' ? v : fallback
+}
+
+// A picked colour drawn at the club's strength (an 'alpha' part), else the
+// fallback. With no strength set the colour comes back as it was picked, so a
+// post nobody touched is byte for byte what it was.
+export function pcAlpha(parts, key, alphaKey, fallback) {
+  const c = pc(parts, key, null)
+  if (!c) return fallback
+  const a = parts && parts[alphaKey]
+  if (typeof a !== 'number' || !Number.isFinite(a)) return c
+  const n = Math.max(0, Math.min(255, Math.round(a * 255)))
+  return n === 255 ? c : c + n.toString(16).padStart(2, '0')
 }
 
 // True when the club has picked this colour (used where a pick changes a
@@ -118,6 +133,7 @@ export function cleanParts(templateId, raw) {
     const v = raw[key]
     if (kind === 'color' && typeof v === 'string' && HEX.test(v)) out[key] = v
     if (kind === 'text' && typeof v === 'string') out[key] = v.slice(0, 24)
+    if (kind === 'alpha' && typeof v === 'number' && Number.isFinite(v)) out[key] = Math.max(0, Math.min(1, v))
   })
   return out
 }

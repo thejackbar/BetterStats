@@ -54,7 +54,7 @@ import { exportNodeToPng } from '../../social/exportImage'
 import { shortClubName, stripGradeTail } from '../../social/clubNames'
 import { crestColour, paletteFromColour } from '../../social/crestColour'
 import { NO_WINNER_KINDS, noWinnerLine, noWinnerWord, detectNoWinner } from '../../social/resultOutcome'
-import { SocialBackground, SocialBackgroundDefs, SOCIAL_BACKGROUNDS, GRADIENT_ANGLES, DEFAULT_COLORS as BG_DEFAULT_COLORS } from '../../social/SocialBackgrounds'
+import { SocialBackground, SocialBackgroundDefs, SOCIAL_BACKGROUNDS, GRADIENT_ANGLES, LINED_BACKGROUNDS, DEFAULT_COLORS as BG_DEFAULT_COLORS } from '../../social/SocialBackgrounds'
 import { EVENT_TEMPLATES, EVENT_PRESETS, DEFAULT_EVENT, resolveMotif, eventPaletteFor, prepareEventList, defaultEventList } from '../../social/event-templates'
 import EventPostEditor from '../../components/admin/EventPostEditor'
 import { BlankCanvas, newBlankItem, defaultBlankItems, withDesign } from '../../social/blank-template'
@@ -66,7 +66,7 @@ import { sponsorSlotFor } from '../../social/sponsorSlots'
 import { useBlankLayer } from '../../social/useBlankLayer'
 import { useTemplateLayers } from '../../social/useTemplateLayers'
 import { PostLayerProvider } from '../../social/postLayers'
-import { PostLookContext, alphaHex, DEFAULT_VEIL } from '../../social/postLook'
+import { PostLookContext, alphaHex, DEFAULT_VEIL, cleanFinish, MAX_FINISH } from '../../social/postLook'
 import { partsFor, partsKey, cleanParts, inkOn } from '../../social/layoutParts'
 import { useEditHistory } from '../../social/useEditHistory'
 import { usePages } from '../../social/usePages'
@@ -651,9 +651,18 @@ function ColourField({ label, value, auto, autoLabel, onChange, onClear, testId 
 }
 
 // How the layout sits on the picked background: the veil its own fill puts over
-// it, and the dots, stripes and grain it draws on top. Both default to what the
-// layout always did on a built-in texture and to "none" on the club's own photo.
-function BackgroundFinish({ ownPhoto, tint, tintAuto, onTint, texture, textureAuto, onTexture, onReset, touched }) {
+// it, and the dots, stripes and grain it draws on top, each on its own. The
+// background's faint diagonal lines are listed too when the picked background
+// has them. All default to what the layout always did on a built-in texture and
+// to "none" on the club's own photo.
+const FINISH_ROWS = [
+  { key: 'dots', label: 'Dots' },
+  { key: 'stripes', label: 'Stripes' },
+  { key: 'grain', label: 'Grain' },
+  { key: 'lines', label: 'Background lines' },
+]
+function BackgroundFinish({ ownPhoto, tint, onTint, finish, showLines, onFinish, onReset, touched }) {
+  const rows = FINISH_ROWS.filter((r) => r.key !== 'lines' || showLines)
   return (
     <div className="mt-2 pt-2 border-t pb-hairline flex flex-col gap-2" data-testid="bg-finish">
       <span className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2">Over the background</span>
@@ -663,19 +672,53 @@ function BackgroundFinish({ ownPhoto, tint, tintAuto, onTint, texture, textureAu
           onChange={(e) => onTint(Number(e.target.value) / 100)} className="flex-1 min-w-0" />
         <span className="w-9 text-right text-pb-faintest">{Math.round(tint * 100)}%</span>
       </label>
-      <label className="flex items-center gap-2 text-[11px] text-pb-faint font-mono">
-        <input type="checkbox" checked={texture} data-testid="bg-texture" onChange={(e) => onTexture(e.target.checked)} />
-        Layout dots, stripes and grain
-      </label>
+      {rows.map(({ key, label }) => {
+        const v = finish[key]
+        const on = v > 0
+        return (
+          <div key={key} className="flex items-center gap-2 text-[11px] text-pb-faint font-mono" data-testid={`bg-finish-${key}`}>
+            <label className="w-24 shrink-0 flex items-center gap-1.5 min-w-0">
+              <input type="checkbox" checked={on} data-testid={`bg-finish-${key}-on`}
+                onChange={(e) => onFinish(key, e.target.checked ? 1 : 0)} />
+              <span className="truncate">{label}</span>
+            </label>
+            <input type="range" min={10} max={MAX_FINISH * 100} step={10} value={Math.round((on ? v : 1) * 100)} disabled={!on}
+              aria-label={`${label} strength`} data-testid={`bg-finish-${key}-strength`}
+              onChange={(e) => onFinish(key, Number(e.target.value) / 100)} className="flex-1 min-w-0 disabled:opacity-40" />
+            <span className="w-9 text-right text-pb-faintest">{on ? `${Math.round(v * 100)}%` : 'Off'}</span>
+          </div>
+        )
+      })}
       <p className="text-[10px] leading-relaxed text-pb-faintest">
         {ownPhoto
           ? 'Your photo shows as it is: no tint and no pattern. Raise the tint if the text is hard to read on it.'
-          : 'The layout lays its own colour (60% by default) and a fine pattern over the background. Lower the tint to see more of it.'}
+          : 'The layout lays its own colour (60% by default) and a fine pattern over the background. Lower the tint to see more of it. Each pattern is 100% at the layout\'s own strength.'}
       </p>
       {touched && (
         <button type="button" onClick={onReset} data-testid="bg-finish-reset"
           className="self-start text-[10px] font-mono text-pb-faintest hover:text-pb-text underline">Back to automatic</button>
       )}
+    </div>
+  )
+}
+
+// How solid a picked colour is drawn (an 'alpha' part, layoutParts.js). It only
+// acts on a colour somebody picked: on Auto the layout keeps its own soft tint,
+// and the slider says so rather than moving nothing.
+function AlphaField({ label, value, colourPicked, onChange, onClear, testId }) {
+  const pct = Math.round((typeof value === 'number' ? value : 1) * 100)
+  return (
+    <div className="flex flex-col gap-0.5 min-h-8 justify-center" data-testid={testId}>
+      <div className="flex items-center gap-2">
+        <span className="text-[11px] text-pb-dim font-mono truncate w-28 shrink-0">{label}</span>
+        <input type="range" min={0} max={100} step={5} value={pct} disabled={!colourPicked} aria-label={label}
+          onChange={(e) => onChange(Number(e.target.value) / 100)} className="flex-1 min-w-0 disabled:opacity-40" />
+        <span className="w-9 text-right text-[10px] font-mono text-pb-faintest">{colourPicked ? `${pct}%` : 'Auto'}</span>
+        {colourPicked && typeof value === 'number' && (
+          <button type="button" onClick={onClear} className="text-[10px] font-mono text-pb-faintest hover:text-pb-text underline">Reset</button>
+        )}
+      </div>
+      {!colourPicked && <span className="text-[10px] text-pb-faintest">Pick a panel colour above to set how solid it is.</span>}
     </div>
   )
 }
@@ -722,7 +765,10 @@ function LayoutElements({ name, spec, palette, parts, onChange, onClear, onReset
       {groups.map((g) => (
         <div key={g} className="mb-2 last:mb-0">
           <div className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2 mt-1 mb-0.5">{g}</div>
-          {spec.filter((p) => p.group === g).map((p) => p.kind === 'text' ? (
+          {spec.filter((p) => p.group === g).map((p) => p.kind === 'alpha' ? (
+            <AlphaField key={p.key} label={p.label} value={parts[p.key]} colourPicked={typeof parts[p.of] === 'string' && parts[p.of] !== ''}
+              onChange={(v) => onChange(p.key, v)} onClear={() => onClear(p.key)} testId={`part-${p.key}`} />
+          ) : p.kind === 'text' ? (
             <label key={p.key} className="flex items-center justify-between gap-2 min-h-8" data-testid={`part-${p.key}`}>
               <span className="text-[11px] text-pb-dim font-mono truncate">{p.label}</span>
               <input value={parts[p.key] ?? ''} placeholder={p.auto(palette)} maxLength={24}
@@ -917,6 +963,17 @@ function fmtIsoDate(iso) {
   const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
   return `${DAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`
+}
+
+// The cricket season a day falls in, written the way posts print it ("2026-27").
+// An Australian season runs from July to June, so July 2026 onwards is 2026-27.
+// Takes an ISO date or a Date; with nothing usable it answers for today, which is
+// what an empty Season field means on a post being made now.
+function cricketSeasonOf(when) {
+  let d = when instanceof Date ? when : (when ? new Date(`${String(when).slice(0, 10)}T00:00:00`) : new Date())
+  if (Number.isNaN(d.getTime())) d = new Date()
+  const start = d.getMonth() >= 6 ? d.getFullYear() : d.getFullYear() - 1
+  return `${start}-${String((start + 1) % 100).padStart(2, '0')}`
 }
 
 // AU score notation from a parsed scorecard team: '9/287' (wickets/runs) while
@@ -1601,6 +1658,7 @@ const DEFAULT_STYLE_JSON = JSON.stringify({
   palette: 'club', dark: true, font: 'barlow', bg: 'none',
   bg_colors: {}, palettes: [], designs: [], lineup_card: LINEUP_CARD_DEFAULTS,
   bg_url: null, bg_tint: null, bg_texture: null, bg_logo: false, bg_logo_op: 0.15, bg_text: '', bg_text_op: 0.16,
+  bg_finish: {},
 })
 
 // Saved templates live in their own table now (one row each), not in the Style
@@ -1821,6 +1879,13 @@ export default function AdminSocialPost() {
     const v = localStorage.getItem('bs_social_bg_texture')
     return v === '1' ? true : v === '0' ? false : null
   })
+  // Each texture on its own: the layout's dots, stripes and grain and the
+  // background's diagonal lines, as a strength (1 is the layout's own, 0 off).
+  // A kind that is absent follows bgTexture above, so a style stored before
+  // these existed opens exactly as it did.
+  const [bgFinish, setBgFinish] = useState(() => {
+    try { return cleanFinish(JSON.parse(localStorage.getItem('bs_social_bg_finish') || '{}')) } catch { return {} }
+  })
   // Colour roles the club has set over whichever palette is open: the same four
   // roles every layout is drawn from (background, panel, accent, text), so one
   // change reaches all of them. Only the keys somebody touched are stored.
@@ -1996,7 +2061,7 @@ export default function AdminSocialPost() {
   const [editor, setEditor] = useState(null)
 
   const [milestone, setMilestone] = useState({ value: '', unit: 'GAMES', reason: '', detail: '', playerIdx: 0 })
-  const [announcement, setAnnouncement] = useState({ kind: 'APPOINTMENT', headline: 'NAMED CAPTAIN', subheadline: 'FOR THE 2025-26 SEASON', playerIdx: 0 })
+  const [announcement, setAnnouncement] = useState({ kind: 'APPOINTMENT', headline: 'NAMED CAPTAIN', subheadline: `FOR THE ${cricketSeasonOf()} SEASON`, playerIdx: 0 })
   const [toss, setToss] = useState({ winner: 'TEAM', decision: 'BAT' })
   const [motm, setMotm] = useState({ playerIdx: 0, stats: [{ label: 'Runs', value: '' }, { label: 'SR', value: '' }], summary: '' })
   const [result, setResult] = useState({
@@ -2230,7 +2295,7 @@ export default function AdminSocialPost() {
       }
       const tpl = {
         key, name: finalName, templateId, custom: usingOverlay,
-        style: { palette: paletteKey, dark: darkMode, font: fontKey, bg: bgStyle, bgColors, customBg, customAccent, bgTint, bgTexture, roles: roleTweaks, parts: layoutParts[partsKey(templateId)] || null, bgUrl: bgStyle === 'custom-image' ? bgCustomUrl : null },
+        style: { palette: paletteKey, dark: darkMode, font: fontKey, bg: bgStyle, bgColors, customBg, customAccent, bgTint, bgTexture, bgFinish, roles: roleTweaks, parts: layoutParts[partsKey(templateId)] || null, bgUrl: bgStyle === 'custom-image' ? bgCustomUrl : null },
         blank: items,
         event: eventContent,
         // The stacking order goes with the design. Without it a template saved
@@ -2306,6 +2371,7 @@ export default function AdminSocialPost() {
     // choice alone for the veil and texture, and start the colours untouched.
     setBgTint(typeof st.bgTint === 'number' ? st.bgTint : null)
     setBgTexture(typeof st.bgTexture === 'boolean' ? st.bgTexture : null)
+    setBgFinish(cleanFinish(st.bgFinish))
     setRoleTweaks(st.roles && typeof st.roles === 'object' ? st.roles : {})
     setLayoutParts((all) => ({ ...all, [partsKey(tpl.templateId)]: cleanParts(tpl.templateId, st.parts) }))
     if (st.bg === 'custom-image' && typeof st.bgUrl === 'string' && st.bgUrl) setBgCustomUrl(st.bgUrl)
@@ -2459,6 +2525,7 @@ export default function AdminSocialPost() {
   }, [bgCustomUrl])
   useEffect(() => { localStorage.setItem('bs_social_bg_tint', bgTint == null ? '' : String(bgTint)) }, [bgTint])
   useEffect(() => { localStorage.setItem('bs_social_bg_texture', bgTexture == null ? '' : bgTexture ? '1' : '0') }, [bgTexture])
+  useEffect(() => { try { localStorage.setItem('bs_social_bg_finish', JSON.stringify(bgFinish)) } catch { /* private window */ } }, [bgFinish])
   useEffect(() => { localStorage.setItem('bs_social_roles', JSON.stringify(roleTweaks)) }, [roleTweaks])
   useEffect(() => { localStorage.setItem('bs_social_parts', JSON.stringify(layoutParts)) }, [layoutParts])
   useEffect(() => { localStorage.setItem('bs_social_bg_colors', JSON.stringify(bgColors)) }, [bgColors])
@@ -2490,6 +2557,7 @@ export default function AdminSocialPost() {
     bg_colors: bgColors, palettes: savedPalettes, designs: savedDesigns, lineup_card: lineupCard,
     bg_url: bgCustomUrl && !String(bgCustomUrl).startsWith('blob:') ? bgCustomUrl : null, bg_tint: bgTint, bg_texture: bgTexture, bg_logo: bgLogoOn, bg_logo_op: bgLogoOpacity,
     bg_text: bgBigText, bg_text_op: bgBigTextOpacity,
+    bg_finish: bgFinish,
   })
   useEffect(() => {
     if (!settings) return undefined
@@ -2533,6 +2601,7 @@ export default function AdminSocialPost() {
             bg_logo_op: typeof st.bg_logo_op === 'number' ? st.bg_logo_op : bgLogoOpacity,
             bg_text: 'bg_text' in st ? (typeof st.bg_text === 'string' ? st.bg_text : '') : bgBigText,
             bg_text_op: typeof st.bg_text_op === 'number' ? st.bg_text_op : bgBigTextOpacity,
+            bg_finish: 'bg_finish' in st ? cleanFinish(st.bg_finish) : bgFinish,
           }
           setPaletteKey(applied.palette)
           setDarkMode(applied.dark)
@@ -2549,6 +2618,7 @@ export default function AdminSocialPost() {
           setBgLogoOpacity(applied.bg_logo_op)
           setBgBigText(applied.bg_text)
           setBgBigTextOpacity(applied.bg_text_op)
+          setBgFinish(applied.bg_finish)
           styleServerRef.current = JSON.stringify(applied)
         }
         setAllPlayers(p)
@@ -2749,6 +2819,9 @@ export default function AdminSocialPost() {
       round: data.meta?.round || m.round,
       venue: data.meta?.venue || m.venue,
       date: fmtIsoDate(data.meta?.date) || m.date,
+      // The match's own season, from its date, so last season's label left in
+      // the field is not printed on this week's result.
+      season: data.meta?.date ? cricketSeasonOf(data.meta.date) : m.season,
     }))
     if (them.name) {
       setOpponent((o) => ({
@@ -2854,6 +2927,7 @@ export default function AdminSocialPost() {
       round: mm.round || m.round,
       venue: mm.venue || m.venue,
       date: fmtIsoDate(mm.date) || m.date,
+      season: mm.date ? cricketSeasonOf(mm.date) : m.season,
       competition: mm.grade || m.competition,
     }))
   }, [playerForPid, isAssoc])
@@ -3726,6 +3800,7 @@ export default function AdminSocialPost() {
     bigTextOpacity: bgBigTextOpacity,
     logoUrl: bgLogoOn ? brandLogo : undefined,
     logoOpacity: bgLogoOpacity,
+    linesStrength: bgFinish.lines,
   }
   // The template's own opaque canvas fill is given an alpha channel so the
   // SocialBackground sitting behind it (same coordinate space, lower in the
@@ -3737,6 +3812,16 @@ export default function AdminSocialPost() {
   const ownPhotoBg = bgStyle === 'custom-image'
   const bgTintEff = bgTint ?? (ownPhotoBg ? 0 : 0.6)
   const bgTextureEff = bgTexture ?? !ownPhotoBg
+  // One strength per texture: the club's pick, else on or off with the switch above.
+  const finishEff = {
+    dots: bgFinish.dots ?? (bgTextureEff ? 1 : 0),
+    stripes: bgFinish.stripes ?? (bgTextureEff ? 1 : 0),
+    grain: bgFinish.grain ?? (bgTextureEff ? 1 : 0),
+    lines: bgFinish.lines ?? 1,
+  }
+  // The layout's own art (slanted slabs, big faint marks) goes with the last of
+  // the three textures, as it went with the one switch before.
+  const layoutArtOn = finishEff.dots > 0 || finishEff.stripes > 0 || finishEff.grain > 0
   // Which side of the scorecard is the opposition (the one that is not this club).
   const scOppSide = (() => {
     const tokens = clubTokens(settings?.name)
@@ -3745,7 +3830,9 @@ export default function AdminSocialPost() {
   })()
   // The page for `side` in that team's own colours, or null to leave the club's look.
   const scPagePalette = (side) => (scOppColours && side === scOppSide ? paletteFromColour(scorecardMatch[side]?.color, templatePalette) : null)
-  const postLook = { veil: bgActive ? alphaHex(bgTintEff) : null, texture: bgActive ? bgTextureEff : true }
+  const postLook = bgActive
+    ? { veil: alphaHex(bgTintEff), texture: layoutArtOn, dots: finishEff.dots, stripes: finishEff.stripes, grain: finishEff.grain }
+    : { veil: null, texture: true }
   const openParts = partsFor(templateId) ? cleanParts(templateId, layoutParts[partsKey(templateId)]) : null
 
   const filteredPlayers = allPlayers.filter(p => {
@@ -3893,7 +3980,7 @@ export default function AdminSocialPost() {
     venue: match.venue || 'HOME GROUND',
     date: match.date || 'SAT 1 JAN',
     time: match.time || '1:00 PM',
-    season: match.season || '2025–26',
+    season: match.season || cricketSeasonOf(),
   }
 
   // What the Round Review layouts draw, from the picked tracker round.
@@ -4149,7 +4236,7 @@ export default function AdminSocialPost() {
     setMarkHero(null)
     setSplitPanel('')
     setMilestone({ value: '', unit: 'GAMES', reason: '', detail: '', playerIdx: 0 })
-    setAnnouncement({ kind: 'APPOINTMENT', headline: 'NAMED CAPTAIN', subheadline: 'FOR THE 2025-26 SEASON', playerIdx: 0 })
+    setAnnouncement({ kind: 'APPOINTMENT', headline: 'NAMED CAPTAIN', subheadline: `FOR THE ${cricketSeasonOf()} SEASON`, playerIdx: 0 })
     setToss({ winner: 'TEAM', decision: 'BAT' })
     setMotm({ playerIdx: 0, stats: [{ label: 'Runs', value: '' }, { label: 'SR', value: '' }], summary: '' })
     setResult({
@@ -5580,10 +5667,11 @@ export default function AdminSocialPost() {
               </div>
               {bgActive && (
                 <BackgroundFinish
-                  ownPhoto={ownPhotoBg} tint={bgTintEff} texture={bgTextureEff}
-                  onTint={setBgTint} onTexture={setBgTexture}
-                  touched={bgTint != null || bgTexture != null}
-                  onReset={() => { setBgTint(null); setBgTexture(null) }} />
+                  ownPhoto={ownPhotoBg} tint={bgTintEff} onTint={setBgTint}
+                  finish={finishEff} showLines={LINED_BACKGROUNDS.includes(bgStyle)}
+                  onFinish={(k, v) => setBgFinish((f) => ({ ...f, [k]: v }))}
+                  touched={bgTint != null || bgTexture != null || Object.keys(bgFinish).length > 0}
+                  onReset={() => { setBgTint(null); setBgTexture(null); setBgFinish({}) }} />
               )}
               {bgStyle === 'gradient-custom' && (
                 <div className="flex gap-1.5 flex-wrap items-center mt-2">
@@ -5957,7 +6045,7 @@ export default function AdminSocialPost() {
                   <Field label="Venue"><TextInput value={match.venue} onChange={v => patchMatch({ venue: v })} placeholder="Heathcote Reserve" /></Field>
                   <Field label="Date"><TextInput value={match.date} onChange={v => patchMatch({ date: v })} placeholder="SAT 30 MAY" /></Field>
                   <Field label="Time"><TextInput value={match.time} onChange={v => patchMatch({ time: v })} placeholder="2:30 PM" /></Field>
-                  <Field label="Season"><TextInput value={match.season} onChange={v => patchMatch({ season: v })} placeholder="2025–26" /></Field>
+                  <Field label="Season"><TextInput value={match.season} onChange={v => patchMatch({ season: v })} placeholder={cricketSeasonOf()} /></Field>
                 </div>
               </section>
             )}
@@ -6369,7 +6457,7 @@ export default function AdminSocialPost() {
                 <div className="grid grid-cols-1 gap-3">
                   <Field label="Kind (eyebrow chip)"><TextInput value={announcement.kind} onChange={v => setAnnouncement(a => ({ ...a, kind: v }))} placeholder="APPOINTMENT" /></Field>
                   <Field label="Headline"><TextInput value={announcement.headline} onChange={v => setAnnouncement(a => ({ ...a, headline: v }))} placeholder="NAMED CAPTAIN" /></Field>
-                  <Field label="Subheadline"><TextInput value={announcement.subheadline} onChange={v => setAnnouncement(a => ({ ...a, subheadline: v }))} placeholder="FOR THE 2025-26 SEASON" /></Field>
+                  <Field label="Subheadline"><TextInput value={announcement.subheadline} onChange={v => setAnnouncement(a => ({ ...a, subheadline: v }))} placeholder={`FOR THE ${cricketSeasonOf()} SEASON`} /></Field>
                   {selectedPlayers.length > 0 && (
                     <Field label="Player">
                       <select value={announcement.playerIdx} onChange={e => setAnnouncement(a => ({ ...a, playerIdx: +e.target.value }))}

@@ -100,9 +100,14 @@ const Tex = ({ id, fill, opacity = 1, blend, transform }) => (
 )
 // Faint diagonal ruling — the "slight detail" texture behind the Clean &
 // Gradient families. Plain CSS, no SVG filter, so it stays crisp at any scale.
-const DiagonalLines = ({ color = '#fff', opacity = 0.06, gap = 15, angle = -45 }) => (
-  <div style={{ ...full, opacity, backgroundImage: `repeating-linear-gradient(${angle}deg, ${color} 0 1.5px, transparent 1.5px ${gap}px)` }} />
-)
+// `k` is the club's strength for the lines (Brand, "Over the background"): 1 is
+// the variant's own, 0 draws nothing.
+export const LINED_BACKGROUNDS = ['clean-lines', 'clean-shard', 'clean-frame', 'gradient-custom']
+const DiagonalLines = ({ color = '#fff', opacity = 0.06, gap = 15, angle = -45, k = 1 }) => {
+  const m = typeof k === 'number' && Number.isFinite(k) ? Math.max(0, k) : 1
+  if (m === 0) return null
+  return <div style={{ ...full, opacity: m === 1 ? opacity : Math.min(1, opacity * m), backgroundImage: `repeating-linear-gradient(${angle}deg, ${color} 0 1.5px, transparent 1.5px ${gap}px)` }} />
+}
 // A single bold triangular shard in one corner — the "something small
 // graphically" accent used across the Clean & Gradient variants.
 const CornerShard = ({ color, opacity = 1, corner = 'br', size = 620 }) => {
@@ -312,7 +317,7 @@ const VARIANTS = {
     <React.Fragment>
       <div style={{ ...full, background: p.primary }} />
       <div style={{ ...full, background: `linear-gradient(160deg, ${p.secondary}55, transparent 60%)` }} />
-      <DiagonalLines color={p.ink} opacity={0.05} gap={16} />
+      <DiagonalLines k={p.lines} color={p.ink} opacity={0.05} gap={16} />
       <CornerShard color={p.tertiary} opacity={0.92} corner="tr" size={760} />
       <Grain fill="#fff" opacity={0.15} />
     </React.Fragment>
@@ -322,7 +327,7 @@ const VARIANTS = {
   'clean-shard': (p) => (
     <React.Fragment>
       <div style={{ ...full, background: `linear-gradient(200deg, ${p.secondary}, ${p.primary} 62%)` }} />
-      <DiagonalLines color={p.ink} opacity={0.06} gap={12} angle={-32} />
+      <DiagonalLines k={p.lines} color={p.ink} opacity={0.06} gap={12} angle={-32} />
       <CornerShard color={p.tertiary} opacity={0.85} corner="br" size={640} />
       <CornerShard color={p.tertiary} opacity={0.28} corner="tl" size={420} />
       <Grain fill="#fff" opacity={0.18} />
@@ -333,7 +338,7 @@ const VARIANTS = {
   'clean-frame': (p) => (
     <React.Fragment>
       <div style={{ ...full, background: p.primary }} />
-      <DiagonalLines color={p.ink} opacity={0.045} gap={18} angle={45} />
+      <DiagonalLines k={p.lines} color={p.ink} opacity={0.045} gap={18} angle={45} />
       <div style={abs({ inset: 34, border: `4px solid ${p.tertiary}`, opacity: 0.55 })} />
       <div style={abs({ left: 0, top: 0, width: '100%', height: 14, background: p.tertiary, opacity: 0.9 })} />
       <Grain fill="#fff" opacity={0.15} />
@@ -362,7 +367,7 @@ const VARIANTS = {
   'gradient-custom': (p) => (
     <React.Fragment>
       <div style={{ ...full, background: `linear-gradient(${Number.isFinite(p.angle) ? p.angle : 135}deg, ${p.secondary}, ${p.tertiary})` }} />
-      <DiagonalLines color="#fff" opacity={0.08} gap={20} />
+      <DiagonalLines k={p.lines} color="#fff" opacity={0.08} gap={20} />
       <Grain fill="#fff" opacity={0.12} />
     </React.Fragment>
   ),
@@ -395,8 +400,11 @@ export function SocialBackground({
   // A low-opacity club-crest watermark, centred. Defaults suit the 10-20%
   // "over the gradient" look; any variant can carry one.
   logoUrl, logoOpacity = 0.14,
+  // How strong the faint diagonal lines are (LINED_BACKGROUNDS): 1 is the
+  // variant's own, 0 hides them. Absent leaves them as they always were.
+  linesStrength,
 }) {
-  const p = { ...DEFAULT_COLORS, ...(colors || {}) }
+  const p = { ...DEFAULT_COLORS, ...(colors || {}), lines: linesStrength }
   const render = VARIANTS[variant] || VARIANTS['ink-splatter']
   const px = Number(size) || 1080
   // height defaults to size (the original square case). For a non-square
