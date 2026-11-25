@@ -3531,6 +3531,7 @@ export const api = {
   approvePlayerRegistration: (id) => request(`/player-dashboard/registrations/${id}/approve`, { method: 'POST' }),
   archivePlayerRegistration: (id) => request(`/player-dashboard/registrations/${id}/archive`, { method: 'POST' }),
   restorePlayerRegistration: (id) => request(`/player-dashboard/registrations/${id}/restore`, { method: 'POST' }),
+  reactivateRegisteredPlayer: (id) => request(`/player-dashboard/registrations/${id}/reactivate`, { method: 'POST' }),
   updatePlayerRegistration: (id, data) =>
     request(`/player-dashboard/registrations/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
 

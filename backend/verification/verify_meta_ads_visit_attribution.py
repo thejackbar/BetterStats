@@ -1,5 +1,5 @@
 """Free trial signups count a registration the campaign's ad brought in, even when its stored
-first touch says otherwise (v9.152.2).
+first touch says otherwise (v9.152.3).
 
     VERIFY_DATABASE_URL=postgresql+asyncpg://postgres:pg@127.0.0.1:5432/verify_visit_attr \\
         python verification/verify_meta_ads_visit_attribution.py

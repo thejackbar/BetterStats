@@ -9,7 +9,7 @@ Revises: 397
 """
 from alembic import op
 
-from app.services.player_registration_ddl import STATEMENTS, DOWNGRADE
+from app.services.player_registration_ddl import STATEMENTS_398 as STATEMENTS, DOWNGRADE_398 as DOWNGRADE
 
 revision = "398"
 down_revision = "397"

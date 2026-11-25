@@ -162,6 +162,13 @@ async def build_schema() -> None:
             from app.services.product_blast_ddl import STATEMENTS as _PBD
             for stmt in _PBD:
                 await conn.execute(text(stmt))
+            # The Player Dashboard sign-up source reads player_registrations (migration 398/399).
+            try:
+                from app.services.player_registration_ddl import STATEMENTS as _REG
+                for stmt in _REG:
+                    await conn.execute(text(stmt))
+            except ImportError:
+                pass
         # The grade milestone scan reads the per-innings views and the club's
         # grade merges, the same way the Records page does. grade_merge_logs is
         # lifespan raw SQL, invisible to create_all, so it is copied here column

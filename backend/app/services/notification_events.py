@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from app.auth.capabilities import (
-    MANAGE_ASSETS, MANAGE_MERCH, MANAGE_QUALIFICATIONS, MANAGE_REPORTS,
+    MANAGE_ASSETS, MANAGE_MERCH, MANAGE_PLAYERS, MANAGE_QUALIFICATIONS, MANAGE_REPORTS,
 )
 
 #: Channels a notification can travel on. Email is the one that leaves the
@@ -271,6 +271,16 @@ EVENT_TYPES: tuple[EventType, ...] = (
         # are in" email can switch it on; sending it to everybody by default is
         # how a notification system trains people to ignore it.
         default_channels={CHANNEL_EMAIL: False, CHANNEL_IN_APP: True},
+    ),
+    EventType(
+        key="player_registered",
+        label="Someone signed up on the Player Dashboard",
+        description=(
+            "A past player found their record, or someone new (a player, parent, volunteer or "
+            "supporter) added themselves. Says whether it needs you to review it."
+        ),
+        category="people",
+        capability=MANAGE_PLAYERS,
     ),
     EventType(
         key="player_request_pending",

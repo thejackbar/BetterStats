@@ -147,7 +147,7 @@ async def setup(session_maker) -> None:
             "ALTER TABLE meta_ad_snapshots ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ",
         ):
             await db.execute(text(stmt))
-        # The trial count also reads usage_events since v9.152.2 (a visit through the ad can tie a
+        # The trial count also reads usage_events since v9.152.3 (a visit through the ad can tie a
         # registration to the campaign). Lifespan DDL, column for column, with its later ALTERs.
         await db.execute(text("DROP TABLE IF EXISTS usage_events"))
         await db.execute(text("""

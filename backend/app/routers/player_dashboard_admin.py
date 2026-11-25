@@ -116,20 +116,30 @@ async def regenerate_link(
 # MANAGE_PLAYERS: approving one changes a player record. Rows are archived, never deleted.
 
 _LIST_SQL = """
-SELECT r.*, COALESCE(p.display_name_override, p.name) AS player_name, p.is_player,
-       (SELECT MAX(g.played_at) FROM game_appearances ga JOIN games g ON g.id = ga.game_id
-         WHERE ga.player_id = r.player_id) AS last_played
-  FROM player_registrations r
-  LEFT JOIN players p ON p.id = r.player_id
- WHERE r.organisation_id = :o {extra}
- ORDER BY r.created_at DESC
+SELECT q.*,
+       -- Dormant: played, but not since the club's window opened, and not marked back since
+       -- (services/dormancy). Lets the list offer "Make active again" for a returning player.
+       (q.last_played IS NOT NULL
+        AND GREATEST(q.last_played, COALESCE(q.dormancy_cleared_on, q.last_played))
+            < (CURRENT_DATE - make_interval(months => q.dormancy_months))) AS player_dormant
+  FROM (
+    SELECT r.*, COALESCE(p.display_name_override, p.name) AS player_name, p.is_player,
+           p.status AS player_status, p.dormancy_cleared_on, COALESCE(o.dormancy_months, 24) AS dormancy_months,
+           (SELECT MAX(g.played_at) FROM game_appearances ga JOIN games g ON g.id = ga.game_id
+             WHERE ga.player_id = r.player_id) AS last_played
+      FROM player_registrations r
+      LEFT JOIN players p ON p.id = r.player_id
+      JOIN organisations o ON o.id = r.organisation_id
+     WHERE r.organisation_id = :o {extra}
+  ) q
+ ORDER BY q.created_at DESC
 """
 
 
 async def _rows(db: AsyncSession, club: Organisation, rid: Optional[uuid.UUID] = None) -> list[dict]:
     extra, params = "", {"o": str(club.id)}
     if rid is not None:
-        extra, params["id"] = "AND r.id = :id", str(rid)
+        extra, params["id"] = "AND r.id = CAST(:id AS uuid)", str(rid)
     rows = (await db.execute(text(_LIST_SQL.format(extra=extra)), params)).mappings().all()
     return [reg_svc.serialise(r) for r in rows]
 
@@ -167,8 +177,8 @@ async def _set_status(db: AsyncSession, club: Organisation, rid: str, status: st
     await db.execute(text(
         "UPDATE player_registrations SET status = :s, updated_at = now()"
         + (", reviewed_at = now(), reviewed_by = :by" if reviewed else "")
-        + " WHERE id = :id AND organisation_id = :o"
-    ), {"s": status, "by": by, "id": rid, "o": str(club.id)})
+        + " WHERE id = CAST(:id AS uuid) AND organisation_id = CAST(:o AS uuid)"
+    ), {"s": status, "by": by, "id": rid, "o": str(club.id)} if reviewed else {"s": status, "id": rid, "o": str(club.id)})
 
 
 @router.post("/registrations/{registration_id}/approve")
@@ -199,14 +209,17 @@ async def approve_registration(
             player.is_public = True
             changes.append("now a player")
     else:
-        if not (player.phone or "").strip() and reg["phone"]:
-            player.phone = reg["phone"]; changes.append("mobile added")
-        if not (player.email or "").strip() and reg["email"] and reg["contact_consent"]:
-            player.email = reg["email"]; changes.append("email added")
-        if player.date_of_birth is None and reg["date_of_birth"]:
-            player.date_of_birth = date.fromisoformat(reg["date_of_birth"]); changes.append("date of birth added")
+        # The admin is the proof here: fill what the record lacks, as a proven match would.
+        changes = reg_svc.fill_empty(player, {
+            "phone": reg["phone"], "email": reg["email"], "contact_consent": reg["contact_consent"],
+            "date_of_birth": date.fromisoformat(reg["date_of_birth"]) if reg["date_of_birth"] else None,
+            "playing": reg["playing"],
+        })
         if current:
-            player.dormancy_cleared_on = date.today(); changes.append("marked no longer dormant")
+            player.dormancy_cleared_on = date.today(); changes.append("back for selection")
+        await db.execute(text(
+            "UPDATE player_registrations SET matched_by = 'admin', applied = CAST(:a AS jsonb) WHERE id = CAST(:id AS uuid)"
+        ), {"a": __import__("json").dumps(changes), "id": reg["id"]})
     name = player.display_name
     by = user_label(user)
     await _set_status(db, club, reg["id"], "approved", by, reviewed=True)
@@ -275,6 +288,35 @@ async def restore_registration(
     return await _one(db, club, registration_id)
 
 
+@router.post("/registrations/{registration_id}/reactivate")
+async def reactivate_registered_player(
+    registration_id: str,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_PLAYERS)),
+):
+    """A returning player the club had marked inactive (or who went dormant): put them back on
+    the active list, for availability and selection. The same two switches an admin flips in
+    Players (status active) and BetterSelect (no longer dormant), audited."""
+    from app.services import player_audit
+    reg = await _one(db, club, registration_id)
+    player = await db.get(Player, uuid.UUID(reg["player_id"])) if reg["player_id"] else None
+    if player is None or player.organisation_id != club.id or not player.is_player:
+        raise HTTPException(status_code=409, detail="Only a player's record can be made active.")
+    was = player.status
+    player.status = "active"
+    player.dormancy_cleared_on = date.today()
+    name = player.display_name
+    await player_audit.record(
+        db, club_id=club.id, area="details", action="registration_reactivated",
+        summary=f"{name} made active again from their Player Dashboard registration",
+        player_id=player.id, player_name_=name, user=user,
+        detail={"registration_id": reg["id"], "status_before": was},
+    )
+    await db.commit()
+    return await _one(db, club, registration_id)
+
+
 class FollowUpBody(BaseModel):
     """Only what is sent changes. `contacted` true stamps now, false clears it."""
     admin_note: Optional[str] = None
@@ -302,7 +344,7 @@ async def update_registration(
         sets.append("contacted_at = " + ("COALESCE(contacted_at, now())" if body.contacted else "NULL"))
     if sets:
         await db.execute(text(
-            f"UPDATE player_registrations SET {', '.join(sets)}, updated_at = now() WHERE id = :id AND organisation_id = :o"
+            f"UPDATE player_registrations SET {', '.join(sets)}, updated_at = now() WHERE id = CAST(:id AS uuid) AND organisation_id = CAST(:o AS uuid)"
         ), params)
         await db.commit()
     return await _one(db, club, registration_id)

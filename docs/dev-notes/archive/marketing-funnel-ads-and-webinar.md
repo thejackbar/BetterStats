@@ -1745,7 +1745,7 @@ Verification:
 - `verify_meta_ads_streams_browser.mjs` 66 passed (section 6b, split payload; 6 still covers the fallback). Control on the previous page: 59 passed, 7 failed, exactly the new checks. 390px screenshot checked by eye.
 
 
-## v9.152.2: every signup the ad brought in counts (25 Nov 2026)
+## v9.152.3: every signup the ad brought in counts (25 Nov 2026)
 
 Reported: since the 10 Nov restart, at least 12 completed clubs on the club list said "Where from: Meta ad", while Free trial signups said 6 (and "8 other registrations from outside this campaign").
 
