@@ -132,6 +132,9 @@ SHARED_DDL_MODULES = (
     ("app.services.availability_site_link_ddl", "STATEMENTS"),
     # Migration 372. `organisations.player_dashboard_enabled`, on the shared Organisation model.
     ("app.services.player_dashboard_ddl", "STATEMENTS"),
+    # Migration 398. `organisations.player_registration_enabled`, on the shared Organisation model,
+    # and the `player_registrations` table the shared public player page writes.
+    ("app.services.player_registration_ddl", "STATEMENTS"),
     # Migration 356. Address and emergency contact columns, on the shared Player model.
     ("app.services.player_contact_ddl", "STATEMENTS"),
 )

@@ -57,9 +57,10 @@ from app.routers.availability import (
     upcoming_fixtures_by_date,
     window_refusal,
 )
-from app.services import fines as fines_svc, player_cards as cards_svc, player_dashboard, rate_limit, section_names, selection_rules as rules_svc, squad_sides
+from app.services import fines as fines_svc, player_cards as cards_svc, player_dashboard, player_registration, rate_limit, section_names, selection_rules as rules_svc, squad_sides
 from app.services import votes as vote_svc
 from app.services.fonts import public_font_fields
+from app.services.name_format import name_sort_key
 from app.services.grade_labels import categories_for_name, org_grade_category_sets
 from app.services.squad_next_game import fixtures_for_player
 from app.services.session_safety import rollback_keeping
@@ -206,6 +207,9 @@ async def _player_for_session(db: AsyncSession, request: Request, club: Organisa
     player = await db.get(Player, pid)
     if not player or player.organisation_id != club.id:
         raise HTTPException(status_code=401, detail="Not verified")
+    # A self-added record the club has since archived is out, cookie or not.
+    if not await player_registration.may_sign_in(db, club, player):
+        raise HTTPException(status_code=401, detail="Not verified")
     return player
 
 
@@ -228,12 +232,20 @@ async def get_landing(token: str, db: AsyncSession = Depends(get_db)):
     the type-to-search step. 404 if the link is disabled / unknown."""
     club = await _club_for_token(db, token, need_select=False)
     players = await active_self_service_players(db, club)
+    # People who added themselves and the club approved (supporters, past players new to the
+    # books...) are not players, so the roster misses them: they join the list here.
+    have = {p.id for p in players}
+    newcomers = [p for p in await player_registration.approved_newcomers(db, club) if p.id not in have]
+    if newcomers:
+        players = sorted(players + newcomers, key=lambda p: name_sort_key(p.display_name))
     return {
         "club": _club_branding(club),
         "require_pin": bool(club.availability_require_pin),
         "has_availability": player_dashboard.availability_live(club),
         "allow_maybe": allow_maybe(club),
         "week_names": rules_svc.club_config(club)["week_names"],
+        # "Can't find your name?" opens the register / past-player step.
+        "registration_open": player_registration.registration_open(club),
         "players": [
             {"id": str(p.id), "display_name": p.display_name, "has_phone": phone_last4(p.phone) is not None}
             for p in players
@@ -264,7 +276,9 @@ async def verify(token: str, body: VerifyBody, request: Request, response: Respo
     )
 
     player = await db.get(Player, pid)
-    if not player or player.organisation_id != club.id or not player.is_player:
+    # A real player, or someone who added themselves (a live registration); never a record
+    # the club archived. `may_sign_in` holds both rules.
+    if not player or player.organisation_id != club.id or not await player_registration.may_sign_in(db, club, player):
         # Don't distinguish "no such player" from "wrong PIN" — both count as a
         # failure so a leaked link can't be used to enumerate the roster.
         rate_limit.record_failure(lock_key, PIN_LOCKOUT_SECONDS)

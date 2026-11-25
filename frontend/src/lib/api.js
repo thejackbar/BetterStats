@@ -3526,6 +3526,13 @@ export const api = {
   setPlayerDashboardSettings: (data) =>
     request('/player-dashboard/settings', { method: 'POST', body: JSON.stringify(data) }),
   regeneratePlayerDashboardLink: () => request('/player-dashboard/regenerate', { method: 'POST' }),
+  // People who added themselves on the Player Dashboard ("Can't find your name?").
+  listPlayerRegistrations: () => request('/player-dashboard/registrations'),
+  approvePlayerRegistration: (id) => request(`/player-dashboard/registrations/${id}/approve`, { method: 'POST' }),
+  archivePlayerRegistration: (id) => request(`/player-dashboard/registrations/${id}/archive`, { method: 'POST' }),
+  restorePlayerRegistration: (id) => request(`/player-dashboard/registrations/${id}/restore`, { method: 'POST' }),
+  updatePlayerRegistration: (id, data) =>
+    request(`/player-dashboard/registrations/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
 
   // ─── Player Cards (BetterStats): the club's settings, behind MANAGE_SETTINGS ───
   getPlayerCardSettings: () => request('/player-cards/settings'),
@@ -3596,6 +3603,10 @@ export const api = {
   // ─── Public: self-service availability (no admin auth; player cookie) ───
   // Outside the admin surface — players reach these via the magic link + PIN.
   availPublicLanding: (token) => request(`/public/availability/${token}`),
+  availPublicRegisterForm: (token) => request(`/public/availability/${token}/register`),
+  availPublicPastPlayers: (token, q) => request(`/public/availability/${token}/past-players?q=${encodeURIComponent(q)}`),
+  availPublicRegister: (token, data) =>
+    request(`/public/availability/${token}/register`, { method: 'POST', body: JSON.stringify(data) }),
   availPublicVerify: (token, player_id, pin) =>
     request(`/public/availability/${token}/verify`, { method: 'POST', body: JSON.stringify({ player_id, pin }) }),
   availPublicSwitch: (token) =>

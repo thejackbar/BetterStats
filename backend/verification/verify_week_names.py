@@ -54,6 +54,13 @@ async def main():
     Session = async_sessionmaker(engine, expire_on_commit=False)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # The player page reads player_registrations on every name list and session (migration 398).
+        try:
+            from app.services.player_registration_ddl import STATEMENTS as _REG_DDL
+            for stmt in _REG_DDL:
+                await conn.execute(text(stmt))
+        except ImportError:
+            pass
         for stmt in SELECTION_RULE_STATEMENTS:
             await conn.execute(text(stmt))
     import app.routers.availability as av

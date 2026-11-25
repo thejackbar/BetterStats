@@ -568,6 +568,8 @@ class Organisation(Base):
     # chosen, which reads as on unless the club hid the page from its site. A club with
     # BetterSelect ignores it and keeps availability_self_service_enabled.
     player_dashboard_enabled = Column(Boolean, nullable=True)
+    # "Let people add themselves" on the Player Dashboard (migration 398). NULL reads as on.
+    player_registration_enabled = Column(Boolean, nullable=True)
     # ─── BetterFantasyCricket: public fantasy link (migration 087) ────────────
     # The per-club magic link members and supporters use to register and play
     # (mirrors availability_link_token). Rotatable; resolves to the club's

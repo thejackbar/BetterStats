@@ -22,7 +22,7 @@ from app.routers import support_chat as support_chat_router
 from app.routers import product_updates
 from app.routers import club_links as club_links_router
 from app.routers import privacy_requests as privacy_requests_router
-from app.routers import card_review, auth, organisations, players, games, game_fow, game_exclusions, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, cricketstatz, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, public_player_cards, player_cards_admin, player_dashboard_admin, public_net_checkin, net_manager, rotation, public_rotation, fines, website, comms, public_comms, public_ses, public_contact, public_trusted_clubs, public_teaser, public_webinar, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, trial_summary, meta_ads, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, public_billing, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
+from app.routers import card_review, auth, organisations, players, games, game_fow, game_exclusions, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, cricketstatz, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, public_player_register, public_player_cards, player_cards_admin, player_dashboard_admin, public_net_checkin, net_manager, rotation, public_rotation, fines, website, comms, public_comms, public_ses, public_contact, public_trusted_clubs, public_teaser, public_webinar, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, trial_summary, meta_ads, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, public_billing, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
     stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store, \
     club_diary, social_media, votes, public_votes, roles_activities, club_room, roster, facility_requests, directory, \
     public_club_room, sales_workspace, sales_commissions, honours, role_programs
@@ -4612,6 +4612,11 @@ async def lifespan(app: FastAPI):
         from app.services.player_dashboard_ddl import STATEMENTS as _PLAYER_DASHBOARD_DDL
         for _stmt in _PLAYER_DASHBOARD_DDL:
             await conn.execute(text(_stmt))
+        # Migration 398: Player Dashboard self-registration. Same one-copy rule: this list and
+        # alembic's 398 both run services/player_registration_ddl.STATEMENTS.
+        from app.services.player_registration_ddl import STATEMENTS as _PLAYER_REGISTRATION_DDL
+        for _stmt in _PLAYER_REGISTRATION_DDL:
+            await conn.execute(text(_stmt))
         # Migration 373: a hand-entered game can be marked as the grand final, which the automatic
         # premierships read. Same one-copy rule: this list and alembic's 373 both run
         # services/manual_grand_final_ddl.STATEMENTS.
@@ -6802,6 +6807,7 @@ app.include_router(votes.router, dependencies=[Depends(require_module("select"))
 # design — it resolves the club from the link token and enforces entitlement +
 # enabled-flag itself, so it is NOT wrapped in require_module.
 app.include_router(public_availability.router)                                            # BetterSelect (public)
+app.include_router(public_player_register.router)                                         # Player Dashboard: Can't find your name? (public, rate limited)
 app.include_router(public_player_cards.router)                                            # Player Cards (public, behind the player page PIN)
 app.include_router(player_cards_admin.router)                                             # Player Cards settings (BetterStats, MANAGE_SETTINGS)
 app.include_router(player_dashboard_admin.router)                                         # Player Dashboard settings (BetterStats, MANAGE_SETTINGS)

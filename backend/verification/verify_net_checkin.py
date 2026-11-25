@@ -71,6 +71,13 @@ async def build_schema():
         await conn.execute(text("DROP SCHEMA public CASCADE"))
         await conn.execute(text("CREATE SCHEMA public"))
         await conn.run_sync(Base.metadata.create_all)
+        # The player page reads player_registrations on every name list and session (migration 398).
+        try:
+            from app.services.player_registration_ddl import STATEMENTS as _REG_DDL
+            for stmt in _REG_DDL:
+                await conn.execute(text(stmt))
+        except ImportError:
+            pass
         # Lifespan DDL (main.py), not on the ORM model: the shared "not played" predicate reads it.
         await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"))
         # create_all doesn't add the server defaults some raw-SQL migrations

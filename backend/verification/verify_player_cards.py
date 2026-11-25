@@ -213,6 +213,13 @@ async def build_schema() -> None:
             await conn.execute(text(sql.replace("OR REPLACE ", "")))
         for stmt in SUPERSEDED_DDL:
             await conn.execute(text(stmt))
+        # The player page reads player_registrations on every session (migration 398).
+        try:
+            from app.services.player_registration_ddl import STATEMENTS as _REG_DDL
+            for stmt in _REG_DDL:
+                await conn.execute(text(stmt))
+        except ImportError:
+            pass
         for stmt in CARD_DDL + SWAP_DDL + SOCIAL_DDL + COMMUNITY_DDL + PACKS_DDL + DESIGNS_DDL + GIFTS_DDL + PHOTOS_DDL + LOOKS_DDL + CHALLENGES_DDL + WINNER_DDL + DISMISSED_DDL + MARKET_DDL + PILE_DDL:
             await conn.execute(text(stmt))
 

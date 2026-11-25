@@ -158,6 +158,13 @@ async def route_checks(db_url: str) -> None:
     from app.services.selection_rule_ddl import SELECTION_RULE_STATEMENTS
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # The player page reads player_registrations on every name list and session (migration 398).
+        try:
+            from app.services.player_registration_ddl import STATEMENTS as _REG_DDL
+            for stmt in _REG_DDL:
+                await conn.execute(text(stmt))
+        except ImportError:
+            pass
         # The matrix reads the club's association rules: a raw-SQL lifespan
         # table create_all never built. Lifted from the shared DDL, not stubbed.
         for stmt in SELECTION_RULE_STATEMENTS:

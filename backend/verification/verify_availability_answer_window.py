@@ -61,6 +61,13 @@ async def build_schema() -> None:
         await conn.execute(text("DROP SCHEMA public CASCADE"))
         await conn.execute(text("CREATE SCHEMA public"))
         await conn.run_sync(Base.metadata.create_all)
+        # The player page reads player_registrations on every name list and session (migration 398).
+        try:
+            from app.services.player_registration_ddl import STATEMENTS as _REG_DDL
+            for stmt in _REG_DDL:
+                await conn.execute(text(stmt))
+        except ImportError:
+            pass
         # Lifespan tables the fixture reads touch (copied as verify_two_day_availability.py does).
         for ddl in (
             """CREATE TABLE IF NOT EXISTS season_aliases (

@@ -17,6 +17,7 @@ import { formatPlayerName, nameMatchesSearch } from '../lib/nameFormat'
 import { AvailabilityEditor, ALL_CHOICES, unansweredNextWeek } from './playerhome/AvailabilityEditor'
 import Group, { useOpenSections } from './playerhome/Group'
 import DetailsModal from './playerhome/DetailsModal'
+import RegisterFlow from './playerhome/RegisterFlow'
 import CardsSummary from './playerhome/CardsSummary'
 import PlayerCardsApp from './playercards/PlayerCardsApp'
 import FantasyCard, { fmtLockShort, nextDeadline, ordinal } from './playerhome/FantasyCard'
@@ -603,10 +604,11 @@ export default function PublicAvailability() {
   }, [])
   const autoPicked = useRef(false)
   const profileRef = useRef(null) // the profile read started with the page, for MyPage to use once
-  const [step, setStep] = useState('loading') // loading | pick | pin | weekend | dead
+  const [step, setStep] = useState('loading') // loading | pick | pin | register | weekend | dead
   const [club, setClub] = useState(null)
   const [requirePin, setRequirePin] = useState(true)
   const [hasAvailability, setHasAvailability] = useState(true) // false for a club without BetterSelect: no games to answer
+  const [registrationOpen, setRegistrationOpen] = useState(false) // "Can't find your name?" lets people add themselves
   const [players, setPlayers] = useState([])
   const [search, setSearch] = useState('')
   const [chosen, setChosen] = useState(null) // {id, display_name, has_phone}
@@ -654,6 +656,7 @@ export default function PublicAvailability() {
         setClub(d.club)
         setRequirePin(d.require_pin)
         setHasAvailability(d.has_availability !== false)
+        setRegistrationOpen(d.registration_open === true)
         setPlayers(d.players || [])
         // Already verified on this device? Jump straight to the weekend.
         if (mine.ok) { setMe(mine.d); setStep('weekend') } else { profileRef.current = null; setStep('pick') }
@@ -799,7 +802,7 @@ export default function PublicAvailability() {
           </div>
         )}
 
-        {(step === 'pick' || step === 'pin') && <ClubHeader club={club} hasAvailability={hasAvailability} />}
+        {(step === 'pick' || step === 'pin' || step === 'register') && <ClubHeader club={club} hasAvailability={hasAvailability} />}
 
         {/* Step 1 — pick your name */}
         {step === 'pick' && (
@@ -830,10 +833,26 @@ export default function PublicAvailability() {
                 </button>
               ))}
             </div>
-            <p className="text-center text-pb-faintest text-[11px] mt-5">
-              Can’t find yourself, or no mobile on file? Ask your club admin.
-            </p>
+            {registrationOpen ? (
+              <div className="mt-5 text-center">
+                <button type="button" onClick={() => { setError(''); setStep('register') }} data-cant-find
+                  className="w-full py-3 rounded-xl border pb-hairline font-semibold text-sm hover:bg-pb-surface2 transition-colors">
+                  Can’t find your name? Register
+                </button>
+                <p className="text-pb-faintest text-[11px] mt-2">Past players, parents, volunteers and supporters welcome. No mobile on file? Ask your club admin.</p>
+              </div>
+            ) : (
+              <p className="text-center text-pb-faintest text-[11px] mt-5">
+                Can’t find yourself, or no mobile on file? Ask your club admin.
+              </p>
+            )}
           </div>
+        )}
+
+        {/* Can't find your name: claim an older record, or add yourself */}
+        {step === 'register' && (
+          <RegisterFlow token={token} requirePin={requirePin} initialQuery={search} fmtName={fmtName}
+            onSignedIn={enterWeekend} onBack={() => setStep('pick')} />
         )}
 
         {/* Step 2 — prove it's you */}

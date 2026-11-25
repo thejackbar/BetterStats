@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import QRCode from 'qrcode'
 import { api } from '../../lib/api'
 import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
@@ -99,7 +100,21 @@ export default function AdminPlayerDashboard() {
                 <Segmented sm value={cfg.show_on_site ? 'on' : 'off'} onChange={(v) => update({ show_on_site: v === 'on' })}
                   options={[{ value: 'on', label: 'Shown' }, { value: 'off', label: 'Hidden' }]} />
               </Setting>
+              <Setting label="Self-registration" attr="data-dash-register-setting">
+                <Segmented sm value={cfg.registration_enabled === false ? 'off' : 'on'} onChange={(v) => update({ registration_enabled: v === 'on' })}
+                  options={[{ value: 'on', label: 'On' }, { value: 'off', label: 'Off' }]} />
+              </Setting>
             </div>
+            <p className="text-[11.5px] text-pb-faintest -mt-2" data-dash-register-note>
+              {cfg.registration_enabled === false
+                ? 'Nobody can add themselves. The name list says to ask a club admin instead.'
+                : 'People who can’t find their name can tap Register: past players find their old record, and anyone else (parents, volunteers, supporters) adds themselves. '}
+              {cfg.registration_enabled !== false && (
+                <Link to="/admin/player-registrations" className="underline" data-dash-register-link>
+                  {cfg.registrations_pending ? `${cfg.registrations_pending} to review` : 'See who has registered'}
+                </Link>
+              )}
+            </p>
             <p className="text-[11.5px] text-pb-faintest -mt-2" data-dash-state-note>
               {enabled
                 ? (cfg.show_on_site

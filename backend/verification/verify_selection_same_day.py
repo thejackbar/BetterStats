@@ -119,6 +119,13 @@ async def build_schema() -> None:
                 await conn.execute(text(stmt))
         except ImportError:
             pass
+        # The player page reads player_registrations on every name list and session (migration 398).
+        try:
+            from app.services.player_registration_ddl import STATEMENTS as _REG_DDL
+            for stmt in _REG_DDL:
+                await conn.execute(text(stmt))
+        except ImportError:
+            pass
         await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"))
         json_cols = (await conn.execute(text(
             "SELECT table_name, column_name FROM information_schema.columns "

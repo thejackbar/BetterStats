@@ -77,6 +77,13 @@ def _create_stmt(table):
 async def build_schema() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # The player page reads player_registrations on every name list and session (migration 398).
+        try:
+            from app.services.player_registration_ddl import STATEMENTS as _REG_DDL
+            for stmt in _REG_DDL:
+                await conn.execute(text(stmt))
+        except ImportError:
+            pass
         # Harness tables the confirm path reads (copied from the lifespan, as in
         # verify_selection_same_day.py).
         for ddl in (
