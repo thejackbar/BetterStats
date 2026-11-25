@@ -442,6 +442,44 @@ async def _src_player_request_pending(session: AsyncSession, org_id, config: dic
     ]
 
 
+async def _src_player_registered(session: AsyncSession, org_id, config: dict) -> list[dict]:
+    """Player Dashboard sign-ups (services/player_registration). One notice per registration,
+    raised the moment it is made (``raise_now``) and caught up here if that missed."""
+    from app.services import player_registration as reg_svc
+    since = datetime.now(timezone.utc) - timedelta(days=LOOKBACK_DAYS)
+    rows = (await session.execute(text("""
+        SELECT r.id, r.kind, r.role, r.status, r.matched_by, r.first_name, r.last_name, r.interests,
+               r.created_at, COALESCE(p.display_name_override, p.name) AS player_name
+        FROM player_registrations r LEFT JOIN players p ON p.id = r.player_id
+        WHERE r.organisation_id = :org AND r.created_at >= :since AND r.status <> 'archived'
+        ORDER BY r.created_at ASC LIMIT :cap
+    """), {"org": str(org_id), "since": since, "cap": MAX_PER_EVENT})).mappings().all()
+    out = []
+    for r in rows:
+        who = f"{r['first_name'] or ''} {r['last_name']}".strip()
+        role = reg_svc.ROLE_LABELS.get(r["role"], r["role"]).lower()
+        likes = [reg_svc.INTEREST_LABELS.get(k, k).lower() for k in (r["interests"] or [])]
+        extra = f" Interested in {', '.join(likes)}." if likes else ""
+        if r["kind"] == "claim" and r["matched_by"] == "admin":
+            title = f"{who} signed up on the Player Dashboard"
+            body = f"Confirmed as {r['player_name']} by an admin. Signed up as a {role}.{extra}"
+        elif r["kind"] == "claim" and r["matched_by"]:
+            title = f"{who} signed up on the Player Dashboard"
+            body = f"Matched to their record ({r['player_name']}) by their {'mobile' if r['matched_by'] == 'mobile' else 'PIN'}. Signed up as a {role}.{extra}"
+        elif r["kind"] == "claim":
+            title = f"{who} says they are {r['player_name']}"
+            body = f"There is no mobile on that record, so they need you to confirm it before they can log in.{extra}"
+        else:
+            title = f"{who} added themselves on the Player Dashboard"
+            body = f"New to the club's records, as a {role}. Approve them to put them on the name list.{extra}"
+        out.append({
+            "dedupe_key": f"player_registered:{r['id']}",
+            "title": title, "body": body, "link": "/admin/player-registrations",
+            "payload": {"registration_id": str(r["id"])}, "occurred_at": r["created_at"],
+        })
+    return out
+
+
 async def _src_sync_failed(session: AsyncSession, org_id, config: dict) -> list[dict]:
     since = datetime.now(timezone.utc) - timedelta(days=LOOKBACK_DAYS)
     rows = (await session.execute(text("""
@@ -512,9 +550,26 @@ SOURCES = {
     "merch_low_stock": _src_merch_low_stock,
     "report_pending": _src_report_pending,
     "player_request_pending": _src_player_request_pending,
+    "player_registered": _src_player_registered,
     "sync_failed": _src_sync_failed,
     "sync_completed": _src_sync_completed,
 }
+
+
+async def raise_now(org_id, event_key: str) -> None:
+    """Run ONE source for one club straight away, on its own session, for something that just
+    happened in a request (rule 14: after the caller's commit, never raises). The daily scan
+    still runs the same source, and the dedupe key stops the notice being raised twice."""
+    source = SOURCES.get(event_key)
+    if source is None:
+        return
+    try:
+        async with async_session_maker() as session:
+            for item in (await source(session, org_id, {}))[:MAX_PER_EVENT]:
+                await notif.emit(session, org_id, event_key=event_key, **item)
+            await session.commit()
+    except Exception:
+        logger.exception("notification raise_now: %s failed for org %s", event_key, org_id)
 
 
 # ─── The scan ────────────────────────────────────────────────────────────────

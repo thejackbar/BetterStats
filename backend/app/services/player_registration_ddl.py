@@ -20,7 +20,7 @@ statement is idempotent.
     reads as on, so the button appears for every club that has the dashboard.
 """
 
-STATEMENTS: list[str] = [
+STATEMENTS_398: list[str] = [
     """
     CREATE TABLE IF NOT EXISTS player_registrations (
         id UUID PRIMARY KEY,
@@ -52,7 +52,51 @@ STATEMENTS: list[str] = [
     "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS player_registration_enabled BOOLEAN",
 ]
 
-DOWNGRADE: list[str] = [
+DOWNGRADE_398: list[str] = [
     "ALTER TABLE organisations DROP COLUMN IF EXISTS player_registration_enabled",
     "DROP TABLE IF EXISTS player_registrations",
 ]
+
+# Migration 399: smart matching and playing details.
+#
+# ``matched_by``  how a claimed record was proven theirs: 'mobile' (the full mobile they typed is the
+#                 one on the record), 'pin' (last four digits of the mobile on file) or 'admin' (an
+#                 admin approved it). NULL for a new person and an unproven claim.
+# ``playing``     what they said about their cricket: player_role, batting_hand, bowling_action,
+#                 bowling_type, is_opening_batsman, is_overseas, overseas_country.
+# ``applied``     the fields this registration wrote onto the player (labels), so the admin list can
+#                 say what changed. Only empty fields are ever written.
+STATEMENTS_399: list[str] = [
+    "ALTER TABLE player_registrations ADD COLUMN IF NOT EXISTS matched_by TEXT",
+    "ALTER TABLE player_registrations ADD COLUMN IF NOT EXISTS playing JSONB NOT NULL DEFAULT '{}'::jsonb",
+    "ALTER TABLE player_registrations ADD COLUMN IF NOT EXISTS applied JSONB NOT NULL DEFAULT '[]'::jsonb",
+]
+
+# Run ONCE by Alembic 399, never by the lifespan. v9.152.0 left a claim that was proven with the
+# PIN waiting for review. Those were signed in on the spot (the audit row says
+# 'registration_claimed', written only after a PIN matched where the club had the PIN on), so they
+# are matches, not requests: mark them approved and matched by PIN. Bounded to rows written before
+# this release, so it can never touch a later one.
+FIX_399: list[str] = [
+    """
+    UPDATE player_registrations r
+       SET status = 'approved', matched_by = 'pin', updated_at = now()
+     WHERE r.kind = 'claim' AND r.status = 'pending' AND r.matched_by IS NULL
+       AND r.created_at < TIMESTAMPTZ '2026-11-26 00:00:00+00'
+       AND EXISTS (SELECT 1 FROM organisations o
+                    WHERE o.id = r.organisation_id AND o.availability_require_pin IS TRUE)
+       AND EXISTS (SELECT 1 FROM audit_events a
+                    WHERE a.organisation_id = r.organisation_id AND a.player_id = r.player_id
+                      AND a.action = 'registration_claimed')
+    """,
+]
+
+DOWNGRADE_399: list[str] = [
+    "ALTER TABLE player_registrations DROP COLUMN IF EXISTS applied",
+    "ALTER TABLE player_registrations DROP COLUMN IF EXISTS playing",
+    "ALTER TABLE player_registrations DROP COLUMN IF EXISTS matched_by",
+]
+
+# Everything the lifespan (and football's schema mirror) runs on every boot.
+STATEMENTS: list[str] = STATEMENTS_398 + STATEMENTS_399
+DOWNGRADE: list[str] = DOWNGRADE_399 + DOWNGRADE_398
