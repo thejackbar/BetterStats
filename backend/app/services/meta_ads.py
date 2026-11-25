@@ -1322,6 +1322,7 @@ async def get_selected_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS,
         GROUP BY o.name, o.slug, o.id
     """), {"days": days, "since": _scope_since(scope, manual=False)})).mappings().all()
 
+    touches = await campaign_visit_touches(db)
     clubs: dict[str, dict] = {}
 
     def _upsert(name, rank, *, first_at=None, last_at=None, org_id=None,
@@ -1374,7 +1375,7 @@ async def get_selected_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS,
                 via_meta=((r["utm_content"] in utm_contents)
                           or ((r["utm_source"] or "").strip().lower() in _META_SOURCES)),
                 # The registration is classified by the SAME rule as the headline count.
-                via_campaign=_attribution_matches_campaign(r["attribution"]),
+                via_campaign=registration_in_campaign(r["attribution"], r["org_id"], touches),
                 origin=origin_from_attribution(r["attribution"]))
 
     # Newest selection first; a club with no timestamp (shouldn't happen — every
@@ -2191,6 +2192,71 @@ _VISITOR_ORIGIN_SQL = """(array_agg(DISTINCT (
 )))[1:5]"""
 
 
+# ── A registration the campaign's ad brought in, whatever its stored first touch says ──
+# `signup_attribution` is the browser's FIRST touch (lib/visitor.js keeps it in localStorage and
+# only upgrades a touch that had no signal). Two real journeys fall through it:
+#   * the browser first came through an earlier campaign's ad, then this campaign's ad, then
+#     registered: the stored tags name the old campaign, so the rule above refuses it;
+#   * the ad was clicked in Facebook's or Instagram's in-app browser, the club picked there, and
+#     the form finished in Safari or Chrome: the registering browser stored no signal at all.
+# The club list's "Where from" already read the visitors' own page views, so it said "Meta ad"
+# for these while the trial count left them out (12 counted by hand against 6, 25 Nov 2026).
+# This reads the same evidence for the count: the registering browser (the submit's
+# `conversion` event carries visitor and org) and any browser that picked that club in the
+# wizard (`club_prepared`, by club name, as the club list merges), each with a page view up to
+# the registration that belongs to this campaign (`_event_in_campaign`, the same rule as the
+# rest of the page). Our own outreach email stays email, as "Where from" ranks it.
+async def campaign_visit_touches(db: AsyncSession) -> dict[str, dict]:
+    """{org_id: touch} for self-serve registrations a browser linked to them reached through the
+    CURRENT campaign, before registering. `touch` is that browser's latest such page view's tags
+    (utm_source / utm_campaign / utm_content), so a creative is credited with the ad that
+    brought the visit, not a stale first touch."""
+    await _use_active_campaign(db)
+    rows = (await db.execute(text(f"""
+        WITH regs AS (
+            SELECT o.id, lower(trim(o.name)) AS nm, MIN(k.created_at) AS at
+              FROM organisations o
+              JOIN self_serve_idempotency_keys k ON k.org_id = o.id
+             WHERE o.signup_source IS NOT NULL AND o.archived_at IS NULL
+             GROUP BY o.id, o.name
+        ), linked AS (
+            SELECT r.id, r.at, ue.visitor_id
+              FROM regs r
+              JOIN usage_events ue ON ue.event_type = 'conversion' AND ue.org_id = r.id
+             WHERE ue.visitor_id IS NOT NULL
+            UNION
+            SELECT r.id, r.at, ue.visitor_id
+              FROM regs r
+              JOIN usage_events ue ON ue.event_type = 'self_serve_step' AND ue.route = 'club_prepared'
+                                  AND lower(trim(ue.metadata->>'club_name')) = r.nm
+             WHERE ue.visitor_id IS NOT NULL AND ue.created_at <= r.at
+        )
+        SELECT DISTINCT ON (l.id) l.id::text AS org_id,
+               COALESCE(NULLIF(mv.utm_source, ''), substring(mv.path from 'utm_source=([^&]+)')) AS utm_source,
+               COALESCE(NULLIF(mv.utm_campaign, ''), substring(mv.path from 'utm_campaign=([^&]+)')) AS utm_campaign,
+               COALESCE(NULLIF(mv.utm_content, ''), substring(mv.path from 'utm_content=([^&]+)')) AS utm_content
+          FROM linked l
+          JOIN usage_events mv ON mv.visitor_id = l.visitor_id
+         WHERE mv.event_type = 'page_view' AND mv.user_id IS NULL
+           AND mv.created_at <= l.at
+           AND {_event_in_campaign("mv")}
+         ORDER BY l.id, mv.created_at DESC
+    """), _campaign_tag_params())).mappings().all()
+    return {r["org_id"]: {"utm_source": r["utm_source"], "utm_campaign": r["utm_campaign"],
+                          "utm_content": r["utm_content"]} for r in rows}
+
+
+def registration_in_campaign(attribution: dict | None, org_id, visit_touches: dict[str, dict]) -> bool:
+    """The ONE rule for "is this registration the selected campaign's": its stored attribution
+    matches (_attribution_matches_campaign), or a browser linked to it came through the
+    campaign's ad before it registered and its stored first touch is not our own email."""
+    if _attribution_matches_campaign(attribution):
+        return True
+    if str(org_id) not in visit_touches:
+        return False
+    return origin_from_attribution(attribution).get("channel") != "email"
+
+
 async def attributed_registrations(db: AsyncSession) -> list[dict]:
     """Every non-archived self-serve registration attributed to the CURRENT
     campaign, each with its signup time and where it sits against the campaign's
@@ -2201,25 +2267,32 @@ async def attributed_registrations(db: AsyncSession) -> list[dict]:
     A campaign that never restarted skips the timestamp join entirely: its scope
     is always 'counted' and the query is the one it always was."""
     await _use_active_campaign(db)
+    touches = await campaign_visit_touches(db)
     if _counts_from() is None:
         rows = (await db.execute(text("""
-            SELECT signup_attribution AS attribution, NULL::timestamptz AS signed_up_at
+            SELECT id, signup_attribution AS attribution, NULL::timestamptz AS signed_up_at
             FROM organisations
-            WHERE signup_source IS NOT NULL AND archived_at IS NULL AND signup_attribution IS NOT NULL
+            WHERE signup_source IS NOT NULL AND archived_at IS NULL
         """))).mappings().all()
     else:
         rows = (await db.execute(text("""
-            SELECT o.signup_attribution AS attribution, MIN(k.created_at) AS signed_up_at
+            SELECT o.id, o.signup_attribution AS attribution, MIN(k.created_at) AS signed_up_at
               FROM organisations o
               LEFT JOIN self_serve_idempotency_keys k ON k.org_id = o.id
-             WHERE o.signup_source IS NOT NULL AND o.archived_at IS NULL AND o.signup_attribution IS NOT NULL
+             WHERE o.signup_source IS NOT NULL AND o.archived_at IS NULL
              GROUP BY o.id, o.signup_attribution
         """))).mappings().all()
-    return [
-        {"attribution": r["attribution"], "signed_up_at": r["signed_up_at"],
-         "scope": registration_scope(r["signed_up_at"])}
-        for r in rows if _attribution_matches_campaign(r["attribution"])
-    ]
+    out = []
+    for r in rows:
+        if not registration_in_campaign(r["attribution"], r["id"], touches):
+            continue
+        # The tags that tie it to the campaign: its own when they match, else the visit's.
+        by_visit = not _attribution_matches_campaign(r["attribution"])
+        out.append({"org_id": str(r["id"]), "attribution": r["attribution"],
+                    "campaign_tags": touches.get(str(r["id"])) if by_visit else r["attribution"],
+                    "by_visit": by_visit, "signed_up_at": r["signed_up_at"],
+                    "scope": registration_scope(r["signed_up_at"])})
+    return out
 
 
 async def get_registrations_outside_campaign(db: AsyncSession) -> int:
@@ -2230,15 +2303,16 @@ async def get_registrations_outside_campaign(db: AsyncSession) -> int:
     start = _counts_from()
     if start is None:
         return 0
+    touches = await campaign_visit_touches(db)
     rows = (await db.execute(text("""
-        SELECT o.signup_attribution AS attribution
+        SELECT o.id, o.signup_attribution AS attribution
           FROM organisations o
           JOIN self_serve_idempotency_keys k ON k.org_id = o.id
          WHERE o.signup_source IS NOT NULL AND o.archived_at IS NULL
          GROUP BY o.id, o.signup_attribution
         HAVING MIN(k.created_at) >= CAST(:start AS timestamptz)
     """), {"start": start})).mappings().all()
-    return sum(1 for r in rows if not _attribution_matches_campaign(r["attribution"]))
+    return sum(1 for r in rows if not registration_in_campaign(r["attribution"], r["id"], touches))
 
 
 async def get_registration_scope(db: AsyncSession) -> dict:
@@ -2302,21 +2376,21 @@ async def get_registration_count_since(db: AsyncSession, since: date) -> dict:
     restructure", and not worth implying a precision we do not have.
     """
     await _use_active_campaign(db)
+    touches = await campaign_visit_touches(db)
     rows = (await db.execute(text("""
-        SELECT o.signup_attribution AS attribution,
+        SELECT o.id, o.signup_attribution AS attribution,
                MIN(k.created_at) AS signed_up_at
           FROM organisations o
           LEFT JOIN self_serve_idempotency_keys k ON k.org_id = o.id
          WHERE o.signup_source IS NOT NULL
            AND o.archived_at IS NULL
-           AND o.signup_attribution IS NOT NULL
          GROUP BY o.id, o.signup_attribution
     """))).mappings().all()
 
     count = 0
     undated = 0
     for row in rows:
-        if not _attribution_matches_campaign(row["attribution"]):
+        if not registration_in_campaign(row["attribution"], row["id"], touches):
             continue
         at = row["signed_up_at"]
         if at is None:
@@ -2717,7 +2791,8 @@ async def get_creative_performance(db: AsyncSession, ads: list[dict]) -> list[di
     await _use_active_campaign(db)
     from app.services import webinar
 
-    trial_tags = [r["attribution"] for r in await attributed_registrations(db) if r["scope"] == "counted"]
+    trial_tags = [r.get("campaign_tags") or r["attribution"]
+                  for r in await attributed_registrations(db) if r["scope"] == "counted"]
     webinar_tags = (await db.execute(text("""
         SELECT utm_source, utm_campaign, utm_content, click_source
           FROM webinar_registrations

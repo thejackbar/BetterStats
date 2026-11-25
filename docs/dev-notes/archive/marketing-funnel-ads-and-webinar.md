@@ -1743,3 +1743,19 @@ Asked: on the Meta Ads page, 6 free trial signups from 47 clubs selected showed 
 Verification:
 - `verify_meta_ads_new_campaign.py` 36 passed (8 new, pure functions). Control on the previous `meta_ads.py`: 29 passed, 7 failed, no crash (presence-safe reads).
 - `verify_meta_ads_streams_browser.mjs` 66 passed (section 6b, split payload; 6 still covers the fallback). Control on the previous page: 59 passed, 7 failed, exactly the new checks. 390px screenshot checked by eye.
+
+
+## v9.152.2: every signup the ad brought in counts (25 Nov 2026)
+
+Reported: since the 10 Nov restart, at least 12 completed clubs on the club list said "Where from: Meta ad", while Free trial signups said 6 (and "8 other registrations from outside this campaign").
+
+Cause: two tests for one question. The club list's origin and `via_campaign` read the visitors' own page views (`_VISITOR_ORIGIN_SQL`, the beacon's `_campaign_visitor_exists`). The count read only `organisations.signup_attribution`, which is lib/visitor.js's FIRST touch, kept in localStorage and upgraded only from a touch with no signal. So it missed (a) a browser that first came through an earlier campaign's ad (its tags name another known campaign, and `_attribution_matches_campaign` refuses those by design), then this campaign's ad, and (b) an ad clicked in Facebook's or Instagram's in-app browser where the club was picked, finished in another browser that stored no signal. Production data was not read from here; these are the paths the code allows that the club list counts and the headline did not, and the control run below reproduces both.
+
+- `campaign_visit_touches(db)`: org ids whose registering visitor (the submit's `conversion` usage event carries `visitor_id` and `org_id`) or a `club_prepared` visitor for that club name had a page view that is `_event_in_campaign`, up to the registration time. Returns the latest such page view's tags.
+- `registration_in_campaign(attribution, org_id, touches)`: stored match, or a visit match whose stored origin is not email. Used by `attributed_registrations` (headline, scope, creatives), `get_registrations_outside_campaign`, `get_registration_count_since`, `get_selected_clubs` (completed rows) and the `/ad-signups` route. Registrations with NULL attribution are now read too (only a visit can admit them).
+- Creatives credit `campaign_tags`: a visit-matched signup goes to the ad that brought the visit, not the stale first touch.
+- Not changed: webinar registrations (they store their own tags, no visitor link); a different device with no club pick on record still cannot be tied.
+
+Verification:
+- `verify_meta_ads_visit_attribution.py` (new, real Postgres, shipped services and the `/ad-signups` route body): 15 passed. Control on the previous services: 7 passed, 8 failed, no crash; the old code counted 1 of the 3 and already marked the in-app browser club as the campaign's on the club list while leaving it out of the count.
+- `verify_meta_ads_campaign_scope.py` 20, `verify_meta_ads_snapshot_fixes.py` 20, `verify_meta_ads_club_origin.py` 35, `verify_meta_ads_season_page_clubs.py` 15, `verify_meta_ads_new_campaign.py` 36, all passed. `verify_meta_ads_streams.py` needed `usage_events` in its harness (lifespan DDL copied); 71 passed, 2 failed, the same 2 on the previous code (its provisional-window checks are dated September 2026 and have aged out).

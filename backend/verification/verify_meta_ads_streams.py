@@ -147,6 +147,20 @@ async def setup(session_maker) -> None:
             "ALTER TABLE meta_ad_snapshots ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ",
         ):
             await db.execute(text(stmt))
+        # The trial count also reads usage_events since v9.152.2 (a visit through the ad can tie a
+        # registration to the campaign). Lifespan DDL, column for column, with its later ALTERs.
+        await db.execute(text("DROP TABLE IF EXISTS usage_events"))
+        await db.execute(text("""
+            CREATE TABLE usage_events (
+                id BIGSERIAL PRIMARY KEY, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                event_type TEXT NOT NULL DEFAULT 'api', method TEXT NOT NULL, path TEXT NOT NULL, route TEXT,
+                status INTEGER NOT NULL DEFAULT 0, duration_ms INTEGER, user_id UUID, org_id UUID, ip_hash TEXT,
+                user_agent TEXT, referer TEXT, metadata JSONB DEFAULT '{}', visitor_id UUID, utm_source TEXT,
+                utm_medium TEXT, utm_campaign TEXT, utm_content TEXT, utm_id TEXT, click_id TEXT,
+                traffic_source TEXT, landing_path TEXT, country TEXT, region TEXT, city TEXT,
+                lat DOUBLE PRECISION, lng DOUBLE PRECISION, time_on_page_ms INTEGER, resolved_marketing_club_id UUID
+            )
+        """))
         await db.execute(text("""
             CREATE TABLE platform_settings (
                 id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),

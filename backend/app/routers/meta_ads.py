@@ -354,9 +354,10 @@ async def ad_signups(db: AsyncSession = Depends(get_db), _: User = Depends(requi
         .where(Organisation.signup_source.isnot(None), Organisation.archived_at.is_(None))
         .options(selectinload(Organisation.module_subscriptions))
     )).all()
+    touches = await meta_ads.campaign_visit_touches(db)
     orgs = [
         (org, score, scored_at) for org, score, scored_at in orgs
-        if meta_ads._attribution_matches_campaign(org.signup_attribution)
+        if meta_ads.registration_in_campaign(org.signup_attribution, org.id, touches)
     ]
 
     # Registration timestamps come from the self-serve idempotency keys (the
