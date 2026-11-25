@@ -2608,6 +2608,11 @@ def build_streams(ads: list[dict], campaign: dict, *, trial_results: int,
             bucket, results,
             club_selected=club_selected if stream == STREAM_TRIAL else None,
         )
+        bucket["reach_funnel"] = compute_stream_reach_funnel(bucket)
+        bucket["conversion_funnel"] = compute_stream_conversion_funnel(
+            bucket, results,
+            club_selected=club_selected if stream == STREAM_TRIAL else None,
+        )
         if stream == STREAM_WEBINAR:
             bucket["unattributed_results"] = webinar_counts.get("unattributed", 0)
             bucket["total_registrations"] = webinar_counts.get("total", 0)
@@ -2650,7 +2655,33 @@ def compute_stream_funnel(bucket: dict, results: int, club_selected: float | Non
         # own stage, which read as a 23,200% "continued" between them).
         stages_raw.append(("club_selected", "Club selected (our visitors)", club_selected or 0))
     stages_raw.append(("results", f"{bucket.get('result_label') or 'Results'} (ours)", results or 0))
+    return _stages_from(stages_raw, bucket, club_selected)
 
+
+# The full funnel above runs from impressions, so every on-site stage reads as a fraction of a
+# percent of the top (6 signups showed as 0.0% though 6 of 47 club pickers is 13%). The page
+# shows two views instead: how well the ads reach (impressions to landing page views) and how
+# well people convert once they click (link clicks to the result), each measured from its own top.
+_REACH_KEYS = ("impressions", "link_clicks", "landing_page_views")
+
+
+def compute_stream_reach_funnel(bucket: dict) -> list[dict]:
+    """Ad reach: impressions to landing page views, all Meta's numbers."""
+    full = compute_stream_funnel(bucket, 0)
+    raw = [(st["key"], st["label"], st["value"]) for st in full if st["key"] in _REACH_KEYS]
+    return _stages_from(raw, bucket, None)
+
+
+def compute_stream_conversion_funnel(bucket: dict, results: int,
+                                     club_selected: float | None = None) -> list[dict]:
+    """Conversion: link clicks to the stream's own result. Impressions left out on purpose,
+    so "of top" is the share of people who clicked the ad."""
+    full = compute_stream_funnel(bucket, results, club_selected=club_selected)
+    raw = [(st["key"], st["label"], st["value"]) for st in full if st["key"] != "impressions"]
+    return _stages_from(raw, bucket, club_selected)
+
+
+def _stages_from(stages_raw: list, bucket: dict, club_selected: float | None) -> list[dict]:
     top = stages_raw[0][2] or 0
     stages: list[dict] = []
     prev: float | None = None

@@ -760,7 +760,7 @@ function TrafficCard({ data, scope, period }) {
   )
 }
 
-function FunnelChart({ stages, title = 'Funnel: impressions to a completed registration' }) {
+function FunnelChart({ stages, title = 'Funnel: impressions to a completed registration', topLabel = 'of top' }) {
   if (!stages?.length) return null
   const top = stages[0]?.value || 0
   return (
@@ -781,14 +781,14 @@ function FunnelChart({ stages, title = 'Funnel: impressions to a completed regis
                 </div>
               )}
               <div className="flex items-center gap-3">
-                <div className="w-40 sm:w-56 shrink-0 text-xs text-pb-text leading-tight" title={s.label}>{s.label}</div>
+                <div className="w-28 sm:w-56 shrink-0 text-xs text-pb-text leading-tight" title={s.label}>{s.label}</div>
                 <div className="flex-1 h-5 bg-pb-surface2 rounded overflow-hidden">
                   <div
                     className="h-full bg-pb-accent rounded"
                     style={{ width: `${widthPct}%`, opacity: fillOpacity }}
                   />
                 </div>
-                <div className="w-16 shrink-0 text-right font-mono text-xs text-pb-text">{fmtNum(s.value)}</div>
+                <div className="w-12 sm:w-16 shrink-0 text-right font-mono text-xs text-pb-text">{fmtNum(s.value)}</div>
                 <div className="w-14 shrink-0 text-right font-mono text-[10px] text-pb-faint">{fmtPct(s.pct_of_top)}</div>
               </div>
               {s.note && (
@@ -799,10 +799,10 @@ function FunnelChart({ stages, title = 'Funnel: impressions to a completed regis
         })}
       </div>
       <div className="flex items-center gap-3 mt-1.5 font-mono text-[9px] text-pb-faintest">
-        <div className="w-40 sm:w-56 shrink-0" />
+        <div className="w-28 sm:w-56 shrink-0" />
         <div className="flex-1" />
-        <div className="w-16 shrink-0 text-right">count</div>
-        <div className="w-14 shrink-0 text-right">of top</div>
+        <div className="w-12 sm:w-16 shrink-0 text-right">count</div>
+        <div className="w-14 shrink-0 text-right">{topLabel}</div>
       </div>
     </div>
   )
@@ -1672,8 +1672,29 @@ export default function SuperMetaAds() {
                 ))}
                 </div>
                 <div className="space-y-3">
+                  {/* Two views per stream. Measured from impressions, every on-site step read as a
+                      fraction of a percent, so conversion now starts at the link click and the ad's
+                      reach (impressions to landing page views) sits on its own. An older payload
+                      without the split keeps the single funnel. */}
                   {activeStreams.filter((st) => (st.impressions || 0) > 0).map((st) => (
-                    <FunnelChart key={st.stream} stages={st.funnel} title={`${st.label}: impressions to a registration`} />
+                    st.conversion_funnel?.length ? (
+                      <div key={st.stream} className="space-y-3">
+                        <FunnelChart
+                          stages={st.conversion_funnel}
+                          title={`${st.label}: link clicks to a registration`}
+                          topLabel="of clicks"
+                        />
+                        {st.reach_funnel?.length > 0 && (
+                          <FunnelChart
+                            stages={st.reach_funnel}
+                            title={`${st.label}: ad reach, impressions to landing page views`}
+                            topLabel="of impr."
+                          />
+                        )}
+                      </div>
+                    ) : (
+                      <FunnelChart key={st.stream} stages={st.funnel} title={`${st.label}: impressions to a registration`} />
+                    )
                   ))}
                 </div>
               </div>

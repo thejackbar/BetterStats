@@ -134,5 +134,32 @@ using(OLD)
 ck("the old campaign's plan and markers are untouched", m._campaign_plan() == (900.0, 30) and m._last_change_date() == date(2026, 9, 8),
    f"{m._campaign_plan()} {m._last_change_date()}")
 
+# Conversion from the link click, reach on its own (v9.152.1). Measured from impressions, 6 signups
+# of 22,000 impressions read as 0.0%; from 157 link clicks they are 3.8%. Paired with the full funnel
+# so the check could fail on the old shape.
+b = {"impressions": 22000, "link_clicks": 157, "landing_page_views": 140, "leads": 45,
+     "result_label": "Free trial signups"}
+full = m.compute_stream_funnel(b, 6, club_selected=47)
+# Presence-safe: on the previous commit these functions are absent and must FAIL, not crash.
+_conv_fn = getattr(m, "compute_stream_conversion_funnel", None) or (lambda *a, **k: [{}])
+_reach_fn = getattr(m, "compute_stream_reach_funnel", None) or (lambda *a, **k: [{}])
+ck("the full funnel still runs from impressions (signups 0.0% of top)",
+   full[0]["key"] == "impressions" and full[-1]["pct_of_top"] == 0.0, str(full[-1]))
+conv = _conv_fn(b, 6, club_selected=47)
+ck("the conversion funnel starts at link clicks",
+   [s_.get("key") for s_ in conv] == ["link_clicks", "landing_page_views", "club_selected", "results"], str(conv))
+ck("signups read as 3.8% of link clicks", conv[-1].get("pct_of_top") == 3.8, str(conv[-1]))
+ck("club selected to signup stays 12.8%", conv[-1].get("pct_of_prev") == 12.8, str(conv[-1]))
+ck("the Meta Lead note rides along on Club selected", len(conv) > 2 and conv[2].get("meta_leads") == 45)
+reach = _reach_fn(b)
+ck("the reach funnel is impressions to landing page views",
+   [s_.get("key") for s_ in reach] == ["impressions", "link_clicks", "landing_page_views"]
+   and reach[-1].get("pct_of_top") == 0.6, str(reach))
+web = _conv_fn({**b, "result_label": "Webinar registrations"}, 3)
+ck("the webinar conversion funnel has no Club selected step",
+   [s_.get("key") for s_ in web] == ["link_clicks", "landing_page_views", "results"], str(web))
+ck("no clicks yields 0%, not a divide by zero",
+   _conv_fn({"link_clicks": 0}, 0)[-1].get("pct_of_top") == 0.0)
+
 print(f"\n{pass_n} passed, {fail_n} failed")
 sys.exit(1 if fail_n else 0)

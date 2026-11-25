@@ -1729,3 +1729,17 @@ Proof (local Postgres 16, Chromium on the production build):
 - `verify_trial_summary_browser.mjs` 29 passed, including 390px with no page scroll and every column fitting at 1500px. Control: 1 passed, 28 failed.
 - `audit_route_access.py` does not load the app in this sandbox (0 gated routes, the same 69 failures with and without the change), so it proved nothing here. Both new routes depend on `require_super_admin`.
 
+
+
+## v9.152.1: conversion measured from the link click (25 Nov 2026)
+
+Asked: on the Meta Ads page, 6 free trial signups from 47 clubs selected showed as 0.0% "of top", because every stage was measured against 22,000 impressions. Conversion should run from link clicks; impressions to landing page views should still be tracked.
+
+- `compute_stream_conversion_funnel` (link clicks to the stream's result, Club selected and its Meta Lead note kept on the trial) and `compute_stream_reach_funnel` (impressions, link clicks, landing page views) share `_stages_from` with `compute_stream_funnel`. `build_streams` sets `conversion_funnel` and `reach_funnel` beside the old `funnel`, which stays for payloads without the split.
+- `FunnelChart` takes a `topLabel` ("of clicks", "of impr."). The page shows the conversion chart then the reach chart per stream, and falls back to the single funnel when `conversion_funnel` is absent.
+- The chart's label column was `w-40` at phone width, which cut the percentage column off at 390px. Now `w-28 sm:w-56`, count `w-12 sm:w-16`.
+- On the screenshot's numbers: signups are 3.8% of link clicks and 12.8% of clubs selected (6 of 47).
+
+Verification:
+- `verify_meta_ads_new_campaign.py` 36 passed (8 new, pure functions). Control on the previous `meta_ads.py`: 29 passed, 7 failed, no crash (presence-safe reads).
+- `verify_meta_ads_streams_browser.mjs` 66 passed (section 6b, split payload; 6 still covers the fallback). Control on the previous page: 59 passed, 7 failed, exactly the new checks. 390px screenshot checked by eye.

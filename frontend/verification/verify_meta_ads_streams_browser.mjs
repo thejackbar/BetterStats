@@ -349,6 +349,45 @@ ck('the trial funnel keeps the Club selected step', /club selected/i.test(funnel
 ck('the webinar funnel ends in its own result, not the trial\'s',
    /webinar registrations/i.test(funnelText))
 
+// 6b. CONVERSION FROM THE CLICK, REACH ON ITS OWN (v9.152.1). Measured from impressions,
+//     every on-site step read as 0.0% of the top. With the split payload the page shows a
+//     link-clicks-to-registration chart whose "of clicks" column is measured from the click,
+//     and a separate impressions-to-landing-page-views chart. The payload above has no split,
+//     so the single funnel stays (checked in 6); this run carries it.
+const rebased = (stages) => stages.map((st, i) => ({
+  ...st,
+  pct_of_top: Number((100 * st.value / stages[0].value).toFixed(1)),
+  pct_of_prev: i === 0 ? 100 : Number((100 * st.value / stages[i - 1].value).toFixed(1)),
+}))
+const split = await open({
+  summary: {
+    ...SUMMARY,
+    streams: STREAMS.map((s) => ({
+      ...s,
+      reach_funnel: rebased(s.funnel.filter((f) => ['impressions', 'link_clicks', 'landing_page_views'].includes(f.key))),
+      conversion_funnel: rebased(s.funnel.filter((f) => !['impressions', 'leads'].includes(f.key))),
+    })),
+  },
+})
+const convCards = split.page.locator('div.pb-card', { hasText: /link clicks to a registration/i })
+const reachCards = split.page.locator('div.pb-card', { hasText: /ad reach, impressions to landing page views/i })
+ck('each stream has a conversion chart starting at the link click', (await convCards.count()) === 2,
+   `found ${await convCards.count()}`)
+ck('each stream has a separate reach chart', (await reachCards.count()) === 2, `found ${await reachCards.count()}`)
+const convText = (await convCards.count()) ? (await convCards.allInnerTexts()).join('\n') : ''
+const reachText = (await reachCards.count()) ? (await reachCards.allInnerTexts()).join('\n') : ''
+ck('the conversion chart leaves impressions out', convText !== '' && !/^Impressions/im.test(convText))
+ck('the conversion chart reads its share "of clicks"', /of clicks/i.test(convText))
+const trialSignupPct = (100 * TRIAL_RESULTS / 1760).toFixed(1)
+ck(`trial signups read as ${trialSignupPct}% of clicks, not 0.0% of impressions`,
+   convText.includes(`${trialSignupPct}%`), convText.slice(0, 400))
+ck('the reach chart ends at landing page views', /landing page views/i.test(reachText)
+   && !/club selected|signups|webinar registrations \(/i.test(reachText.replace(/^.*ad reach.*$/im, '')))
+ck('the old impressions-to-registration chart is gone with the split payload',
+   (await split.page.locator('text=/impressions to a registration/i').count()) === 0)
+ck('no page errors with the split funnels', split.errors.length === 0, split.errors.join(' | '))
+await split.ctx.close()
+
 // 7. THE 8 SEP CHANGE IS DRAWN AND EXPLAINED.
 ck('the campaign change is named under the charts', body.includes('Campaign restructured'))
 ck('the change explains what actually changed', /A\$50/.test(body) && /A\$30/.test(body))
