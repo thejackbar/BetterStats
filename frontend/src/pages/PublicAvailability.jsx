@@ -24,6 +24,7 @@ import FantasyCard, { fmtLockShort, nextDeadline, ordinal } from './playerhome/F
 import PlayerHero from './playerhome/PlayerHero'
 import NetsToday, { netsSummary } from './playerhome/NetsToday'
 import SeasonDashboard from './playerhome/SeasonDashboard'
+import CustomCard from './playerhome/CustomCard'
 import { Muted, Section, fmtShort, money } from './playerhome/ui'
 
 
@@ -297,7 +298,32 @@ function FeesModule({ data }) {
           <PaymentsList payments={f.payments} />
         </>
       )}
+      {(!f?.on_record || f.total_outstanding > 0) && <FeesHowToPay pay={f?.how_to_pay} />}
     </Section>
+  )
+}
+
+// How to pay the club's fees, as the club set it in BetterStats > Player Dashboard: bank
+// details to copy, a pay-online button and any other way (cash at the bar). Says plainly
+// when the club has not added any, rather than leaving the player guessing.
+function FeesHowToPay({ pay }) {
+  const p = pay || {}
+  const rows = PAY_LABELS.filter(([k]) => p[k])
+  const any = rows.length > 0 || p.pay_online_url || p.other_instructions
+  return (
+    <div className="mt-3 rounded-lg p-3" style={{ background: 'var(--pb-surface2)' }} data-fees-how-to-pay>
+      <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-1">How to pay</div>
+      {!any && <div className="text-[12.5px] text-pb-faint">Your club has not added payment details yet. Ask your treasurer how to pay.</div>}
+      {rows.map(([k, label]) => <CopyRow key={k} label={label} value={p[k]} />)}
+      {p.pay_online_url && (
+        <a href={p.pay_online_url} target="_blank" rel="noopener noreferrer" data-fees-pay-online
+          className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-[14px] font-semibold"
+          style={{ background: 'var(--pb-accent)', color: 'var(--pb-on-accent)' }}>
+          <span className="min-w-0 truncate">{p.pay_online_label || 'Pay online'}</span><span aria-hidden="true">↗</span>
+        </a>
+      )}
+      {p.other_instructions && <div className="text-[12.5px] text-pb-dim mt-2 whitespace-pre-line" data-fees-other>{p.other_instructions}</div>}
+    </div>
   )
 }
 
@@ -397,6 +423,17 @@ const GROUPS = {
 // thought (Voting); then the housekeeping. A club without a section just has fewer cells, and
 // the rest fill in behind it, so four sections make a 2x2 and seven make three rows and one.
 const ORDER = ['availability', 'selection', 'cards', 'fantasy', 'stats', 'voting', 'admin']
+
+// Put the grid's cells in the club's order. Anything the order does not name goes after
+// it, in the order it came in (the standard sections, then the club's own cards).
+export function sortByLayout(cells, layout) {
+  if (!Array.isArray(layout) || !layout.length) return cells
+  const at = new Map(layout.map((id, i) => [id, i]))
+  return cells
+    .map((c, i) => ({ c, rank: at.has(c.key) ? at.get(c.key) : layout.length + i }))
+    .sort((a, b) => a.rank - b.rank)
+    .map((x) => x.c)
+}
 
 // The Selection modules drawn together as one block of short rows.
 const GLANCE = ['squad', 'selected', 'training']
@@ -532,6 +569,12 @@ function MyPage({ token, me, club, availability, onSwitch, prefetch }) {
     .map((id) => ({ id, ...GROUPS[id], mods: modules.filter((m) => GROUPS[id].keys.includes(m)) }))
     .filter((g) => (g.id === 'availability' ? me.has_availability !== false : g.mods.length > 0))
   const allOpen = shown.every((g) => sections.isOpen(g.id))
+  // The grid: the built-in sections and the club's own cards, in the order the club set
+  // (`data.layout`). A card the order does not name keeps its standard place after the rest.
+  const cells = sortByLayout([
+    ...shown.map((g) => ({ key: g.id, group: g })),
+    ...(data?.custom_modules || []).map((m) => ({ key: `custom:${m.id}`, custom: m })),
+  ], data?.layout)
 
   return (
     <div data-my-page>
@@ -567,7 +610,8 @@ function MyPage({ token, me, club, availability, onSwitch, prefetch }) {
       </div>
       {/* items-start: opening one section never stretches the closed one beside it. */}
       <div className="grid gap-3 md:grid-cols-2 items-start" data-groups>
-        {shown.map((g) => {
+        {cells.map(({ group: g, custom, key }) => {
+          if (custom) return <CustomCard key={key} token={token} m={custom} />
           const { text, tone } = summaryFor(g.id, { me, data, ladder, cardsReady, nets: netsLive })
           return (
             <Group key={g.id} id={g.id} hideTitle={g.hideTitle}

@@ -7,7 +7,8 @@ like `/availability/self-service`.
 
 The dashboard switch is its own (`organisations.player_dashboard_enabled`) and never touches the
 BetterSelect availability switch, which keeps owning availability, votes and the BetterSelect sections
-of the same link (`services/player_dashboard.availability_live` / `dashboard_live`). Gated on
+of the same link. The club's own modules (`/custom-modules`) and the order of the dashboard's cards
+(`layout`) are set here too (`services/player_dashboard.availability_live` / `dashboard_live`). Gated on
 MANAGE_SETTINGS, the club-wide settings capability. A key that is not sent leaves its setting alone.
 """
 from __future__ import annotations
@@ -17,7 +18,7 @@ import uuid
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,8 +27,8 @@ from app.auth.capabilities import MANAGE_PLAYERS, MANAGE_SETTINGS, require_cap
 from app.auth.modules import MODULE_SELECT, org_has_module
 from app.models.db import Organisation, Player, User, get_db
 from app.routers.auth import get_current_club
-from app.routers.availability import active_self_service_players, phone_last4
-from app.services import player_dashboard, player_registration as reg_svc
+from app.routers.availability import active_self_service_players, local_now, phone_last4
+from app.services import player_dashboard, player_dashboard_custom as custom_svc, player_registration as reg_svc
 from app.services.player_audit import user_label
 
 router = APIRouter(prefix="/player-dashboard", tags=["player-dashboard"])
@@ -41,10 +42,17 @@ class SettingsBody(BaseModel):
     dashboard_modules: Optional[list[str]] = None
     # "Let people add themselves" (Can't find your name? on the player page).
     registration_enabled: Optional[bool] = None
+    # The order of the dashboard's cards: built-in section ids and `custom:<id>`.
+    layout: Optional[list[str]] = None
+    # How players pay their fees (PayID, bank account, a pay-online link, other ways). The whole set
+    # is sent each time; an empty object clears it.
+    fees_payment: Optional[dict] = None
 
 
-async def _payload(db: AsyncSession, club: Organisation) -> dict:
+async def _payload(db: AsyncSession, club: Organisation, tz: Optional[str] = None) -> dict:
     players = await active_self_service_players(db, club)
+    today = custom_svc.today_for(local_now(tz))
+    custom_rows = await custom_svc.list_rows(db, club.id)
     with_phone = sum(1 for p in players if phone_last4(p.phone))
     return {
         "enabled": player_dashboard.dashboard_live(club),
@@ -61,6 +69,11 @@ async def _payload(db: AsyncSession, club: Organisation) -> dict:
         "registrations_pending": (await db.execute(text(
             "SELECT count(*) FROM player_registrations WHERE organisation_id = :o AND status = 'pending'"
         ), {"o": str(club.id)})).scalar() or 0,
+        # The club's own cards (links, announcements, events, image banners) and the order of every card.
+        "custom_modules": [custom_svc.serialise_admin(r, today) for r in custom_rows],
+        "custom_kinds": [{"key": k, "label": custom_svc.KIND_LABELS[k]} for k in custom_svc.KINDS],
+        "layout": custom_svc.admin_layout(club, custom_rows, today),
+        "fees_payment": player_dashboard.fee_payment_details(club),
     }
 
 
@@ -69,10 +82,11 @@ async def get_settings(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
     user: User = Depends(require_cap(MANAGE_SETTINGS)),
+    tz: Optional[str] = None,
 ):
     """The page's switches plus a phone-coverage count (a player signs in with the last four
     digits of their mobile, so a player with none cannot open their page)."""
-    return await _payload(db, club)
+    return await _payload(db, club, tz)
 
 
 @router.post("/settings")
@@ -81,6 +95,7 @@ async def update_settings(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
     user: User = Depends(require_cap(MANAGE_SETTINGS)),
+    tz: Optional[str] = None,
 ):
     if body.require_pin is not None:
         club.availability_require_pin = bool(body.require_pin)
@@ -92,9 +107,17 @@ async def update_settings(
         player_dashboard.set_dashboard_live(club, body.enabled)
     if body.registration_enabled is not None:
         club.player_registration_enabled = bool(body.registration_enabled)
+    if body.fees_payment is not None:
+        try:
+            club.fees_payment_details = player_dashboard.clean_fee_payment(body.fees_payment) or None
+        except (ValueError, custom_svc.Invalid) as e:
+            raise HTTPException(status_code=422, detail=str(e))
+    if body.layout is not None:
+        ids = [str(r["id"]) for r in await custom_svc.list_rows(db, club.id)]
+        club.player_dashboard_layout = custom_svc.normalise_layout(body.layout, ids)
     await db.commit()
     await db.refresh(club)
-    return await _payload(db, club)
+    return await _payload(db, club, tz)
 
 
 @router.post("/regenerate")
@@ -108,6 +131,124 @@ async def regenerate_link(
     await db.commit()
     await db.refresh(club)
     return await _payload(db, club)
+
+
+# ── The club's own modules ──────────────────────────────────────────────────────
+# Cards the club writes itself: a link button, an announcement, an event with a countdown,
+# an image banner. Same capability as the rest of the page's settings. Each answer is the
+# whole settings payload, so the screen redraws from one response.
+
+class CustomModuleBody(BaseModel):
+    """Only the keys that are sent change; an explicit null or empty clears that field."""
+    kind: Optional[str] = None
+    title: Optional[str] = None
+    body: Optional[str] = None
+    url: Optional[str] = None
+    button_label: Optional[str] = None
+    emoji: Optional[str] = None
+    location: Optional[str] = None
+    event_date: Optional[str] = None
+    event_time: Optional[str] = None
+    show_from: Optional[str] = None
+    show_until: Optional[str] = None
+    enabled: Optional[bool] = None
+
+
+def _sent(body: CustomModuleBody) -> dict:
+    return {k: getattr(body, k) for k in body.model_fields_set}
+
+
+@router.post("/custom-modules")
+async def create_custom_module(
+    body: CustomModuleBody,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SETTINGS)),
+    tz: Optional[str] = None,
+):
+    try:
+        row = await custom_svc.create(db, club, _sent(body), user_label(user))
+    except custom_svc.Invalid as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    await db.commit()
+    await db.refresh(club)
+    return {**await _payload(db, club, tz), "created_id": str(row["id"])}
+
+
+@router.patch("/custom-modules/{module_id}")
+async def update_custom_module(
+    module_id: str,
+    body: CustomModuleBody,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SETTINGS)),
+    tz: Optional[str] = None,
+):
+    try:
+        row = await custom_svc.update(db, club, module_id, _sent(body))
+    except custom_svc.Invalid as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    if row is None:
+        raise HTTPException(status_code=404, detail="That module is not there any more.")
+    await db.commit()
+    await db.refresh(club)
+    return await _payload(db, club, tz)
+
+
+@router.delete("/custom-modules/{module_id}")
+async def delete_custom_module(
+    module_id: str,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SETTINGS)),
+    tz: Optional[str] = None,
+):
+    if not await custom_svc.delete(db, club, module_id):
+        raise HTTPException(status_code=404, detail="That module is not there any more.")
+    await db.commit()
+    await db.refresh(club)
+    return await _payload(db, club, tz)
+
+
+@router.post("/custom-modules/{module_id}/image")
+async def upload_custom_module_image(
+    module_id: str,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SETTINGS)),
+    tz: Optional[str] = None,
+):
+    from pathlib import Path
+    ext = Path(file.filename or "").suffix.lower()
+    mime = custom_svc.IMAGE_EXTS.get(ext)
+    if mime is None:
+        raise HTTPException(status_code=422, detail="Image files only (jpg, png, webp, gif).")
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=422, detail="That file is empty.")
+    if len(data) > custom_svc.IMAGE_MAX_BYTES:
+        raise HTTPException(status_code=422, detail="Images must be 5 MB or smaller.")
+    if await custom_svc.set_image(db, club, module_id, data, mime) is None:
+        raise HTTPException(status_code=404, detail="That module is not there any more.")
+    await db.commit()
+    await db.refresh(club)
+    return await _payload(db, club, tz)
+
+
+@router.delete("/custom-modules/{module_id}/image")
+async def delete_custom_module_image(
+    module_id: str,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SETTINGS)),
+    tz: Optional[str] = None,
+):
+    if await custom_svc.set_image(db, club, module_id, None, None) is None:
+        raise HTTPException(status_code=404, detail="That module is not there any more.")
+    await db.commit()
+    await db.refresh(club)
+    return await _payload(db, club, tz)
 
 
 # ── People who added themselves ─────────────────────────────────────────────────

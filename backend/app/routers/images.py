@@ -67,6 +67,18 @@ async def get_org_logo(org_id: str, format: str | None = None, db: AsyncSession 
     return Response(content=data, media_type=mime, headers=_CACHE_HEADERS)
 
 
+@router.get("/player-dashboard-modules/{module_id}")
+async def get_player_dashboard_module_image(module_id: str, db: AsyncSession = Depends(get_db)):
+    """The image on a club's own Player Dashboard card (an event poster, a merch photo).
+    Its address carries ?v= of the upload, so it is cached hard like a logo."""
+    row = (await db.execute(text(
+        "SELECT image_data, image_mime FROM player_dashboard_custom_modules WHERE id = CAST(:id AS uuid)"
+    ), {"id": str(_parse_uuid(module_id))})).first()
+    if not row or not row[0]:
+        raise HTTPException(404, "No image")
+    return Response(content=bytes(row[0]), media_type=row[1] or "image/png", headers=_CACHE_HEADERS)
+
+
 @router.get("/association-crests/{workspace_id}/{ca_org_id}")
 async def get_association_crest(workspace_id: str, ca_org_id: str, variant: str = "", db: AsyncSession = Depends(get_db)):
     """A club crest from an association workspace's library (services/association_crests.py).

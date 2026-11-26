@@ -57,7 +57,7 @@ from app.routers.availability import (
     upcoming_fixtures_by_date,
     window_refusal,
 )
-from app.services import fines as fines_svc, player_cards as cards_svc, player_dashboard, player_registration, rate_limit, section_names, selection_rules as rules_svc, squad_sides
+from app.services import fines as fines_svc, player_cards as cards_svc, player_dashboard, player_dashboard_custom as custom_svc, player_registration, rate_limit, section_names, selection_rules as rules_svc, squad_sides
 from app.services import votes as vote_svc
 from app.services.fonts import public_font_fields
 from app.services.name_format import name_sort_key
@@ -790,6 +790,17 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
             modules = [m for m in modules if m != "fines"]
         lap("fines")
 
+    # The club's own cards (links, announcements, events, image banners) and the order of the grid.
+    # Each fails on its own like the newer modules: the page still loads in the standard order.
+    custom_modules: list[dict] = []
+    layout: Optional[list[str]] = None
+    try:
+        custom_modules, layout = await custom_svc.for_player(db, club, today)
+    except Exception:
+        logger.exception("player page: custom modules failed for %s", player.id)
+        await rollback_keeping(db, club, player)
+    lap("custom")
+
     total = round((time.perf_counter() - t0) * 1000)
     # One line per page load, so "the dashboard is slow" can be answered from the log:
     # which module took the time. Warning level once the page takes over 1.5 seconds.
@@ -816,7 +827,22 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
         "votes_cast": votes_cast,
         "cards": cards,
         "has_availability": player_dashboard.availability_live(club),
+        "custom_modules": custom_modules,
+        "layout": layout,
     }
+
+
+@router.post("/{token}/me/custom/{module_id}/click")
+async def count_custom_module_click(token: str, module_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """One tap on a club's own card that opens a link: adds one to its count, which the club
+    sees beside the card in its settings. Nothing about who tapped is kept. Behind the same
+    PIN cookie as the page, and rate limited, so a count is players and not a script."""
+    club = await _club_for_token(db, token, need_select=False, need_dashboard=True)
+    player = await _player_for_session(db, request, club)
+    rate_limit.enforce(f"custom-click:{player.id}:{module_id}", 5, 60)
+    counted = await custom_svc.record_click(db, club.id, module_id)
+    await db.commit()
+    return {"counted": counted}
 
 
 @router.get("/{token}/me/ranks")

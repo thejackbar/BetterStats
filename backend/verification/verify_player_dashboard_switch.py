@@ -66,7 +66,8 @@ def guarded(name):
 async def main():
     await base.build_schema()
     async with engine.begin() as conn:
-        for mod in ("availability_maybe_ddl", "availability_site_link_ddl", "player_dashboard_ddl"):
+        for mod in ("availability_maybe_ddl", "availability_site_link_ddl", "player_dashboard_ddl",
+                    "player_registration_ddl", "player_dashboard_custom_ddl"):
             m = guarded(f"app.services.{mod}")
             for stmt in (m.STATEMENTS if m else []):
                 await conn.execute(text(stmt))

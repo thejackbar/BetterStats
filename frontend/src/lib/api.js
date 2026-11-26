@@ -3522,9 +3522,20 @@ export const api = {
     request(`/availability/periods/${id}`, { method: 'DELETE' }),
 
   // ─── Player Dashboard (BetterStats): the page's switches, behind MANAGE_SETTINGS ───
-  getPlayerDashboardSettings: () => request('/player-dashboard/settings'),
+  getPlayerDashboardSettings: () => request(`/player-dashboard/settings${tzQuery()}`),
   setPlayerDashboardSettings: (data) =>
-    request('/player-dashboard/settings', { method: 'POST', body: JSON.stringify(data) }),
+    request(`/player-dashboard/settings${tzQuery()}`, { method: 'POST', body: JSON.stringify(data) }),
+  // The club's own cards on the Player Dashboard (links, announcements, events, image banners).
+  // Each answers with the whole settings payload.
+  createPlayerDashboardCustomModule: (data) =>
+    request(`/player-dashboard/custom-modules${tzQuery()}`, { method: 'POST', body: JSON.stringify(data) }),
+  updatePlayerDashboardCustomModule: (id, data) =>
+    request(`/player-dashboard/custom-modules/${id}${tzQuery()}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deletePlayerDashboardCustomModule: (id) =>
+    request(`/player-dashboard/custom-modules/${id}${tzQuery()}`, { method: 'DELETE' }),
+  uploadPlayerDashboardCustomModuleImage: (id, file) => uploadFile(`/player-dashboard/custom-modules/${id}/image${tzQuery()}`, file),
+  deletePlayerDashboardCustomModuleImage: (id) =>
+    request(`/player-dashboard/custom-modules/${id}/image${tzQuery()}`, { method: 'DELETE' }),
   regeneratePlayerDashboardLink: () => request('/player-dashboard/regenerate', { method: 'POST' }),
   // People who added themselves on the Player Dashboard ("Can't find your name?").
   listPlayerRegistrations: () => request('/player-dashboard/registrations'),
@@ -3622,6 +3633,8 @@ export const api = {
   // The competition ladder for the player's squads (the page's Ladder module).
   // Where the player ranks in the club this season (runs, wickets, catches). Read when Stats opens.
   availPublicRanks: (token) => request(`/public/availability/${token}/me/ranks`),
+  // One tap on a club's own link card, for the count the club sees. Nothing about who tapped is kept.
+  availPublicCustomClick: (token, id) => request(`/public/availability/${token}/me/custom/${id}/click`, { method: 'POST' }),
   availPublicLadder: (token) => request(`/public/availability/${token}/me/ladder`),
   availPublicSet: (token, data) =>
     request(`/public/availability/${token}/me`, { method: 'POST', body: JSON.stringify({ ...data, tz: browserTz() }) }),

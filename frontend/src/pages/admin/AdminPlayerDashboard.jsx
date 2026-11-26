@@ -6,6 +6,9 @@ import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import { useToast } from '../../contexts/ToastContext'
 import { Btn, Segmented } from './betterselect/ui'
 import { PageModules } from './betterselect/SelfServiceLinkPanel'
+import CustomModulesPanel from './playerdash/CustomModulesPanel'
+import DashboardLayoutPanel from './playerdash/DashboardLayoutPanel'
+import FeesPaymentPanel from './playerdash/FeesPaymentPanel'
 
 // Player Dashboard (BetterStats): the page each player opens with a link and the last four digits of
 // their mobile. It holds their Player Cards and their season, so it needs BetterStats and nothing
@@ -47,8 +50,10 @@ export default function AdminPlayerDashboard() {
     setBusy(true)
     try {
       setCfg(await api.setPlayerDashboardSettings(patch))
+      return true
     } catch (e) {
       toast.error(e.message || 'Update failed')
+      return false
     } finally { setBusy(false) }
   }
 
@@ -175,6 +180,18 @@ export default function AdminPlayerDashboard() {
 
             <PageModules modules={cfg.dashboard_modules || []} canEdit busy={busy}
               onChange={(keys) => update({ dashboard_modules: keys })} />
+
+            <CustomModulesPanel cfg={cfg} onCfg={setCfg} />
+
+            {(cfg.layout || []).length > 0 && (
+              <DashboardLayoutPanel layout={cfg.layout} busy={busy} onChange={(ids) => update({ layout: ids })} />
+            )}
+
+            {cfg.fees_payment !== undefined && (
+              <FeesPaymentPanel value={cfg.fees_payment} busy={busy}
+                feesModule={(cfg.dashboard_modules || []).find((m) => m.key === 'fees')}
+                onSave={async (details) => { if (await update({ fees_payment: details })) toast.success('Payment details saved') }} />
+            )}
           </div>
         )}
       </div>

@@ -570,6 +570,12 @@ class Organisation(Base):
     player_dashboard_enabled = Column(Boolean, nullable=True)
     # "Let people add themselves" on the Player Dashboard (migration 398). NULL reads as on.
     player_registration_enabled = Column(Boolean, nullable=True)
+    # The order of the cards on the Player Dashboard grid (migration 400): built-in section ids and
+    # `custom:<id>` for the club's own modules. NULL = the standard order, the club's own cards last.
+    player_dashboard_layout = Column(JSONB, nullable=True)
+    # How a player pays their fees, shown under Fees on the Player Dashboard (migration 400): PayID,
+    # bank account, reference, a pay-online link, other ways. Keys: services/player_dashboard.FEE_PAY_FIELDS.
+    fees_payment_details = Column(JSONB, nullable=True)
     # ─── BetterFantasyCricket: public fantasy link (migration 087) ────────────
     # The per-club magic link members and supporters use to register and play
     # (mirrors availability_link_token). Rotatable; resolves to the club's

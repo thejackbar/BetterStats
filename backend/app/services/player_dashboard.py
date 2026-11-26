@@ -306,7 +306,7 @@ async def fees_owing(db: AsyncSession, club: Organisation, player: Player) -> di
     )).scalar_one_or_none()
     snap = await fee_service.member_financial_snapshot(db, club.id, member.id) if member else None
     if snap is None:
-        return {"on_record": False, "payments": []}
+        return {"on_record": False, "payments": [], "how_to_pay": fee_payment_details(club)}
     fin = snap["financials"]
     season = await db.get(Season, snap["season_id"])
     return {
@@ -319,7 +319,44 @@ async def fees_owing(db: AsyncSession, club: Organisation, player: Player) -> di
         "total_paid": fin.get("total_paid", 0.0),
         "credit": fin.get("credit", 0.0),
         "payments": await fees_paid(db, club, member),
+        "how_to_pay": fee_payment_details(club),
     }
+
+
+# How a player pays their fees, set by the club in BetterStats > Player Dashboard and shown under
+# Fees on the player's page. The bank fields match the Fines "how to pay" block so the two read
+# the same; a pay-online link and free text cover every other way a club takes money.
+FEE_PAY_FIELDS = (
+    "payid", "payid_name", "account_name", "bsb", "account_number",
+    "reference_hint", "pay_online_url", "pay_online_label", "other_instructions",
+)
+_FEE_PAY_LIMITS = {"other_instructions": 1000, "pay_online_url": 2000}
+
+
+def clean_fee_payment(raw) -> dict:
+    """The details to store: known keys only, trimmed, blanks dropped. The pay-online link
+    must be an http(s) address (the same rule as the club's own cards). Raises ValueError
+    with a message for the club."""
+    from app.services.player_dashboard_custom import clean_url
+    out: dict = {}
+    for key in FEE_PAY_FIELDS:
+        val = (raw or {}).get(key)
+        if val is None:
+            continue
+        val = str(val).strip()
+        if not val:
+            continue
+        if len(val) > _FEE_PAY_LIMITS.get(key, 120):
+            raise ValueError("One of the payment details is too long.")
+        if key == "pay_online_url":
+            val = clean_url(val)
+        out[key] = val
+    return out
+
+
+def fee_payment_details(club: Organisation) -> dict:
+    raw = club.fees_payment_details
+    return {k: v for k, v in raw.items() if k in FEE_PAY_FIELDS and v} if isinstance(raw, dict) else {}
 
 
 PAYMENTS_SHOWN = 30

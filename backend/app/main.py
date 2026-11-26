@@ -4617,6 +4617,11 @@ async def lifespan(app: FastAPI):
         from app.services.player_registration_ddl import STATEMENTS as _PLAYER_REGISTRATION_DDL
         for _stmt in _PLAYER_REGISTRATION_DDL:
             await conn.execute(text(_stmt))
+        # Migration 400: a club's own Player Dashboard modules and the order of its cards. Same
+        # one-copy rule: this list and alembic's 400 both run services/player_dashboard_custom_ddl.STATEMENTS.
+        from app.services.player_dashboard_custom_ddl import STATEMENTS as _PLAYER_DASHBOARD_CUSTOM_DDL
+        for _stmt in _PLAYER_DASHBOARD_CUSTOM_DDL:
+            await conn.execute(text(_stmt))
         # Migration 373: a hand-entered game can be marked as the grand final, which the automatic
         # premierships read. Same one-copy rule: this list and alembic's 373 both run
         # services/manual_grand_final_ddl.STATEMENTS.
