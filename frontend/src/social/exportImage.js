@@ -1,3 +1,4 @@
+import { waitForFx } from './designFx'
 // Shared BetterSocials image export — the font-embedding + DOM-to-PNG pipeline
 // the Post Designer (AdminSocialPost) and the super-admin Club Announcement tool
 // both render with. Kept in one place so the export stays pixel-identical across
@@ -108,6 +109,9 @@ export async function exportNodeToPng(node, {
 } = {}) {
   if (!node) throw new Error('Nothing to export')
   await document.fonts.ready
+  // A photo look (colour splash, duotone, …) is made on a canvas after the
+  // block draws; wait for any still being made so the PNG is not half done.
+  await waitForFx()
   const { domToBlob } = await import('modern-screenshot')
   let font
   try { font = { cssText: await getEmbeddedFontCss() } } catch { /* fall back to system fonts */ }

@@ -1,8 +1,8 @@
 export default {
-  version: 'v9.153.1',
+  version: 'v9.154.1',
   date: '2026-11-26',
-  // Above v9.153.0's sortKey (2026-11-26T10:00:00Z). Check origin/main at merge time.
-  sortKey: '2026-11-26T14:00:00Z',
+  // Above v9.154.0's sortKey (2026-11-26T14:00:00Z). Check origin/main at merge time.
+  sortKey: '2026-11-26T16:00:00Z',
   title: 'BetterPosts: Match Cards, a results post on your own photo',
   items: [
     'New Results layout, Match Cards. Each match gets its own card over your club photo: the team, grade and round, one headline, each innings with its crest, score and overs, and your best batter and bowler.',
