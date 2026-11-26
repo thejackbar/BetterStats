@@ -78,7 +78,7 @@ function Swatches({ value, onChange, palette }) {
 
 export default function SelectionInspector({
   items, selIds, onUpdate, onReorder, onDuplicate, onRemove, onAlign,
-  palette, players = [], onPickImage, onEditImage, onSendTo, layoutName = null, onOpenSponsors,
+  palette, players = [], onPickImage, onEditImage, onSendTo, layoutName = null, onOpenSponsors, onOpenEffects,
 }) {
   const [more, setMore] = useState(false)
   const single = selIds.length === 1 ? items.find(it => it.id === selIds[0]) : null
@@ -236,6 +236,12 @@ export default function SelectionInspector({
         )}
 
         <div className="flex-1" />
+
+        {/* Frames, photo looks, colour splash, text styles and textures live in
+            the Effects panel; this opens it on whatever is selected. */}
+        {single && onOpenEffects && !single.design && ['image', 'text', 'element'].concat(single.kind === 'playerphoto' ? ['data'] : []).includes(single.type) && (
+          <span data-testid="open-effects"><Btn title="Frames, looks, colour splash and text styles" onClick={() => onOpenEffects()}>Effects</Btn></span>
+        )}
 
         {/* A block someone has just added lands in front of everything, so the
             way to drop it to the bottom of the stack belongs here, on the

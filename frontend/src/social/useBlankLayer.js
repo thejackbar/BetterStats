@@ -92,12 +92,34 @@ export function useBlankLayer(initial) {
     })
     patchMany(patch)
   }
+  // A copy of a block placed directly behind it (a big faded ghost of a player).
+  // Returns the copy's id so the editor can order it on a built-in layout too.
+  const insertCopy = (id, patch = {}) => {
+    const src = items.find((it) => it.id === id)
+    if (!src) return null
+    const copy = { ...src, ...patch, id: genId() }
+    setItems((its) => {
+      const i = its.findIndex((it) => it.id === id)
+      const next = its.slice()
+      next.splice(i < 0 ? 0 : i, 0, copy)
+      return next
+    })
+    return copy.id
+  }
+  // Several blocks at once (a design starter added on top of what is there).
+  const addMany = (list) => {
+    const fresh = (list || []).map((it) => ({ ...it, id: genId() }))
+    if (!fresh.length) return []
+    setItems((its) => [...its, ...fresh])
+    setSelIds([])
+    return fresh.map((it) => it.id)
+  }
   const applyStarter = (key) => { setItems(starterItems(key)); setSelIds([]) }
   const reset = (val) => { setItems(val || []); setSelIds([]) }
 
   return {
     items, selIds, setItems, setSelIds,
     patchMany, update, select, deselect,
-    add, remove, duplicate, reorder, moveBefore, align, applyStarter, reset,
+    add, remove, duplicate, reorder, moveBefore, align, applyStarter, reset, insertCopy, addMany,
   }
 }

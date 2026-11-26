@@ -13,6 +13,7 @@ export const TOOLS = [
   { key: 'content',  icon: 'sheet',     label: 'Content' },
   { key: 'text',     icon: 'list',      label: 'Text' },
   { key: 'elements', icon: 'selection', label: 'Shapes' },
+  { key: 'effects',  icon: 'sun',       label: 'Effects' },
   { key: 'photos',   icon: 'player',    label: 'Photos' },
   { key: 'sponsors', icon: 'share',     label: 'Sponsors' },
   { key: 'data',     icon: 'ladders',   label: 'Club data' },
@@ -23,7 +24,7 @@ export const END_TOOLS = [
 ]
 
 export const TOOL_TITLE = {
-  source: 'Get your data', design: 'Design', content: 'Content', text: 'Text', elements: 'Shapes',
+  source: 'Get your data', design: 'Design', content: 'Content', text: 'Text', elements: 'Shapes', effects: 'Effects',
   photos: 'Photos & badge', sponsors: 'Post sponsors', data: 'Club data', brand: 'Brand kit', layers: 'Layers',
 }
 

@@ -10,9 +10,11 @@ import { IS_AFL } from '../lib/sport'
 // copies. Coordinates live in 1080-space; the interactive layer divides pointer
 // deltas by the preview `scale` so dragging tracks the cursor 1:1.
 // ─────────────────────────────────────────────────────────────────────────────
-import { useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { BrandLockup, GrainSVG, CreditMark } from './cricket-templates'
 import { resolveBind, splitPlayerName, bindLabel, autoMarks } from './boundResolve'
+import FramedImage, { hasImageDesign } from './FramedImage'
+import { TEXTURES, halftoneDots, newSeed } from './designFx'
 
 // Colour tokens resolve against the live palette so a palette switch re-tints
 // any block left on a token; a raw hex (custom colour) passes straight through.
@@ -58,7 +60,18 @@ export const BLANK_ELEMENTS = [
   { shape: 'chevron', name: 'Chevron' },
   { shape: 'diamond', name: 'Diamond' },
   { shape: 'hexagon', name: 'Hexagon' },
+  // Drawn textures. Each is made from its `seed`, so Shuffle gives a new one and
+  // the editor, preview and export always draw the same marks.
+  { shape: 'brush', name: 'Brush stroke', texture: true },
+  { shape: 'splatter', name: 'Splatter', texture: true },
+  { shape: 'speed', name: 'Speed lines', texture: true },
+  { shape: 'torn', name: 'Torn paper', texture: true },
+  { shape: 'halftone', name: 'Halftone', texture: true },
+  { shape: 'burst', name: 'Burst', texture: true },
+  { shape: 'grunge', name: 'Grunge', texture: true },
 ]
+export const TEXTURE_SHAPES = new Set(BLANK_ELEMENTS.filter((e) => e.texture).map((e) => e.shape))
+const ELEMENT_NAMES = Object.fromEntries(BLANK_ELEMENTS.map((e) => [e.shape, e.name]))
 
 // Data blocks pull live club info (fixtures, results, record, a scorecard, a
 // player's career stats) into the canvas. They render from the `data` bundle
@@ -134,6 +147,13 @@ export function newBlankItem(type, opts = {}) {
     if (shape === 'divider') return { id, type: 'element', shape, x: 90, y: 540, w: 900, h: 4, thickness: 4, color: 'ink', opacity: 0.5, rotation: 0 }
     if (shape === 'rect') return { id, type: 'element', shape, x: 380, y: 400, w: 320, h: 200, color: 'accent', fill: true, radius: 0, thickness: 6, opacity: 1, rotation: 0 }
     if (shape === 'ellipse') return { id, type: 'element', shape, x: 420, y: 380, w: 240, h: 240, color: 'accent', fill: true, thickness: 6, opacity: 1, rotation: 0 }
+    if (shape === 'brush') return { id, type: 'element', shape, x: 60, y: 380, w: 960, h: 300, color: 'accent', opacity: 1, rotation: -4, seed: newSeed() }
+    if (shape === 'splatter') return { id, type: 'element', shape, x: 290, y: 290, w: 500, h: 500, color: 'accent', opacity: 0.9, rotation: 0, seed: newSeed() }
+    if (shape === 'speed') return { id, type: 'element', shape, x: 0, y: 300, w: 1080, h: 480, color: 'ink', opacity: 0.35, rotation: -12, seed: newSeed() }
+    if (shape === 'torn') return { id, type: 'element', shape, x: 40, y: 780, w: 1000, h: 200, color: 'white', opacity: 1, rotation: -2, seed: newSeed() }
+    if (shape === 'halftone') return { id, type: 'element', shape, x: 0, y: 0, w: 1080, h: 1080, color: 'ink', opacity: 0.18, rotation: 0, dot: 22 }
+    if (shape === 'burst') return { id, type: 'element', shape, x: -100, y: -100, w: 1280, h: 1280, color: 'ink', opacity: 0.08, rotation: 0, seed: newSeed() }
+    if (shape === 'grunge') return { id, type: 'element', shape, x: 0, y: 0, w: 1080, h: 1080, color: 'ink', opacity: 0.35, rotation: 0, seed: newSeed() }
     // Fill-only clip-path shapes (triangle + star/arrow/chevron/diamond/hexagon)
     return { id, type: 'element', shape, x: 420, y: 380, w: 260, h: 230, color: 'accent', opacity: 1, rotation: 0 }
   }
@@ -157,7 +177,8 @@ export function itemBBox(it) {
   if (!it) return { x: 0, y: 0, w: 0, h: 0 }
   if (it.type === 'text') {
     const lines = Math.max(1, Math.ceil((String(it.text || '').length * it.fontSize * 0.52) / Math.max(it.w, 1)))
-    return { x: it.x, y: it.y, w: it.w, h: Math.round(it.fontSize * (it.lineHeight || 1) * lines) }
+    const echo = it.echo && it.echo.count > 1 ? 1 + (it.echo.count - 1) * (it.echo.step ?? 0.82) / Math.max(0.1, it.lineHeight || 1) / lines : 1
+    return { x: it.x, y: it.y, w: it.w, h: Math.round(it.fontSize * (it.lineHeight || 1) * lines * echo) }
   }
   if (it.type === 'brand') return { x: it.x, y: it.y, w: it.showName ? it.size * 3 : it.size, h: it.size }
   return { x: it.x, y: it.y, w: it.w || 100, h: it.h || 100 }
@@ -172,7 +193,7 @@ export function itemLabel(it) {
   if (it.type === 'image') return it.design ? 'Your design' : it.bind ? `Field: ${bindLabel(it.bind)}` : (it.srcName || (it.src ? 'Image' : 'Image (empty)'))
   if (it.type === 'brand') return 'Club badge'
   if (it.type === 'sponsors') return 'Sponsors'
-  if (it.type === 'element') return { line: 'Line', divider: 'Divider', rect: 'Box', ellipse: 'Circle', triangle: 'Triangle', star: 'Star', arrow: 'Arrow', chevron: 'Chevron', diamond: 'Diamond', hexagon: 'Hexagon' }[it.shape] || 'Element'
+  if (it.type === 'element') return ELEMENT_NAMES[it.shape] || 'Element'
   if (it.type === 'data') return {
     fixtures: 'Fixtures', results: 'Results', record: 'Record', scorecard: 'Scorecard',
     player: 'Player stats', playerphoto: 'Player photo', playername: 'Player name',
@@ -196,6 +217,7 @@ export function groupBBox(list) {
 const starterBrand = (over = {}) => ({ ...newBlankItem('brand'), ...over })
 const starterText = (text, over = {}) => ({ ...newBlankItem('text'), text, ...over })
 const starterEl = (shape, over = {}) => ({ ...newBlankItem('element', { shape }), ...over })
+const starterImg = (over = {}) => ({ ...newBlankItem('image'), ...over })
 
 export const BLANK_STARTERS = [
   { key: 'blank', name: 'Empty', build: () => [starterBrand({ x: 60, y: 56, size: 150 })] },
@@ -232,6 +254,41 @@ export const BLANK_STARTERS = [
       starterText('SAT · 1:00 PM · HOME GROUND', { x: 72, y: 700, w: 900, fontSize: 46, color: 'ink' }),
     ],
   },
+  // The design-led starters: framed photos, echo type, textures. The photo
+  // frames start empty so the shapes show; drop a cut-out into each.
+  {
+    key: 'matchday', name: 'Match day v', build: () => [
+      starterEl('burst', { opacity: 0.06 }),
+      starterText('MATCH DAY', { x: 90, y: 56, w: 900, fontSize: 132, color: 'ink', align: 'center' }),
+      starterImg({ x: 60, y: 250, w: 460, h: 600, mask: 'vbottom', frameFill: 'accent', popOut: 0.14, fit: 'contain' }),
+      starterImg({ x: 560, y: 250, w: 460, h: 600, mask: 'vbottom', frameFill: 'white', popOut: 0.14, fit: 'contain' }),
+      starterText('HOME', { x: 60, y: 690, w: 460, fontSize: 64, color: 'black', align: 'center' }),
+      starterText('AWAY', { x: 560, y: 690, w: 460, fontSize: 64, color: 'black', align: 'center' }),
+      starterText('V', { x: 480, y: 470, w: 120, fontSize: 120, color: 'ink', align: 'center', extrude: { depth: 10, angle: 45, color: 'black' } }),
+      starterText('SAT 1:00 PM · HOME GROUND', { x: 90, y: 930, w: 900, fontSize: 44, color: 'accent', align: 'center' }),
+      starterBrand({ x: 60, y: 940, size: 90, showName: false }),
+    ],
+  },
+  {
+    key: 'gameday', name: 'Gameday echo', build: () => [
+      starterEl('speed', { opacity: 0.18 }),
+      starterText('GAMEDAY', { x: 40, y: 120, w: 1000, fontSize: 200, color: 'accent', align: 'center', echo: { count: 5, step: 0.78, filled: 'first', fade: true } }),
+      starterEl('brush', { x: 40, y: 700, w: 1000, h: 260, color: 'accent', rotation: -5 }),
+      starterImg({ x: 250, y: 150, w: 580, h: 860, fit: 'contain', fx: { outline: { width: 6, color: 'white' }, shadow: { x: 0, y: 18, blur: 30, opacity: 55 } } }),
+      starterText('SATURDAY · 1:00 PM', { x: 70, y: 900, w: 940, fontSize: 56, color: 'black', align: 'center', skew: 8 }),
+      starterBrand({ x: 60, y: 50, size: 120, showName: false }),
+    ],
+  },
+  {
+    key: 'colourpop', name: 'Colour pop poster', build: () => [
+      starterImg({ x: 0, y: 0, w: 1080, h: 1080, fit: 'cover', fx: { tone: 'mono', splash: [{ color: 'primary', range: 26, soft: 16 }], splashStrength: 100, contrast: 14 } }),
+      starterEl('grunge', { opacity: 0.4, color: 'white' }),
+      starterEl('torn', { x: -20, y: 760, w: 1120, h: 240, color: 'white', rotation: -3 }),
+      starterText('PLAYER NAME', { x: 70, y: 800, w: 940, fontSize: 110, color: 'black' }),
+      starterText('YOUR MESSAGE HERE', { x: 72, y: 920, w: 900, fontSize: 40, color: 'primary' }),
+      starterBrand({ x: 60, y: 56, size: 140, showName: false }),
+    ],
+  },
 ]
 
 export function starterItems(key) {
@@ -252,31 +309,110 @@ export function defaultBlankItems() {
 }
 
 // ── Rendering ────────────────────────────────────────────────────────────────
+// Text effects (all optional; a block without them renders as it always did):
+//   hollow                       outline only, no fill
+//   stroke  { width, color }     an outline round the letters (outside the fill)
+//   shadow  { x, y, blur, color, opacity }
+//   extrude { depth, angle, color }   a solid 3D block shadow
+//   echo    { count, step, filled, fade, width }  the word stacked again and again,
+//           one copy filled and the rest outlined (the "GAMEDAY GAMEDAY" look)
+//   skew    degrees of slant
+export function textHasFx(it) {
+  return !!(it && (it.hollow || (it.stroke && it.stroke.width > 0) || it.shadow || (it.extrude && it.extrude.depth > 0) || (it.echo && it.echo.count > 1) || it.skew))
+}
+
+function textShadowCss(item, palette) {
+  const parts = []
+  const ex = item.extrude
+  if (ex && ex.depth > 0) {
+    const a = ((ex.angle ?? 45) * Math.PI) / 180
+    const c = resolveBlankColor(ex.color || 'black', palette)
+    const n = Math.min(60, Math.round(ex.depth))
+    for (let i = 1; i <= n; i++) parts.push(`${(Math.cos(a) * i).toFixed(1)}px ${(Math.sin(a) * i).toFixed(1)}px 0 ${c}`)
+  }
+  const sh = item.shadow
+  if (sh && (sh.blur > 0 || sh.x || sh.y)) {
+    const c = resolveBlankColor(sh.color || 'black', palette)
+    const op = Math.round(((sh.opacity ?? 70) / 100) * 255).toString(16).padStart(2, '0')
+    const col = /^#[0-9a-f]{6}$/i.test(c) ? `${c}${op}` : c
+    parts.push(`${sh.x || 0}px ${sh.y || 0}px ${sh.blur || 0}px ${col}`)
+  }
+  return parts.length ? parts.join(', ') : undefined
+}
+
 function TextBlock({ item, palette, data }) {
   // A bound field prints the live value; null (nothing held yet) shows its sample.
   const live = item.bind ? resolveBind(item.bind, data) : null
   const base = live === null || live === undefined ? item.text : live
   // A name carries its (C), (WK) and DEBUT marks without the template asking for them.
   const shown = item.autoMarks && live ? `${base}${autoMarks(item.bind, data)}` : base
+  const color = resolveBlankColor(item.color, palette)
+  const style = {
+    width: item.w,
+    fontFamily: item.fontFamily, fontSize: item.fontSize,
+    // The club's display font names its own weight (a one-weight face must not be bolded).
+    fontWeight: item.bold ? (String(item.fontFamily || '').includes('--social-display-font') ? 'var(--social-display-font-weight, 800)' : 800) : 400,
+    color,
+    textAlign: item.align, lineHeight: item.lineHeight ?? 1,
+    letterSpacing: item.letterSpacing || 0,
+    textTransform: item.uppercase ? 'uppercase' : 'none',
+    whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+    background: item.bg && item.bg !== 'none' ? resolveBlankColor(item.bg, palette) : 'transparent',
+    padding: item.bg && item.bg !== 'none' ? '0.15em 0.4em' : 0,
+    boxDecorationBreak: 'clone',
+  }
+  if (!textHasFx(item)) return <div style={style}>{shown || ' '}</div>
+
+  const strokeW = item.stroke && item.stroke.width > 0 ? item.stroke.width : (item.hollow ? Math.max(2, Math.round(item.fontSize * 0.025)) : 0)
+  const strokeC = item.stroke && item.stroke.color ? resolveBlankColor(item.stroke.color, palette) : color
+  const shadow = textShadowCss(item, palette)
+  const skew = item.skew ? `skewX(${-item.skew}deg)` : undefined
+  const face = (hollow, sw, sc) => ({
+    ...style,
+    color: hollow ? 'transparent' : color,
+    WebkitTextStroke: sw ? `${sw}px ${sc}` : undefined,
+    paintOrder: 'stroke fill',
+  })
+  const echo = item.echo && item.echo.count > 1 ? item.echo : null
+  if (!echo) {
+    return <div style={{ ...face(item.hollow, strokeW, strokeC), textShadow: shadow, transform: skew, transformOrigin: 'left center' }}>{shown || ' '}</div>
+  }
+  const n = Math.min(12, Math.round(echo.count))
+  const step = (echo.step ?? 0.82) * item.fontSize
+  const filledIdx = echo.filled === 'first' ? 0 : echo.filled === 'last' ? n - 1 : echo.filled === 'none' ? -1 : echo.filled === 'all' ? -2 : Math.floor((n - 1) / 2)
+  const ew = echo.width ?? Math.max(2, Math.round(item.fontSize * 0.022))
+  const order = Array.from({ length: n }, (_, i) => i).sort((a, b) => (a === filledIdx) - (b === filledIdx))
   return (
-    <div style={{
-      width: item.w,
-      fontFamily: item.fontFamily, fontSize: item.fontSize,
-      // The club's display font names its own weight (a one-weight face must not be bolded).
-      fontWeight: item.bold ? (String(item.fontFamily || '').includes('--social-display-font') ? 'var(--social-display-font-weight, 800)' : 800) : 400,
-      color: resolveBlankColor(item.color, palette),
-      textAlign: item.align, lineHeight: item.lineHeight ?? 1,
-      letterSpacing: item.letterSpacing || 0,
-      textTransform: item.uppercase ? 'uppercase' : 'none',
-      whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-      background: item.bg && item.bg !== 'none' ? resolveBlankColor(item.bg, palette) : 'transparent',
-      padding: item.bg && item.bg !== 'none' ? '0.15em 0.4em' : 0,
-      boxDecorationBreak: 'clone',
-    }}>{shown || ' '}</div>
+    <div style={{ position: 'relative', width: item.w, transform: skew, transformOrigin: 'left center', paddingBottom: step * (n - 1) }}>
+      <div style={{ ...style, visibility: 'hidden' }}>{shown || ' '}</div>
+      {order.map((i) => {
+        const filled = filledIdx === -2 || i === filledIdx
+        const dist = filledIdx >= 0 ? Math.abs(i - filledIdx) : i
+        const op = echo.fade ? Math.max(0.12, 1 - dist * (0.85 / Math.max(1, n - 1))) : 1
+        return (
+          <div key={i} data-echo={i} style={{
+            ...face(!filled || item.hollow, filled ? strokeW : ew, filled ? strokeC : color),
+            position: 'absolute', left: 0, top: i * step, opacity: op,
+            textShadow: filled ? shadow : undefined,
+          }}>{shown || ' '}</div>
+        )
+      })}
+    </div>
   )
 }
 
 function ImageBlock({ item, palette, data }) {
+  // Frames, looks and cut-out effects. Absent on every image saved before them,
+  // which then takes the untouched branches below.
+  if (hasImageDesign(item)) {
+    const resolve = (c) => resolveBlankColor(c, palette)
+    if (item.bind) {
+      const live = resolveBind(item.bind, data)
+      if (live === '') return <div style={{ width: item.w, height: item.h }} />
+      return <FramedImage item={item} src={live || null} resolve={resolve} defaultFit="cover" placeholder={bindLabel(item.bind).toUpperCase()} />
+    }
+    return <FramedImage item={item} src={item.src || null} resolve={resolve} />
+  }
   // A bound picture (a player's photo) shows the live one; nothing held yet shows a
   // labelled placeholder, and a place with no player or no photo prints nothing.
   if (item.bind) {
@@ -306,9 +442,30 @@ function ImageBlock({ item, palette, data }) {
   )
 }
 
+function TextureBlock({ item, color, op }) {
+  const w = Math.max(1, item.w)
+  const h = Math.max(1, item.h)
+  if (item.shape === 'halftone') {
+    const dots = halftoneDots(w, h, Math.max(6, item.dot || 22))
+    return (
+      <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ display: 'block', opacity: op, overflow: 'visible' }}>
+        <g fill={color}>{dots.map(([x, y, r], i) => <circle key={i} cx={x} cy={y} r={r} />)}</g>
+      </svg>
+    )
+  }
+  const make = TEXTURES[item.shape]
+  const paths = make ? make(w, h, item.seed || 1) : []
+  return (
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ display: 'block', opacity: op, overflow: 'visible' }}>
+      {paths.map((p, i) => <path key={i} d={p.d} fill={color} fillOpacity={p.opacity} />)}
+    </svg>
+  )
+}
+
 function ElementBlock({ item, palette }) {
   const color = resolveBlankColor(item.color, palette)
   const op = item.opacity ?? 1
+  if (TEXTURE_SHAPES.has(item.shape)) return <TextureBlock item={item} color={color} op={op} />
   if (item.shape === 'line' || item.shape === 'divider') {
     return <div style={{ width: item.w, height: Math.max(1, item.thickness || 4), background: color, opacity: op }} />
   }
@@ -333,7 +490,7 @@ const MONO_FONT = "'JetBrains Mono', monospace"
 const BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.BASE_URL + 'api')
 // Same headshot URL the lineup templates use (playerToTemplatePlayer builds
 // `headshot` from it) — no new server endpoint needed.
-const headshotUrl = (p) => (p?.photo_url ? `${BASE_URL}/images/players/${p.id}/photo` : null)
+export const headshotUrl = (p) => (p?.photo_url ? `${BASE_URL}/images/players/${p.id}/photo` : null)
 
 // "LAST, First" / "First Last" split, mirroring splitName in AdminSocialPost.
 
@@ -440,6 +597,10 @@ function DataBlock({ item, palette, data = {} }) {
   if (item.kind === 'playerphoto') {
     const player = (data.players || []).find((p) => p.id === item.playerId)
     const src = headshotUrl(player)
+    if (hasImageDesign(item)) {
+      return <FramedImage item={item} src={src} resolve={(c) => resolveBlankColor(c, palette)} defaultFit="cover"
+        placeholder={player ? `NO PHOTO ON ${(player.display_name || player.name || '').toUpperCase()}'S PROFILE` : 'SELECT A PLAYER'} />
+    }
     if (src) {
       return <img src={src} alt="" draggable={false} style={{ width: item.w, height: item.h, objectFit: item.fit || 'cover', display: 'block', pointerEvents: 'none' }} />
     }
@@ -581,7 +742,10 @@ const RESIZE_HANDLES = [
   { k: 'w', x: 0, y: 0.5, cur: 'ew-resize' },
 ]
 
-function BlankBlock({ item, palette, team, data, interactive, selected, single, outline, handle, accent, onPointerDown, onResize, onRotate, onDuplicate, onRemove }) {
+// Pictures that can be moved about inside their own frame (double-click).
+const isAdjustable = (it) => it && (it.type === 'image' || (it.type === 'data' && it.kind === 'playerphoto')) && !it.design
+
+function BlankBlock({ item, palette, team, data, interactive, selected, single, outline, handle, accent, onPointerDown, onResize, onRotate, onDuplicate, onRemove, adjusting = false, onAdjust }) {
   const rot = item.rotation ? `rotate(${item.rotation}deg)` : undefined
   const H = handle
   const gap = H * 1.6
@@ -592,12 +756,18 @@ function BlankBlock({ item, palette, team, data, interactive, selected, single, 
   return (
     <div
       onPointerDown={interactive ? (e) => onPointerDown(e, item.id) : undefined}
+      onDoubleClick={interactive && onAdjust && isAdjustable(item) ? (e) => { e.stopPropagation(); onAdjust(item.id) } : undefined}
+      data-adjusting={adjusting ? '' : undefined}
       draggable={false}
       onDragStart={interactive ? (e) => e.preventDefault() : undefined}
       style={{
         position: 'absolute', left: item.x, top: item.y,
-        cursor: interactive ? 'move' : 'default',
-        outline: interactive && selected ? `${outline}px solid ${accent}` : 'none',
+        cursor: interactive ? (adjusting ? 'grab' : 'move') : 'default',
+        outline: interactive && selected ? `${outline}px ${adjusting ? 'dashed' : 'solid'} ${accent}` : 'none',
+        // Block-wide opacity and blend (a faded copy behind a player, a texture
+        // multiplied into a photo). Elements carry their own opacity inside.
+        opacity: item.type !== 'element' && item.opacity != null && item.opacity !== 1 ? item.opacity : undefined,
+        mixBlendMode: item.blend && item.blend !== 'normal' ? item.blend : undefined,
         outlineOffset: outline * 2, transform: rot, transformOrigin: 'center center',
         touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none',
         // Re-armed explicitly so a block stays grabbable inside a pass-through
@@ -606,7 +776,12 @@ function BlankBlock({ item, palette, team, data, interactive, selected, single, 
         ...(item.locked ? { pointerEvents: 'none' } : null),
       }}>
       {renderContent(item, palette, team, data)}
-      {interactive && single && (
+      {interactive && adjusting && (
+        <div style={{ position: 'absolute', left: '50%', top: '100%', transform: `translate(-50%, ${handle * 0.8}px)`, whiteSpace: 'nowrap', padding: `${handle * 0.3}px ${handle * 0.6}px`, borderRadius: handle, background: accent, color: '#000', fontFamily: "'JetBrains Mono', monospace", fontSize: handle * 0.85, letterSpacing: 1, pointerEvents: 'none' }}>
+          DRAG TO MOVE THE PHOTO · SCROLL TO ZOOM · ESC TO FINISH
+        </div>
+      )}
+      {interactive && single && !adjusting && (
         <>
           {/* Quick toolbar */}
           <div onPointerDown={(e) => e.stopPropagation()}
@@ -655,9 +830,55 @@ export function BlankCanvas({
   const selSet = new Set(selectedIds)
   const s = scale || 1
   const accent = resolveBlankColor('accent', palette)
+  // "Adjust in frame": a double-clicked picture's drag moves the photo inside
+  // its frame and the wheel zooms it, instead of moving the block.
+  const [adjustId, setAdjustId] = useState(null)
+  const adjusting = adjustId && selectedIds.length === 1 && selectedIds[0] === adjustId ? adjustId : null
+  const adjItem = adjusting ? items.find((x) => x.id === adjusting) : null
+  const selKey = selectedIds.join(',')
+  useEffect(() => { if (adjustId && selKey !== adjustId) setAdjustId(null) }, [selKey, adjustId])
+  useEffect(() => {
+    if (!adjusting) return undefined
+    const onKey = (e) => { if (e.key === 'Escape' || e.key === 'Enter') setAdjustId(null) }
+    const el = rootRef.current
+    const onWheel = (e) => {
+      const it = items.find((x) => x.id === adjusting)
+      if (!it) return
+      e.preventDefault()
+      const c = it.crop || {}
+      const z = Math.max(0.3, Math.min(6, (c.z ?? 1) * (e.deltaY < 0 ? 1.06 : 1 / 1.06)))
+      onGestureStart && onGestureStart()
+      onPatchMany({ [it.id]: { crop: { x: c.x || 0, y: c.y || 0, z: Math.round(z * 1000) / 1000 } } })
+      onCommit && onCommit()
+    }
+    window.addEventListener('keydown', onKey)
+    el && el.addEventListener('wheel', onWheel, { passive: false })
+    return () => { window.removeEventListener('keydown', onKey); el && el.removeEventListener('wheel', onWheel) }
+  }, [adjusting, items, onPatchMany, onGestureStart, onCommit])
+
+  const beginPan = (e, it) => {
+    e.stopPropagation()
+    const c0 = it.crop || {}
+    const sx = e.clientX, sy = e.clientY
+    let started = false
+    // The block may be rotated: turn the screen drag back into the block's axes.
+    const a = -((it.rotation || 0) * Math.PI) / 180
+    const move = (ev) => {
+      if (!started) { started = true; onGestureStart && onGestureStart() }
+      const dx = (ev.clientX - sx) / s, dy = (ev.clientY - sy) / s
+      const rx = dx * Math.cos(a) - dy * Math.sin(a)
+      const ry = dx * Math.sin(a) + dy * Math.cos(a)
+      onPatchMany({ [it.id]: { crop: { x: Math.round((c0.x || 0) + rx), y: Math.round((c0.y || 0) + ry), z: c0.z ?? 1 } } })
+    }
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); onCommit && onCommit() }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
 
   const beginMove = (e, id) => {
     if (!interactive) return
+    if (adjItem && id === adjItem.id && !(e.shiftKey || e.ctrlKey || e.metaKey)) { beginPan(e, adjItem); return }
+    if (adjustId && id !== adjustId) setAdjustId(null)
     e.stopPropagation()
     const additive = e.shiftKey || e.ctrlKey || e.metaKey
     let active
@@ -819,6 +1040,7 @@ export function BlankCanvas({
           outline={outline} handle={handle} accent={accent}
           onPointerDown={beginMove} onResize={beginResize} onRotate={beginRotate}
           onDuplicate={onDuplicate} onRemove={onRemove}
+          adjusting={adjusting === it.id} onAdjust={(aid) => { onSelect && onSelect(aid, false); setAdjustId(aid) }}
         />
         )
       })}

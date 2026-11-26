@@ -19,6 +19,7 @@ import ShapesPanel from '../../components/admin/socialpost/panels/ShapesPanel'
 import ClubDataPanel from '../../components/admin/socialpost/panels/ClubDataPanel'
 import LayersPanel from '../../components/admin/socialpost/panels/LayersPanel'
 import SponsorsPanel from '../../components/admin/socialpost/panels/SponsorsPanel'
+import EffectsPanel from '../../components/admin/socialpost/panels/EffectsPanel'
 import { api, setPublishingContext } from '../../lib/api'
 import { pickHero } from '../../lib/playerShots'
 import {
@@ -57,7 +58,8 @@ import { NO_WINNER_KINDS, noWinnerLine, noWinnerWord, detectNoWinner } from '../
 import { SocialBackground, SocialBackgroundDefs, SOCIAL_BACKGROUNDS, GRADIENT_ANGLES, LINED_BACKGROUNDS, DEFAULT_COLORS as BG_DEFAULT_COLORS } from '../../social/SocialBackgrounds'
 import { EVENT_TEMPLATES, EVENT_PRESETS, DEFAULT_EVENT, resolveMotif, eventPaletteFor, prepareEventList, defaultEventList } from '../../social/event-templates'
 import EventPostEditor from '../../components/admin/EventPostEditor'
-import { BlankCanvas, newBlankItem, defaultBlankItems, withDesign } from '../../social/blank-template'
+import { BlankCanvas, newBlankItem, defaultBlankItems, withDesign, starterItems, itemBBox, headshotUrl } from '../../social/blank-template'
+import { resolveBind } from '../../social/boundResolve'
 import { parseTemplateFile, itemsFromTemplate, templateWarnings, boundSlotCount } from '../../social/boundFields'
 import { CustomLayout, CUSTOM_LAYOUT_ID, CUSTOM_LAYOUTS, CUSTOM_LAYOUT_IDS, CUSTOM_PANEL_ALIAS, isCustomLayout } from '../../social/custom-layout'
 import { fixtureRows, resultRows, finalBundle, motmBundle, announceBundle, tossBundle, totwBundle, milestoneBundle, eventBundle } from '../../social/postBundle'
@@ -3761,6 +3763,56 @@ export default function AdminSocialPost() {
   }
   const hToggleHidden = (id) => { record('Show/hide element'); tlayers.toggleHidden(id) }
 
+  // Effects panel actions that put one block directly behind another. On the
+  // Blank tab the array order is the stack; on a built-in layout the stack is
+  // held by `tlayers`, and a block added this render is not in `stackIds` yet,
+  // so the move waits for the next render (pendingMoves) and runs once it is.
+  const pendingMoves = useRef([])
+  useEffect(() => {
+    if (!pendingMoves.current.length) return
+    const [a, b] = pendingMoves.current[0]
+    if (!stackIds.includes(a) || !stackIds.includes(b)) return
+    pendingMoves.current.shift()
+    if (isBlankTab) canvas.moveBefore(a, b)
+    else tlayers.move(stackIds, a, b)
+  })
+  const isPictureBlock = (it) => it && !it.design && (it.type === 'image' || (it.type === 'data' && it.kind === 'playerphoto'))
+  const hGhost = (id) => {
+    const it = layer.items.find((x) => x.id === id)
+    if (!it) return
+    record('Add faded copy')
+    const k = 1.5
+    const fx = { ...(it.fx || {}), outline: null, glow: null, shadow: null, trail: null }
+    if (!fx.tone || fx.tone === 'none') fx.tone = 'mono'
+    const nid = layer.insertCopy(id, {
+      x: Math.round(it.x - (it.w * (k - 1)) / 2), y: Math.round(it.y - (it.h * (k - 1)) / 2),
+      w: Math.round(it.w * k), h: Math.round(it.h * k),
+      opacity: 0.22, mask: null, popOut: 0, frameFill: null, frameStroke: null, crop: null, fx, locked: false,
+    })
+    if (nid && !isBlankTab) pendingMoves.current.push([nid, id])
+  }
+  // The topmost picture a text block overlaps: the one it goes under.
+  const pictureUnder = (textId) => {
+    const t = layer.items.find((x) => x.id === textId)
+    if (!t) return null
+    const a = itemBBox(t)
+    const hit = layerStack.filter((l) => l.kind === 'block' && isPictureBlock(l.item) && (() => {
+      const b = itemBBox(l.item)
+      return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+    })())
+    return hit.length ? hit[hit.length - 1].id : null
+  }
+  const hTextBehind = (textId) => {
+    const pid = pictureUnder(textId)
+    if (!pid) return
+    hMoveBefore(textId, pid)
+  }
+  const hAddStarter = (key) => {
+    if (!isBlankTab && !customOn) setCustomEdit(true)
+    record('Add design')
+    layer.addMany(starterItems(key))
+  }
+
   // Keyboard: delete removes the selection; ⌘/Ctrl-Z undo, ⇧⌘Z redo. Ignored
   // while typing in a field.
   useEffect(() => {
@@ -5115,6 +5167,7 @@ export default function AdminSocialPost() {
       palette={themedPalette} players={allPlayers} onPickImage={pickImageForItem} onEditImage={editImageForItem}
       onSendTo={hSendTo} layoutName={!isBlankTab ? tmpl.name : null}
       onOpenSponsors={() => setTool('sponsors')}
+      onOpenEffects={() => setTool('effects')}
     />
   )
 
@@ -5469,6 +5522,20 @@ export default function AdminSocialPost() {
             )}
             {tool === 'text' && <TextPanel onAdd={addBlock} />}
             {tool === 'elements' && <ShapesPanel onAdd={addBlock} />}
+            {tool === 'effects' && (() => {
+              const fxItem = layer.selIds.length === 1 ? layer.items.find((x) => x.id === layer.selIds[0]) || null : null
+              const previewSrc = !fxItem ? null
+                : fxItem.type === 'data' ? headshotUrl((blankData.players || []).find((p) => p.id === fxItem.playerId))
+                  : fxItem.bind ? (resolveBind(fxItem.bind, blankData) || null) : (fxItem.src || null)
+              return (
+                <EffectsPanel item={fxItem} selCount={layer.selIds.length} palette={themedPalette}
+                  onPatch={(p) => fxItem && hUpdate(fxItem.id, p)} previewSrc={previewSrc}
+                  onGhost={() => fxItem && hGhost(fxItem.id)}
+                  onTextBehind={() => fxItem && hTextBehind(fxItem.id)}
+                  canBehind={!!(fxItem && fxItem.type === 'text' && pictureUnder(fxItem.id))}
+                  onAddStarter={hAddStarter} />
+              )
+            })()}
             {tool === 'data' && <ClubDataPanel onAdd={addBlock} />}
             {tool === 'photos' && photosPanel}
             {tool === 'sponsors' && sponsorsPanel}
