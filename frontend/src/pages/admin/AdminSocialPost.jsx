@@ -37,6 +37,7 @@ import {
 import { SplitPoster, autoPanelColor } from '../../social/split-template'
 import { LineupCard, LINEUP_CARD_DEFAULTS, cardWashDefault } from '../../social/lineup-card-template'
 import { ResultGlass, GLASS_DEFAULTS, GLASS_FOCUS, GLASS_POSITIONS } from '../../social/result-glass-template'
+import { ResultsCards } from '../../social/results-cards-template'
 import { RoundCover } from '../../social/round-cover-template'
 import { ResultHighlights, HIGHLIGHTS_FOCUS } from '../../social/highlights-cover-template'
 import { GiantType } from '../../social/giant-type-template'
@@ -135,6 +136,7 @@ const ALL_TEMPLATES = [
   { id: 'RR4', name: 'Headline',       component: ResultsHeadline,    desc: 'Feature result + others',         maxPlayers: 0, kind: 'results' },
   { id: 'RR5', name: 'Board',          component: ResultsBoard,       desc: 'Results table',                   maxPlayers: 0, kind: 'results' },
   { id: 'RR6', name: 'Win/Loss Split', component: ResultsSplit,       desc: 'Wins vs losses columns',          maxPlayers: 0, kind: 'results' },
+  { id: 'RR8', name: 'Match Cards',    component: ResultsCards,       desc: 'Your photo, one card per match, live chases and results', maxPlayers: 0, kind: 'results', hasLeaders: true, hasInnings: true },
   // Team of the week — the round's best performers across every grade, 6 to 14 of them.
   { id: 'TW1', name: 'Team Sheet',     component: TeamOfWeekGrid,     desc: 'Photo cards, any team size',      maxPlayers: TOTW_MAX, kind: 'totw' },
   { id: 'TW2', name: 'Ranked Board',   component: TeamOfWeekBoard,    desc: 'One row per player, best first',  maxPlayers: TOTW_MAX, kind: 'totw' },
@@ -172,7 +174,7 @@ const ALL_TEMPLATES = [
 // The football build drops the layouts that only mean anything with cricket
 // data: the batting order, the results wrap's batting/bowling leaders, and
 // every layout of the three hidden post types (toss, scorecard, final score).
-const AFL_HIDDEN_TEMPLATES = new Set([...CUSTOM_LAYOUT_IDS, 'T4', 'T11', 'T12', 'T13', 'C5', 'RR7', 'C2', 'C4', 'RS1', 'RS2', 'RS3', 'RS4', 'RS5', 'RS6', 'RS7', 'RS8', 'RS9', 'SC1', 'SC2', 'SC3', 'TW1', 'TW2', 'TW3', 'MS1', 'MS2', 'RV1', 'RV2', 'RV3', 'RV4', 'RV5', 'RV6', 'RV7', 'RV8', 'RV9'])
+const AFL_HIDDEN_TEMPLATES = new Set([...CUSTOM_LAYOUT_IDS, 'T4', 'T11', 'T12', 'T13', 'C5', 'RR7', 'RR8', 'C2', 'C4', 'RS1', 'RS2', 'RS3', 'RS4', 'RS5', 'RS6', 'RS7', 'RS8', 'RS9', 'SC1', 'SC2', 'SC3', 'TW1', 'TW2', 'TW3', 'MS1', 'MS2', 'RV1', 'RV2', 'RV3', 'RV4', 'RV5', 'RV6', 'RV7', 'RV8', 'RV9'])
 const TEMPLATES = IS_AFL ? ALL_TEMPLATES.filter(t => !AFL_HIDDEN_TEMPLATES.has(t.id)) : ALL_TEMPLATES
 
 // The lineup templates that crop the hero photo into a fixed box, and the shape
@@ -208,7 +210,7 @@ const TAB_MAP = {
   FX1: 'fixtures', FX2: 'fixtures', FX3: 'fixtures', FX4: 'fixtures', FX5: 'fixtures', FX6: 'fixtures',
   C1: 'announcement', C5: 'announcement', C2: 'toss', C3: 'motm',
   C4: 'result', RS1: 'result', RS2: 'result', RS3: 'result', RS4: 'result', RS5: 'result', RS6: 'result', RS7: 'result', RS8: 'result', RS9: 'result',
-  RR1: 'results', RR2: 'results', RR3: 'results', RR4: 'results', RR5: 'results', RR6: 'results', RR7: 'results',
+  RR1: 'results', RR2: 'results', RR3: 'results', RR4: 'results', RR5: 'results', RR6: 'results', RR7: 'results', RR8: 'results',
   TW1: 'totw', TW2: 'totw', TW3: 'totw',
   MS1: 'milestones', MS2: 'milestones',
   RV1: 'review', RV2: 'review', RV3: 'review', RV4: 'review', RV5: 'review', RV6: 'review', RV7: 'review', RV8: 'review', RV9: 'review',
@@ -472,7 +474,7 @@ function readEventDraft() {
 // prints the Competition except Round Cover and Giant Type (a round number and a
 // figure are their headlines). A field the open layout ignores says so on screen.
 const HEADLINE_TEMPLATES = ['T1', 'T2', 'T3', 'T5', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', ...CUSTOM_LAYOUT_IDS]
-const NO_COMPETITION_TEMPLATES = ['T13', 'C5']
+const NO_COMPETITION_TEMPLATES = ['T13', 'C5', 'RR8']
 const ROLE_OPTIONS = IS_AFL ? ['', 'FB', 'HB', 'C', 'W', 'MID', 'RUCK', 'HF', 'FF', 'UTIL'] : ['BAT', 'BOWL', 'AR', 'WK']
 const ROLE_LONG = IS_AFL
   ? { FB: 'Full Back', HB: 'Half Back', C: 'Centre', W: 'Wing', MID: 'Midfield', RUCK: 'Ruck', HF: 'Half Forward', FF: 'Full Forward', UTIL: 'Utility' }
@@ -3923,7 +3925,7 @@ export default function AdminSocialPost() {
     extraProps.sponsorPanel = overlay.items.find((it) => it.type === 'sponsors')?.panel || 'light'
   }
   // The three card layouts keep a slot for the sponsor grid and ask how many logos it holds.
-  if (templateId === 'T13' || templateId === 'C5') extraProps.sponsorCount = gridLogoCount
+  if (templateId === 'T13' || templateId === 'C5' || templateId === 'RR8') extraProps.sponsorCount = gridLogoCount
   if (templateId === 'C4') {
     if (resultSwap) extraProps.swap = true
     extraProps.result = {
@@ -5133,7 +5135,7 @@ export default function AdminSocialPost() {
       // sitting where the layout put it follows the bar. One somebody moved stays.
       let follow = null
       // The Glass Card's slot is wider for more logos, the same way.
-      if (['T12', 'RS7', 'T13', 'C5', 'RS8'].includes(templateId)) {
+      if (['T12', 'RS7', 'T13', 'C5', 'RS8', 'RR8'].includes(templateId)) {
         const was = sponsorSlotFor(templateId, W, H, (sponsorBlock.sponsorIds || []).length || 1, slotOpts)
         if (['x', 'y', 'w', 'h'].every((k) => sponsorBlock[k] === was[k])) {
           const { x, y, w, h } = sponsorSlotFor(templateId, W, H, ids.length, slotOpts)
@@ -6987,6 +6989,11 @@ export default function AdminSocialPost() {
                   onPull={importResults} onFetchLink={importResultsFromLink} notice={rrImport.notice} inPlay={rrLive} onInPlay={IS_AFL ? undefined : changeRrLive}
                   onPick={(i) => { setRrImport(s => ({ ...s, idx: i })); applyRrDate(rrImport.dates[i], rrImport.season, rrOff) }}
                   off={rrOff} onToggleCat={toggleRrCat} />
+                {tmpl.hasInnings && (
+                  <p className="text-[11px] text-pb-faint mb-3" data-testid="rr8-hint">
+                    Match Cards is built for your own photo: add one in <strong>Style</strong>, under Your backgrounds (the + tile). A game in play reads as the chase (NEED 188 TO WIN) once it knows who batted first. The pull fills that in, and you can set it on each row below. Tick <strong>Include games in progress</strong> to bring in games still going.
+                  </p>
+                )}
                 {tmpl.hasLeaders && (
                   <div className="mb-3" data-testid="rr-perf-side">
                     <span className="block font-mono text-[9px] tracking-wide2 uppercase text-pb-faint mb-1">Players shown</span>
@@ -7040,6 +7047,20 @@ export default function AdminSocialPost() {
                           <input value={r.margin} onChange={e => set({ margin: e.target.value })} placeholder="BY 4 WICKETS"
                             className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
                         </div>
+                        {tmpl.hasInnings && (
+                          <div className="grid gap-1.5 items-center" data-testid="rr-innings" style={{ gridTemplateColumns: 'minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr)' }}>
+                            <select value={r.battedFirst || ''} onChange={e => set({ battedFirst: e.target.value || undefined })} aria-label="Who batted first"
+                              className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-1 py-1 text-xs text-pb-text">
+                              <option value="">Batted first: not set</option>
+                              <option value="us">We batted first</option>
+                              <option value="them">They batted first</option>
+                            </select>
+                            <input value={r.usOvers || ''} onChange={e => set({ usOvers: e.target.value })} placeholder="Our overs 40" aria-label="Our overs"
+                              className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-xs text-pb-text font-mono placeholder:text-pb-faintest" />
+                            <input value={r.themOvers || ''} onChange={e => set({ themOvers: e.target.value })} placeholder="Their overs 38.2" aria-label="Their overs"
+                              className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-xs text-pb-text font-mono placeholder:text-pb-faintest" />
+                          </div>
+                        )}
                         {tmpl.hasLeaders && (
                           <div className="grid gap-2 pt-1 mt-0.5 border-t pb-hairline" style={{ gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)' }}>
                             {[['bat', perfKeys(rrPerfSide).bat], ['bowl', perfKeys(rrPerfSide).bowl]].map(([kind, key]) => (

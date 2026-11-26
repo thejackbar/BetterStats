@@ -13,6 +13,7 @@ import * as glass from '../src/social/result-glass-template.jsx'
 import * as roundCover from '../src/social/round-cover-template.jsx'
 import * as giant from '../src/social/giant-type-template.jsx'
 import * as highlights from '../src/social/highlights-cover-template.jsx'
+import * as resultCards from '../src/social/results-cards-template.jsx'
 
 const HEAD = 'ZZHEADLINEZZ', COMP = 'ZZCOMPZZ'
 const pal = { primary: '#102040', secondary: '#183060', accent: '#f0b000', ink: '#ffffff', name: 'x' }
@@ -48,6 +49,7 @@ const LAYOUTS = {
   RS5: [rounds.ResultInningsBars, { palette: pal, result }], RS6: [rounds.ResultTicket, { palette: pal, result }],
   RS7: [glass.ResultGlass, { palette: pal, result }],
   RS8: [highlights.ResultHighlights, { palette: pal, result }],
+  RR8: [resultCards.ResultsCards, { palette: pal, meta, results: rs, club: {} }],
   T13: [roundCover.RoundCover, lineupProps],
   C5: [giant.GiantType, { ...lineupProps, announcement: { kind: 'DEBUT', headline: 'ZZANNZZ', subheadline: '', player: players[0] } }],
   TW1: [totw.TeamOfWeekGrid, { palette: pal, players, totw: { round: 'ROUND 1', date: 'SAT 1 JAN', comp: COMP, showPoints: true } }],

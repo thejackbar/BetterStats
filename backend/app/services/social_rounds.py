@@ -448,7 +448,51 @@ def _result_row(
     }
     if live:
         row["live"] = True
+    # For a layout that tells the match as it stands (Match Cards, RR8): who
+    # batted first, each side's overs and our team's own label ("1ST XI" from
+    # "Willetton 1st XI"). Each is left out when the card cannot answer it, so a
+    # layout falls back rather than guessing, and the older layouts never read them.
+    first = _first_batting_side(innings, our_id, opp_id)
+    if first:
+        row["battedFirst"] = first
+    for key, inn in (("usOvers", our_inn), ("themOvers", opp_inn)):
+        if inn and inn.get("oversBowled") is not None:
+            # Whole overs read as the scorecard prints them: "40", not "40.0".
+            row[key] = _overs_str(inn.get("oversBowled")).removesuffix(".0")
+    label = _team_label((our_team.get("displayName") or "") if our_team else "")
+    if label:
+        row["teamLabel"] = label
     return row
+
+
+def _first_batting_side(innings: list, our_id: str, opp_id: str | None) -> str | None:
+    """'us' or 'them': whose innings comes first on the card (``inningsOrder``,
+    then ``inningsNumber``, then the order the card lists them in). ``None`` when
+    the first innings names neither side."""
+    if not innings:
+        return None
+    ranked = sorted(
+        enumerate(innings),
+        key=lambda p: (p[1].get("inningsOrder") or p[1].get("inningsNumber") or 0, p[0]),
+    )
+    tid = _team_id_from_inn(ranked[0][1])
+    if tid and tid == our_id:
+        return "us"
+    if tid and opp_id and tid == opp_id:
+        return "them"
+    return None
+
+
+def _team_label(display_name: str) -> str:
+    """The grade part of a team name: 'Willetton 1st XI' -> '1ST XI'. Empty when
+    the name carries no such suffix (the club name alone)."""
+    name = (display_name or "").strip()
+    if not name:
+        return ""
+    club = strip_team_suffix(name)
+    if not club or club == name:
+        return ""
+    return name[len(club):].strip().upper()
 
 
 async def social_fixtures(db: AsyncSession, org) -> dict:
@@ -578,6 +622,8 @@ async def social_results(db: AsyncSession, org, include_live: bool = False) -> d
         if not row:
             continue
         row["categories"] = cats_of(grade_name_by_guid.get(gid))
+        if _round_label(m.get("round")):
+            row["round"] = _round_label(m.get("round")).upper()
         day = m.get("played_at") or ""
         bucket = by_date.setdefault(day, {"date": day, "label": _label(day), "round": "", "results": []})
         if not bucket["round"]:
@@ -886,6 +932,8 @@ async def social_results_for_reference(db: AsyncSession, org, raw: str, include_
         )
         if row:
             row["categories"] = cats_of(ctx["grade_name_by_guid"].get(guid))
+            if _round_label(_match_round_name(m)):
+                row["round"] = _round_label(_match_round_name(m)).upper()
             results.append(row)
     if not results:
         return {"kind": "no_results", "message": no_round}
