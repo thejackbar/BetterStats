@@ -2968,7 +2968,17 @@ async def _sync_trial_registration(*, org_id, org_name: str, contact_name: str, 
                     full_name=contact_name or (contact.full_name if contact else "") or org_name,
                     email=email, phone=phone)
             await session.commit()
-            return {"deal_id": str(deal.id)} if deal else {"skipped": "no trial stage"}
+            result = {"deal_id": str(deal.id)} if deal else {"skipped": "no trial stage"}
     except Exception:  # noqa: BLE001 - a CRM hiccup can't undo the registration that already committed
         logger.exception("crm: failed to sync %s deal for org %s", source, org_id)
         return {"error": "failed"}
+
+    # The club's Directory row exists now, and may only have been CREATED just above (a club the
+    # crawl never found has none at registration, and onboarding's link is a no-op for it). The
+    # admin-list sync the registration queued ran BEFORE this, so it filed the admin on BetterCricket's
+    # internal Comms list with no club on it ({{club}} and the trial figures blank, a named-club
+    # segment never matching). Running it again links them: it is idempotent and only ever fills a
+    # blank club link. Its own session, after our commit, and it never raises.
+    from app.services.admin_contact_list import run_sync as admin_contact_sync
+    await admin_contact_sync(org_id)
+    return result

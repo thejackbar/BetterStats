@@ -35,7 +35,7 @@ from sqlalchemy import func, select, text  # noqa: E402
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
 
 from app.models.db import (  # noqa: E402
-    Base, ClubMembership, CommsContact, CommsList, CommsListMember, EmailSuppression,
+    Base, ClubMembership, CommsContact, CommsSegment, CommsSegmentMember, EmailSuppression,
     MarketingClub, Organisation, OrgModuleSubscription, User,
 )
 from app.services import admin_contact_list as acl  # noqa: E402
@@ -54,9 +54,9 @@ async def listed_emails(db, outreach_id) -> set:
     """Whoever is actually ON the list, by address."""
     return set((await db.execute(
         select(CommsContact.email)
-        .join(CommsListMember, CommsListMember.contact_id == CommsContact.id)
-        .join(CommsList, CommsList.id == CommsListMember.list_id)
-        .where(CommsList.organisation_id == outreach_id, CommsList.name == acl.LIST_NAME)
+        .join(CommsSegmentMember, CommsSegmentMember.contact_id == CommsContact.id)
+        .join(CommsSegment, CommsSegment.id == CommsSegmentMember.segment_id)
+        .where(CommsSegment.organisation_id == outreach_id, CommsSegment.name == acl.LIST_NAME)
     )).scalars().all())
 
 
@@ -73,6 +73,10 @@ async def main() -> int:
         await conn.run_sync(Base.metadata.create_all)
         # Lifespan DDL (main.py), not on the ORM model: the shared "not played" predicate reads it.
         await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"))
+        # The merge variables read the club's teaser link, a lifespan table create_all never makes.
+        from app.services.club_teaser_ddl import STATEMENTS as TEASER_DDL
+        for stmt in TEASER_DDL:
+            await conn.execute(text(stmt))
 
     root0 = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # backend/
     repo0 = os.path.dirname(root0)                                        # the repo
@@ -90,7 +94,7 @@ async def main() -> int:
         await db.commit()
         res = await acl.sync(db)
         check("with no outreach org designated it no-ops", res["status"] == "no_outreach_org", res)
-        check("...and writes no list", (await db.scalar(select(func.count()).select_from(CommsList))) == 0)
+        check("...and writes no list", (await db.scalar(select(func.count()).select_from(CommsSegment))) == 0)
 
         # ── The platform ────────────────────────────────────────────────────
         outreach = Organisation(id=uuid.uuid4(), name="BetterCricket", slug="bettercricket",
@@ -170,8 +174,8 @@ async def main() -> int:
               res["no_email"] == ["noemail"], res["no_email"])
 
         print("\n── The list itself ────────────────────────────────────────────")
-        lst = (await db.execute(select(CommsList).where(
-            CommsList.organisation_id == outreach.id))).scalars().all()
+        lst = (await db.execute(select(CommsSegment).where(
+            CommsSegment.organisation_id == outreach.id))).scalars().all()
         check("exactly one list, in the outreach org", len(lst) == 1, len(lst))
         check("named as asked", lst[0].name == "Super Admin User Contact List", lst[0].name)
         check("marked auto with an origin that says what made it",
@@ -183,32 +187,32 @@ async def main() -> int:
 
         print("\n── Running it again changes nothing ───────────────────────────")
         before_c = await db.scalar(select(func.count()).select_from(CommsContact))
-        before_m = await db.scalar(select(func.count()).select_from(CommsListMember))
+        before_m = await db.scalar(select(func.count()).select_from(CommsSegmentMember))
         res2 = await acl.sync(db)
         await db.commit()
         check("no contact is created twice",
               (await db.scalar(select(func.count()).select_from(CommsContact))) == before_c,
               before_c)
         check("no list membership is created twice",
-              (await db.scalar(select(func.count()).select_from(CommsListMember))) == before_m,
+              (await db.scalar(select(func.count()).select_from(CommsSegmentMember))) == before_m,
               before_m)
         check("and it says so", res2["contacts_added"] == 0 and res2["list_added"] == 0, res2)
         check("no second list is minted",
-              (await db.scalar(select(func.count()).select_from(CommsList))) == 1)
+              (await db.scalar(select(func.count()).select_from(CommsSegment))) == 1)
 
         print("\n── An opt-out is never overridden ─────────────────────────────")
         second = (await db.execute(select(CommsContact).where(
             CommsContact.email == "second@example.com"))).scalars().one()
         second.subscribed = False
-        await db.execute(text("DELETE FROM comms_list_members WHERE contact_id = :c"),
+        await db.execute(text("DELETE FROM comms_segment_members WHERE contact_id = :c"),
                          {"c": second.id})
         wp = (await db.execute(select(CommsContact).where(
             CommsContact.email == "wp@example.com"))).scalars().one()
         wp.bounced = True
-        await db.execute(text("DELETE FROM comms_list_members WHERE contact_id = :c"),
+        await db.execute(text("DELETE FROM comms_segment_members WHERE contact_id = :c"),
                          {"c": wp.id})
         db.add(EmailSuppression(email="nodir@example.com", reason="complaint"))
-        await db.execute(text("DELETE FROM comms_list_members WHERE contact_id IN "
+        await db.execute(text("DELETE FROM comms_segment_members WHERE contact_id IN "
                               "(SELECT id FROM comms_contacts WHERE email = 'nodir@example.com')"))
         await db.commit()
         res3 = await acl.sync(db)
@@ -296,25 +300,25 @@ async def main() -> int:
             other = Organisation(id=uuid.uuid4(), name="Other Outreach", slug="other-outreach")
             db2.add(other)
             await db2.flush()
-            hand = CommsList(organisation_id=other.id, name=acl.LIST_NAME,
+            hand = CommsSegment(organisation_id=other.id, name=acl.LIST_NAME,
                              source="manual", origin=None)
             db2.add(hand)
             await db2.commit()
-            got_list = await acl.ensure_list(db2, other.id)
+            got_list = await acl.ensure_segment(db2, other.id)
             await db2.commit()
             check("a list a person made by hand is adopted", got_list.id == hand.id)
             check("...and left as theirs, not relabelled auto",
                   got_list.source == "manual" and got_list.origin is None,
                   f"{got_list.source}/{got_list.origin}")
             check("no second list beside it",
-                  (await db2.scalar(select(func.count()).select_from(CommsList).where(
-                      CommsList.organisation_id == other.id))) == 1)
+                  (await db2.scalar(select(func.count()).select_from(CommsSegment).where(
+                      CommsSegment.organisation_id == other.id))) == 1)
 
         print("\n── The shipped route bodies ───────────────────────────────────")
         # super_set_primary_admin: hand the role to the second admin and confirm
         # the hook lands them on the list through the real route body.
         from app.routers.club_admin import PrimaryAdminSet, super_set_primary_admin
-        await db.execute(text("DELETE FROM comms_list_members"))
+        await db.execute(text("DELETE FROM comms_segment_members"))
         await db.execute(text("DELETE FROM comms_contacts"))
         await db.commit()
         await super_set_primary_admin(
