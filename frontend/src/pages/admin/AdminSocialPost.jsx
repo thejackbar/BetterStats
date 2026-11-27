@@ -44,14 +44,15 @@ import { ResultHighlights, HIGHLIGHTS_FOCUS } from '../../social/highlights-cove
 import { GiantType } from '../../social/giant-type-template'
 import { MatchDayV, GamedayEcho, GameDayCard, SquadCollage, COLLAGE_MAX, FinalScoreV, FixturesEcho, ResultsEcho, ColourPopSpotlight, ColourPopAnnounce, DESIGN_PANEL_ALIAS } from '../../social/design-templates'
 import { DesignLadder, HeadToHead, StatLeaders } from '../../social/design-templates-3'
+import { CleanMatchDay, CleanFinal, CleanSpotlight, CleanPlayerOfMatch, CleanFixtures, CleanResults, DESIGN_PANEL_ALIAS_MIN } from '../../social/minimal-templates'
 import StandingsControls from '../../components/admin/socialpost/StandingsControls'
 import { SignedStamp, QuoteCard, Birthday, SquadUpdate, Countdown, StatHero, CoinToss, BigNumber, TheOval, SplitFinal, NumberedList, DESIGN_PANEL_ALIAS_2 } from '../../social/design-templates-2'
 // Which built-in layout's Content panel (and props) each design layout shares.
-const DESIGN_ALIAS = { ...DESIGN_PANEL_ALIAS, ...DESIGN_PANEL_ALIAS_2 }
+const DESIGN_ALIAS = { ...DESIGN_PANEL_ALIAS, ...DESIGN_PANEL_ALIAS_2, ...DESIGN_PANEL_ALIAS_MIN }
 // The design layouts that can show our past results against the one opponent.
-const PAST_TEMPLATES = ['DL1', 'DL2', 'DL8', 'DL9', 'DL20', 'DL3', 'DL19', 'DL16', 'DL22']
+const PAST_TEMPLATES = ['DL1', 'DL2', 'DL8', 'DL9', 'DL20', 'DL24', 'DL3', 'DL19', 'DL25', 'DL16', 'DL22']
 // The roundups put each row's last results beside that row's opponent.
-const PAST_ROUND_TEMPLATES = ['FX1', 'FX2', 'FX3', 'FX4', 'FX5', 'FX6', 'RR1', 'RR2', 'RR3', 'RR4', 'RR5', 'RR6', 'RR7', 'RR8', 'DL4', 'DL5']
+const PAST_ROUND_TEMPLATES = ['FX1', 'FX2', 'FX3', 'FX4', 'FX5', 'FX6', 'RR1', 'RR2', 'RR3', 'RR4', 'RR5', 'RR6', 'RR7', 'RR8', 'DL4', 'DL5', 'DL28', 'DL29']
 // What a roundup row is looked up by: the club (not the team) and, when asked, the row's grade.
 // The older built-in layouts with one opponent take past results as a block on
 // top of the layout (Club data, "Past results v opponent"), placed for them.
@@ -138,11 +139,13 @@ const ALL_TEMPLATES = [
   { id: 'T9', name: 'Flyer',           component: T9_Flyer,           desc: 'Festival poster style',           maxPlayers: LINEUP_MAX },
   { id: 'T10', name: 'Team Sheet',     component: T10_TeamSheet,      desc: 'Full-bleed photo + torn strip',   maxPlayers: LINEUP_MAX },
   // Design layouts (design-templates.jsx): frames, echo type and colour splash.
-  { id: 'DL1', name: 'Match Day V',    component: MatchDayV,          desc: 'Pale poster, our player and their crest in V panels', maxPlayers: LINEUP_MAX },
+  { id: 'DL1', name: 'Match Day V',    component: MatchDayV,          desc: "Both clubs' colours, our player and their crest in V panels", maxPlayers: LINEUP_MAX },
   { id: 'DL2', name: 'Gameday Echo',   component: GamedayEcho,        desc: 'Stacked GAMEDAY, player in black and white, kit colour kept', maxPlayers: LINEUP_MAX },
   { id: 'DL8', name: 'Game Day Card',  component: GameDayCard,        desc: 'Duotone photo, GAME DAY with the player breaking out', maxPlayers: LINEUP_MAX },
   { id: 'DL9', name: 'Squad Collage',  component: SquadCollage,       desc: 'Up to seven players stacked on a torn poster', maxPlayers: LINEUP_MAX },
   { id: 'DL20', name: 'Numbered List', component: NumberedList,       desc: 'Outlined numbers, names stacked, duotone hero', maxPlayers: LINEUP_MAX },
+  // Minimal layouts (minimal-templates.jsx): one photo, one big word, quiet type. Made for the Club Colour backgrounds.
+  { id: 'DL24', name: 'Clean Match Day', component: CleanMatchDay,    desc: 'Minimal: the player big, the opponent big, the details small', maxPlayers: LINEUP_MAX },
   { id: 'C1', name: 'Announcement',    component: C1_CaptainAnnounce, desc: 'Captain / debut / award',         maxPlayers: 1 },
   { id: 'C5', name: 'Giant Type',      component: GiantType,          desc: 'FIRST XI / 100 / 5FA behind the player', maxPlayers: 1 },
   { id: 'C2', name: 'Toss',            component: C2_TossWon,         desc: 'Toss result post',                maxPlayers: 0 },
@@ -155,6 +158,8 @@ const ALL_TEMPLATES = [
   { id: 'DL13', name: 'Squad Update',  component: SquadUpdate,        desc: 'Muted photo and a status pill (injury, availability)', maxPlayers: 1 },
   { id: 'DL14', name: 'Countdown',     component: Countdown,          desc: 'One huge number (the headline), days to go', maxPlayers: 1 },
   { id: 'DL15', name: 'Stat Hero',     component: StatHero,           desc: 'The first figure huge, the player in front of it', maxPlayers: 1 },
+  { id: 'DL26', name: 'Clean Spotlight', component: CleanSpotlight,  desc: 'Minimal: the player beside their name, the news small', maxPlayers: 1 },
+  { id: 'DL27', name: 'Clean Spotlight', component: CleanPlayerOfMatch, desc: 'Minimal: the player beside their name and figures', maxPlayers: 1 },
   { id: 'DL16', name: 'Coin Toss',     component: CoinToss,           desc: "Split post, the winner's crest on a coin", maxPlayers: 0 },
   { id: 'C4', name: 'Result · Classic', component: C4_FinalScore,     desc: 'Result + top performers', maxPlayers: 0 },
   // Single-match result layouts (fold into the Final Score tab alongside C4).
@@ -169,6 +174,7 @@ const ALL_TEMPLATES = [
   { id: 'RS8', name: 'Highlights Cover', component: ResultHighlights, desc: 'Full-bleed photo, title and one score card', maxPlayers: 0, kind: 'singleresult' },
   { id: 'DL3', name: 'Final Score V',  component: FinalScoreV,        desc: 'Both crests in V frames, winner lit', maxPlayers: 0, kind: 'singleresult' },
   { id: 'DL19', name: 'Split Final',   component: SplitFinal,         desc: 'Diagonal split, giant scores, FULL TIME ribbon', maxPlayers: 0, kind: 'singleresult' },
+  { id: 'DL25', name: 'Clean Final',   component: CleanFinal,         desc: 'Minimal: two crests, two scores, one line', maxPlayers: 0, kind: 'singleresult' },
   // Fixtures roundup — one post, all grades.
   { id: 'FX1', name: 'List',           component: FixtureList,        desc: 'Clean factual rows',              maxPlayers: 0, kind: 'fixtures' },
   { id: 'FX2', name: 'Match-day Hype', component: FixtureHype,        desc: 'Diagonal poster',                 maxPlayers: 0, kind: 'fixtures' },
@@ -177,6 +183,7 @@ const ALL_TEMPLATES = [
   { id: 'FX5', name: 'Headline',       component: FixtureHeadline,    desc: 'Feature match + also-on',         maxPlayers: 0, kind: 'fixtures' },
   { id: 'FX6', name: 'Schedule',       component: FixtureSchedule,    desc: 'Match-day timeline',              maxPlayers: 0, kind: 'fixtures' },
   { id: 'DL4', name: 'Fixtures Echo',  component: FixturesEcho,       desc: 'Stacked heading, torn paper strips', maxPlayers: 0, kind: 'fixtures' },
+  { id: 'DL28', name: 'Clean Fixtures', component: CleanFixtures,     desc: 'Minimal: a big title, hairline rows', maxPlayers: 0, kind: 'fixtures' },
   // Results roundup — one post, all grades, win/loss coded.
   { id: 'RR1', name: 'Weekend Wrap',   component: ResultsList,        desc: 'Win/loss list',                   maxPlayers: 0, kind: 'results' },
   { id: 'RR7', name: 'Wrap + Leaders', component: ResultsListLeaders, desc: 'Win/loss list + our top scorers & wicket takers', maxPlayers: 0, kind: 'results', hasLeaders: true },
@@ -191,6 +198,7 @@ const ALL_TEMPLATES = [
   { id: 'DL22', name: 'Head to Head',  component: HeadToHead,         desc: 'Your ladder row against the opponent, as bars', maxPlayers: 0, kind: 'standings' },
   { id: 'DL23', name: 'Stat Leaders',  component: StatLeaders,        desc: 'Top run scorers, wicket takers or fielders', maxPlayers: 0, kind: 'standings' },
   { id: 'DL5', name: 'Results Echo',   component: ResultsEcho,        desc: 'Stacked heading, torn paper strips, win or loss tag', maxPlayers: 0, kind: 'results' },
+  { id: 'DL29', name: 'Clean Results', component: CleanResults,      desc: 'Minimal: a big title, hairline rows, W or L', maxPlayers: 0, kind: 'results' },
   // Team of the week — the round's best performers across every grade, 6 to 14 of them.
   { id: 'TW1', name: 'Team Sheet',     component: TeamOfWeekGrid,     desc: 'Photo cards, any team size',      maxPlayers: TOTW_MAX, kind: 'totw' },
   { id: 'TW2', name: 'Ranked Board',   component: TeamOfWeekBoard,    desc: 'One row per player, best first',  maxPlayers: TOTW_MAX, kind: 'totw' },
@@ -241,12 +249,12 @@ const HERO_CROP_ASPECT = { T1: 480 / 845, T3: 380 / 1080, T10: 720 / 1080, T13: 
 const HERO_FOCUS_TEMPLATES = Object.keys(HERO_CROP_ASPECT)
 // The layouts drawn around a hero photo. Derived from the same id list the Hero
 // Image panel is gated on, so the two can't drift apart.
-const HERO_SLOT_TEMPLATES = ['T1', 'T3', 'T6', 'T7', 'T10', 'T11', 'T13', 'C1', 'C3', 'C5', 'DL1', 'DL2', 'DL8', 'DL20', 'DL6', 'DL7', 'DL10', 'DL11', 'DL12', 'DL13', 'DL14', 'DL15', CUSTOM_LAYOUTS.lineup, CUSTOM_LAYOUTS.result, CUSTOM_LAYOUTS.motm, CUSTOM_LAYOUTS.announcement]
+const HERO_SLOT_TEMPLATES = ['T1', 'T3', 'T6', 'T7', 'T10', 'T11', 'T13', 'C1', 'C3', 'C5', 'DL1', 'DL2', 'DL8', 'DL20', 'DL24', 'DL6', 'DL7', 'DL26', 'DL27', 'DL10', 'DL11', 'DL12', 'DL13', 'DL14', 'DL15', CUSTOM_LAYOUTS.lineup, CUSTOM_LAYOUTS.result, CUSTOM_LAYOUTS.motm, CUSTOM_LAYOUTS.announcement]
 // The lineups that can mark which listed player is the one in the photo, and
 // the ones whose Hero Player picker names that player. T7 and the announcement
 // layouts have a single player, so there is no list to mark.
 const HERO_MARK_TEMPLATES = ['T1', 'T3', 'T10', 'T11']
-const HERO_PLAYER_TEMPLATES = ['T1', 'T3', 'T6', 'T10', 'T11', 'DL1', 'DL2', 'DL8', 'DL20', CUSTOM_LAYOUT_ID]
+const HERO_PLAYER_TEMPLATES = ['T1', 'T3', 'T6', 'T10', 'T11', 'DL1', 'DL2', 'DL8', 'DL20', 'DL24', CUSTOM_LAYOUT_ID]
 // The lineups that draw a DEBUT tag beside a flagged player. The flag is kept
 // on the player either way, so switching layout never loses it.
 const DEBUT_TEMPLATES = ['T1', 'T3', 'T10', 'T11', 'T12']
@@ -262,10 +270,11 @@ const matchDayIso = (v) => (/^\d{4}-\d{2}-\d{2}/.test(String(v || '')) ? String(
 const TAB_MAP = {
   T1: 'lineup', T2: 'lineup', T3: 'lineup', T4: 'lineup', T5: 'lineup',
   T6: 'lineup', T7: 'lineup', T8: 'lineup', T9: 'lineup', T10: 'lineup', T11: 'lineup', T12: 'lineup', T13: 'lineup',
-  DL1: 'lineup', DL2: 'lineup', DL8: 'lineup', DL9: 'lineup', DL20: 'lineup', DL3: 'result', DL19: 'result',
+  DL1: 'lineup', DL2: 'lineup', DL8: 'lineup', DL9: 'lineup', DL20: 'lineup', DL24: 'lineup', DL3: 'result', DL19: 'result', DL25: 'result',
   DL10: 'announcement', DL11: 'announcement', DL12: 'announcement', DL13: 'announcement', DL14: 'announcement',
   DL15: 'motm', DL16: 'toss', DL17: 'milestones', DL18: 'totw',
   DL21: 'standings', DL22: 'standings', DL23: 'standings', DL4: 'fixtures', DL5: 'results', DL6: 'motm', DL7: 'announcement',
+  DL26: 'announcement', DL27: 'motm', DL28: 'fixtures', DL29: 'results',
   ...Object.fromEntries(Object.entries(CUSTOM_LAYOUTS).map(([type, id]) => [id, type])),
   FX1: 'fixtures', FX2: 'fixtures', FX3: 'fixtures', FX4: 'fixtures', FX5: 'fixtures', FX6: 'fixtures',
   C1: 'announcement', C5: 'announcement', C2: 'toss', C3: 'motm',
@@ -4208,7 +4217,7 @@ export default function AdminSocialPost() {
       summary: motm.summary,
     }
   }
-  if (['T1', 'T3', 'T6', 'T7', 'T10', 'T11', 'T13', 'DL1', 'DL2', 'DL8', 'DL20'].includes(templateId) && heroImage.blobUrl) {
+  if (['T1', 'T3', 'T6', 'T7', 'T10', 'T11', 'T13', 'DL1', 'DL2', 'DL8', 'DL20', 'DL24'].includes(templateId) && heroImage.blobUrl) {
     extraProps.heroImage = heroImage.blobUrl
   }
   // Only the templates that crop a photo into a box can act on a focal point;

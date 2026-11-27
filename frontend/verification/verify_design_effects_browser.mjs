@@ -925,6 +925,66 @@ const tilesOf = async (page) => page.evaluate(() => [...document.querySelectorAl
   }
 }
 
+// ── 4m. Minimal layouts (DL24-DL29) and the reworked Swoosh ─────────────────
+{
+  const tiles = async (page) => page.evaluate(() => [...document.querySelectorAll('[data-testid^="layout-tile-"]')].map((e) => e.getAttribute('data-testid').slice(12)))
+  const MIN = [['DL24', 'T11', 'Lineup'], ['DL25', 'C4', 'Final Score'], ['DL26', 'C1', 'Announcement'], ['DL27', 'C3', 'Player of the Match'], ['DL28', 'FX1', 'Fixtures'], ['DL29', 'RR1', 'Results']]
+  {
+    const { ctx, page, errors } = await openEditor({ query: '?template=T11' })
+    for (const [id, home, label] of MIN) {
+      await page.goto(`${BASE}/admin/social-post?template=${home}`, { waitUntil: 'domcontentloaded' }).catch(() => {})
+      await page.getByRole('button', { name: /DOWNLOAD PNG|SLIDES/ }).first().waitFor({ timeout: 25000 }).catch(() => {})
+      await press(page.getByRole('button', { name: 'Design', exact: true }))
+      await page.waitForTimeout(250)
+      ck(`${id} is offered in the ${label} layouts`, (await tiles(page)).includes(id), (await tiles(page)).join(','))
+    }
+    ck('no page errors through the layout lists', errors.length === 0, errors.slice(0, 2).join(' | '))
+    await ctx.close()
+  }
+  for (const [id] of MIN) {
+    const { ctx, page, errors } = await openEditor({ query: `?template=${id}`, settings: { ...CLUB, socials_style: { palette: 'club', bg: 'flat-club', dark: true } }, roster: ROSTER })
+    if (['DL24', 'DL26', 'DL27'].includes(id)) {
+      await press(page.getByRole('button', { name: 'Content', exact: true }))
+      await page.waitForTimeout(200)
+      await press(page.getByRole('button', { name: /^Sam Player1\b/ }))
+      await press(page.getByRole('button', { name: /^Sam Player2\b/ }))
+      await page.waitForTimeout(1200)
+    }
+    const html = await exportBlocks(page)
+    const layers = [...html.matchAll(/data-layer="([^"]+)"/g)].map((m) => m[1])
+    ck(`${id}: draws with no texture layers (no grunge, halftone, streaks or burst)`, layers.length > 3 && !layers.some((l) => /Grunge|Halftone|streak|Burst|Splatter|Worn/i.test(l)), layers.slice(0, 8).join(','))
+    if (['DL24', 'DL26', 'DL27'].includes(id)) ck(`${id}: the player photo is drawn as it is (no processed look)`, /<img[^>]+src="[^"]*images\/players\/p1\/photo/.test(html) && !/<img[^>]+src="(blob:|data:image\/png)/.test(html))
+    ck(`${id}: no page errors`, errors.length === 0, errors.slice(0, 2).join(' | '))
+    await ctx.close()
+  }
+  // The big word behind the player shrinks to fit, in square and story.
+  for (const size of ['square', 'story']) {
+    const { ctx: c2, page } = await openEditor({ query: '?template=DL24' })
+    await page.evaluate((k) => { try { localStorage.setItem('bs_social_post_size', k) } catch {} }, size)
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await page.getByRole('button', { name: /DOWNLOAD PNG|SLIDES/ }).first().waitFor({ timeout: 25000 }).catch(() => {})
+    await page.waitForTimeout(600)
+    const fit = await page.evaluate(() => {
+      const h = [...document.querySelectorAll('div')].find((d) => d.style.left === '-9999px' && d.style.position === 'absolute')
+      const box = h && h.querySelector('[data-layer="Big word"]')
+      const span = box && box.querySelector('span')
+      return box && span ? { box: box.getBoundingClientRect().width, word: span.getBoundingClientRect().width, text: span.textContent } : null
+    })
+    ck(`DL24 (${size}): MATCH DAY fits inside the post's width`, fit && fit.text === 'MATCH DAY' && fit.word <= fit.box + 1 && fit.word > fit.box * 0.5, JSON.stringify(fit))
+    await c2.close()
+  }
+  // Swoosh: the foot of the post is the club colour, not a white field that
+  // swallows white words (sampled below the fixture rows, centre).
+  {
+    const { ctx, page } = await openEditor({ query: '?template=DL28', settings: { ...CLUB, accent_color: '#e8711a', socials_style: { palette: 'club', bg: 'swoosh', dark: true } } })
+    await page.waitForTimeout(600)
+    const px = await exportPixels(page, [[540, 900], [540, 988]])
+    ck('Swoosh: the lower post is the club colour, not white', px.px[0][0] > 150 && px.px[0][2] < 120, JSON.stringify(px.px[0]))
+    ck('Swoosh: and the white sweep is still there, along the very foot', px.px[1][0] > 225 && px.px[1][1] > 225 && px.px[1][2] > 225, JSON.stringify(px.px[1]))
+    await ctx.close()
+  }
+}
+
 // ── 5. Association Socials workspace has the same tools ────────────────────
 {
   const { ctx, page, errors } = await openEditor({ settings: WORKSPACE, assoc: true })

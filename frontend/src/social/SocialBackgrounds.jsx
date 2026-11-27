@@ -441,9 +441,11 @@ Object.assign(VARIANTS, {
     const c = clubOf(p)
     return (
       <React.Fragment>
-        <div style={{ ...full, background: `linear-gradient(180deg, ${shade(c, 'white', 0.1)} 0%, ${c} 70%)` }} />
-        <div style={abs({ left: -300, top: 700, width: 1680, height: 900, borderRadius: '50%', background: '#ffffff' })} />
-        <div style={abs({ left: -300, top: 668, width: 1680, height: 900, borderRadius: '50%', border: `10px solid ${shade(c, 'white', 0.55)}`, opacity: 0.7 })} />
+        <div style={{ ...full, background: `linear-gradient(180deg, ${shade(c, 'white', 0.1)} 0%, ${c} 60%, ${shade(c, 'black', 0.18)} 100%)` }} />
+        {/* A white sweep along the very foot, not a white field: the words of a layout
+            are the post's ink (white on this ground) and must stay readable. */}
+        <div style={abs({ left: -300, top: 968, width: 1680, height: 900, borderRadius: '50%', border: '40px solid #ffffff', opacity: 0.92 })} />
+        <div style={abs({ left: -300, top: 926, width: 1680, height: 900, borderRadius: '50%', border: `8px solid ${shade(c, 'white', 0.55)}`, opacity: 0.7 })} />
       </React.Fragment>
     )
   },

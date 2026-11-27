@@ -1525,3 +1525,10 @@ Asked for (November 2026, a club's own results graphic as the reference): a Resu
 - Effects photo: `layoutPhotoSrc` follows the same order the layouts draw (heroImage, announcement, MOTM, featured template player, POTM, first collected photo). Eyedropper canvas carries `data-src`.
 - Panels: Brand sections fold (`bs_brand_open` localStorage), Effects frame and text extras behind `More`. Suites that open those panels set `bs_brand_open` open in an init script.
 - Proof: verify_design_effects 270/270; control on v9.163.0 fails the 9 new checks. post_designer same 8 pre-existing fails; association 63/63; leeming 29/29; parts_all 372/372; post_look 28/30, the 2 fails read the `bg-texture` switch removed in v9.150.1 (pre-existing).
+
+## Minimal layouts DL24-DL29 (v9.165.0)
+- Asked for: minimal layouts to go with the Club Colour backgrounds ("minimalistic posts ... effects on the images and simple layouts being powerful and clean").
+- `social/minimal-templates.jsx`: DL24 Clean Match Day (lineup, hero player, past strip), DL25 Clean Final (result, past strip), DL26 Clean Spotlight (announcement, alias C1), DL27 Clean Spotlight (motm, alias C3), DL28 Clean Fixtures and DL29 Clean Results (row form chips). Root is `palette.primary` (veiled to clear over a clean ground); every mark is the post's ink, because a Club Colour ground is the accent and accent type would vanish on it. One extra part, `mlHighlight`, Auto = ink. No texture layers; photos have no `fx`.
+- The big word is sized from its length (0.62 em a letter) rather than AutoFitText, which did not shrink one long word to the width ("MATCH DAY" ran off the left).
+- Swoosh: the white ellipse was a filled field from y 700 that swallowed white words at the foot; it is now a 40px band from y 968.
+- Proof: verify_design_effects 296/296; control on v9.164.0 fails 15 (tiles, texture and photo checks on DL24/26/27, word fit, Swoosh). post_designer same 8 pre-existing; association 63/63; leeming 29/29; parts_all 372/372; post_look 28/30 (pre-existing `bg-texture`).
