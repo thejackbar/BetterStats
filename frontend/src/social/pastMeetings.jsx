@@ -81,3 +81,27 @@ export function RowForm({ past, size = 20, gap = 3, max = 5, style }) {
     </span>
   )
 }
+
+// The past results as a block a club places on any layout (the Club data
+// "Past results" block): the last five and the record on a backing panel.
+// With no record it takes no space in the post; the editor shows where it is.
+export function PastLine({ past, w, h, f = 1, color = '#fff', accent = '#ffc233', panel = 'dark', interactive = false, opponent = '' }) {
+  if (!hasPast(past)) {
+    if (!interactive) return <div style={{ width: w, height: h }} />
+    return (
+      <div style={{ width: w, height: h, boxSizing: 'border-box', border: `2px dashed ${color}66`, display: 'grid', placeItems: 'center', fontFamily: MONO, fontSize: 16, letterSpacing: 2, color: `${color}aa`, textAlign: 'center', padding: '0 12px' }}>
+        {opponent ? `NO PAST RESULTS AGAINST ${String(opponent).toUpperCase()} · NOT SHOWN ON THE POST` : 'PAST RESULTS · TYPE THE OPPONENT'}
+      </div>
+    )
+  }
+  const bg = panel === 'light' ? 'rgba(255,255,255,0.92)' : panel === 'dark' ? 'rgba(8,10,14,0.72)' : 'transparent'
+  const ink = panel === 'light' ? '#111111' : color
+  const chip = Math.round(Math.min(h * 0.56, 34))
+  return (
+    <div data-past-line="" style={{ width: w, height: h, boxSizing: 'border-box', background: bg, borderRadius: Math.round(h / 2), display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: `0 ${Math.round(h * 0.4)}px`, color: ink, fontFamily: MONO, fontSize: Math.round(Math.min(18, h * 0.3)), letterSpacing: 2, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+      <span style={{ opacity: 0.85 }}>V {String(past.opponent || opponent || '').toUpperCase()}</span>
+      {past.form.map((o, i) => <Chip key={i} o={o} size={chip} />)}
+      <span style={{ color: panel === 'light' ? '#111111' : accent }}>{recordLine(past)}</span>
+    </div>
+  )
+}

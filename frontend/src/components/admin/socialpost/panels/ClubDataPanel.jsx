@@ -18,6 +18,7 @@ const DESC = {
   results: 'Latest results, win/loss coded',
   record: 'Season W · L · D',
   scorecard: 'A match summary',
+  past: 'Our last five and record against the opponent',
 }
 
 export default function ClubDataPanel({ onAdd }) {

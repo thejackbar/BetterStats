@@ -667,6 +667,66 @@ const tilesOf = async (page) => page.evaluate(() => [...document.querySelectorAl
   await ctx.close()
 }
 
+// ── 4i. Older built-in layouts: past results as a block placed on the post ─
+{
+  const PAST = { found: true, opponent: 'Subiaco-Floreat', meetings: 5, wins: 3, losses: 1, draws: 0, ties: 1, no_result: 0, form: ['W', 'W', 'L', 'T', 'W'], recent: [] }
+  const NONE = { found: false, opponent: null, meetings: 0, wins: 0, losses: 0, draws: 0, ties: 0, no_result: 0, form: [], recent: [], reason: 'no past games against that club' }
+  const ctx = await browser.newContext({ viewport: { width: 1600, height: 1000 } })
+  const page = await ctx.newPage()
+  const errors = []
+  const asks = []
+  page.on('pageerror', (e) => errors.push(String(e)))
+  const json = (b) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(b) })
+  await page.route('**/api/**', (route) => {
+    const url = route.request().url()
+    if (/\/admin\/social\/head-to-head\?/.test(url)) { asks.push(url); return route.fulfill(json(/Nobody/i.test(decodeURIComponent(url)) ? NONE : PAST)) }
+    if (/\/auth\/me/.test(url)) return route.fulfill(json({ id: 'u1', role: 'club_admin', club_slug: 'tcc', entitlements: { modules: ['socials', 'select', 'stats'], status: 'active' } }))
+    if (/\/club-admin\/settings/.test(url)) return route.fulfill(json(CLUB))
+    if (/social\/media|templates|sponsors|players|ladders/.test(url)) return route.fulfill(json([]))
+    return route.fulfill(json({}))
+  })
+  const counts = async () => page.evaluate(() => {
+    const h = [...document.querySelectorAll('div')].find((d) => d.style.left === '-9999px')
+    const shown = document.body.innerText
+    return { exp: h ? h.querySelectorAll('[data-past-line]').length : -1, placeholder: /NO PAST RESULTS AGAINST|PAST RESULTS · TYPE THE OPPONENT/.test(shown), expText: h ? h.innerText : '' }
+  })
+  for (const id of ['T11', 'T1', 'C4', 'RS1', 'C2', 'C3']) {
+    await page.goto(`${BASE}/admin/social-post?template=${id}`, { waitUntil: 'domcontentloaded' })
+    await page.getByRole('button', { name: /DOWNLOAD PNG|SLIDES/ }).first().waitFor({ timeout: 25000 }).catch(() => {})
+    await page.waitForTimeout(400)
+    await press(page.getByRole('button', { name: 'Content', exact: true }))
+    await page.waitForTimeout(200)
+    const box = page.getByTestId('past-block-on')
+    ck(`${id}: Content offers past results for this older layout`, await seen(box))
+    const c0 = await counts()
+    ck(`${id}: control, nothing on the post before it is switched on`, c0.exp === 0)
+    await press(box)
+    await page.getByPlaceholder('Subiaco CC').first().fill('Subiaco-Floreat').catch(() => {})
+    await page.waitForTimeout(1300)
+    const c1 = await counts()
+    ck(`${id}: switched on, the record strip is on the exported post`, c1.exp === 1 && /3-1 1 T IN 5 MEETINGS/.test(c1.expText), JSON.stringify({ exp: c1.exp }))
+    if (id === 'T11') {
+      ck('it asks for that opponent', asks.some((u) => /opponent=Subiaco-Floreat/.test(u)))
+      await page.getByPlaceholder('Subiaco CC').first().fill('Nobody CC').catch(() => {})
+      await page.waitForTimeout(1300)
+      const c2 = await counts()
+      ck('a club never played: the editor marks where the strip is, the export holds no record', c2.placeholder && !/IN \d+ MEETINGS/.test(c2.expText))
+      await page.getByPlaceholder('Subiaco CC').first().fill('Subiaco-Floreat').catch(() => {})
+      await page.waitForTimeout(1300)
+    }
+    await press(box)
+    await page.waitForTimeout(300)
+    ck(`${id}: switched off, the strip comes off the post`, (await counts()).exp === 0)
+  }
+  // The block is in Club data for any layout, including the Blank canvas.
+  await page.goto(`${BASE}/admin/social-post?type=blank`, { waitUntil: 'domcontentloaded' })
+  await page.getByRole('button', { name: /DOWNLOAD PNG|SLIDES/ }).first().waitFor({ timeout: 25000 }).catch(() => {})
+  await press(page.locator('nav button[title="Club data"]'))
+  ck('Club data offers the Past results block', await seen(page.getByRole('button', { name: /Past results v opponent/ })))
+  ck('no page errors through the older layouts', errors.length === 0, errors.slice(0, 2).join(' | '))
+  await ctx.close()
+}
+
 // ── 5. Association Socials workspace has the same tools ────────────────────
 {
   const { ctx, page, errors } = await openEditor({ settings: WORKSPACE, assoc: true })

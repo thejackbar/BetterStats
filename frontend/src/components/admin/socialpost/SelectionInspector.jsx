@@ -215,6 +215,11 @@ export default function SelectionInspector({
           </>
         )}
 
+        {single?.type === 'data' && single.kind === 'past' && ['dark', 'light', 'none'].map(p => (
+          <Btn key={p} active={(single.panel || 'dark') === p} title={p === 'none' ? 'No backing' : `${p} backing`}
+            onClick={() => patch({ panel: p })}>{p === 'dark' ? 'Dark' : p === 'light' ? 'Light' : 'None'}</Btn>
+        ))}
+
         {single?.type === 'data' && (single.kind === 'fixtures' || single.kind === 'results') && (
           <label className="flex items-center gap-1.5"><Label>Rows</Label>
             <Num value={single.count} onChange={v => patch({ count: Math.max(1, Math.min(12, v)) })} min={1} max={12} w="w-12" />

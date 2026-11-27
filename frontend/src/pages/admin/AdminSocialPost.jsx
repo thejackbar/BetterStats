@@ -53,6 +53,10 @@ const PAST_TEMPLATES = ['DL1', 'DL2', 'DL8', 'DL9', 'DL20', 'DL3', 'DL19', 'DL16
 // The roundups put each row's last results beside that row's opponent.
 const PAST_ROUND_TEMPLATES = ['FX1', 'FX2', 'FX3', 'FX4', 'FX5', 'FX6', 'RR1', 'RR2', 'RR3', 'RR4', 'RR5', 'RR6', 'RR7', 'RR8', 'DL4', 'DL5']
 // What a roundup row is looked up by: the club (not the team) and, when asked, the row's grade.
+// The older built-in layouts with one opponent take past results as a block on
+// top of the layout (Club data, "Past results v opponent"), placed for them.
+const PAST_BLOCK_TABS = ['lineup', 'result', 'toss', 'motm']
+const isPastBlock = (it) => it && it.type === 'data' && it.kind === 'past'
 const rowPastKey = (r, gradeOnly) => `${String(r.oppClub || r.opp || '').trim().toLowerCase()}|${gradeOnly ? String(r.grade || '').trim().toLowerCase() : ''}`
 import { MilestoneCards, MilestoneBoard, MILESTONE_MAX } from '../../social/milestone-templates'
 import { ReviewWrap, ReviewPerformers, ReviewPlayer, ReviewMatch, ReviewResults, ReviewLeaders, ReviewMilestones, ReviewLadder, ReviewFixtures } from '../../social/round-review-templates'
@@ -3705,7 +3709,10 @@ export default function AdminSocialPost() {
   const pastGrade = !pastOpts.gradeOnly ? ''
     : templateId === 'DL22' ? ((ladders && Array.isArray(ladders.teams) ? ladders.teams.find((t) => t.team_id === standingsPick.teamKey) : null)?.grade_name || '')
       : (activeTab === 'result' && result.grade) ? result.grade : (match.competition && match.competition !== 'COMPETITION' ? match.competition : '')
-  const pastKey = PAST_TEMPLATES.includes(templateId) && pastOpts.on && !IS_AFL && settings && settings.workspace_kind !== 'association' && pastOpp.trim()
+  // Any layout with a Past results block asks too (a built-in one, the Blank
+  // canvas or an imported template).
+  const hasPastBlock = canvas.items.some(isPastBlock) || overlay.items.some(isPastBlock)
+  const pastKey = (PAST_TEMPLATES.includes(templateId) || hasPastBlock) && pastOpts.on && !IS_AFL && settings && settings.workspace_kind !== 'association' && pastOpp.trim()
     ? `${pastOpp.trim().toLowerCase()}|${pastGrade.toLowerCase()}` : ''
   useEffect(() => {
     if (!pastKey || pastRec.key === pastKey) return undefined
@@ -3929,7 +3936,8 @@ export default function AdminSocialPost() {
   const overlayOn = customOn && !isBlankTab
   // The post's sponsor grid is part of the post, not of Custom Edit, so it draws
   // (and exports) with Custom Edit off. Every other block waits for Custom Edit.
-  const overlayItems = overlayOn ? overlay.items : overlay.items.filter((it) => it.type === 'sponsors')
+  // The past results strip is part of the post the same way (its Content switch places it).
+  const overlayItems = overlayOn ? overlay.items : overlay.items.filter((it) => it.type === 'sponsors' || isPastBlock(it))
 
   // ONE STACK, whichever surface is being edited. On a built-in layout it holds
   // the layout's own elements and the added blocks together, ordered by
@@ -4347,6 +4355,8 @@ export default function AdminSocialPost() {
   }
   const blankData = {
     team, match: matchData, fixtures, results, record: blankRecord,
+    // The Past results block: our record against the post's opponent, once looked up.
+    past: pastData, pastOpponent: pastOpp,
     scorecard: scorecardMatch, players: allPlayers, playerStats: playerStatsCache,
     // What bound text fields print (an imported template's player slots, opponent
     // and so on). null means the editor holds nothing for it yet.
@@ -7139,6 +7149,39 @@ export default function AdminSocialPost() {
             )}
 
             {/* Past results against the opponent, on the layouts that draw them */}
+            {/* Older built-in layouts: the past results ride as a block on top, placed for the club */}
+            {!PAST_TEMPLATES.includes(templateId) && !PAST_ROUND_TEMPLATES.includes(templateId) && PAST_BLOCK_TABS.includes(activeTab) && !IS_AFL && !isAssoc && (() => {
+              const blocks = layer.items.filter(isPastBlock)
+              const on = blocks.length > 0
+              const place = () => {
+                const slot = sponsorSlotFor(templateId, W, H, 1)
+                const h = 64
+                const y = slot && slot.y > H * 0.5 ? slot.y - h - 18 : H - h - 96
+                addBlock('data', { kind: 'past', x: 60, y: Math.max(20, Math.round(y)), w: W - 120, h })
+              }
+              return (
+                <section className="pb-card p-4" data-testid="past-meetings">
+                  <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Past results against them</h2>
+                  <label className="flex items-center gap-2 text-[12px] text-pb-text mb-1.5">
+                    <input type="checkbox" checked={on} data-testid="past-block-on"
+                      onChange={(e) => { if (e.target.checked) { if (!pastOpts.on) setPastOpts((o) => ({ ...o, on: true })); place() } else blocks.forEach((b) => hRemove(b.id)) }} />
+                    Show our record and last five results on the post
+                  </label>
+                  <label className="flex items-center gap-2 text-[12px] text-pb-text mb-2">
+                    <input type="checkbox" checked={pastOpts.gradeOnly} disabled={!on} data-testid="past-grade" onChange={(e) => setPastOpts((o) => ({ ...o, gradeOnly: e.target.checked }))} />
+                    Only games in {pastGrade || 'this grade (set it in Match Info)'}
+                  </label>
+                  <p className="text-[11px] text-pb-dim leading-snug" data-testid="past-status">
+                    {!on ? `It goes on as a strip above the sponsors. Drag it anywhere, and pick a dark, light or no backing on the bar under the canvas.`
+                      : !pastOpp.trim() ? 'Type the opponent in Opponent to look up your games against them.'
+                        : pastRec.status === 'loading' || pastRec.key !== pastKey ? `Looking up your games against ${pastOpp}…`
+                          : pastRec.status === 'error' ? 'Your past results could not be read just now.'
+                            : pastData && pastData.found && pastData.meetings > 0 ? `${pastData.wins}-${pastData.losses}${pastData.draws ? `, ${pastData.draws} drawn` : ''}${pastData.ties ? `, ${pastData.ties} tied` : ''} in ${pastData.meetings} game${pastData.meetings === 1 ? '' : 's'} against ${pastData.opponent}${pastGrade ? ` in ${pastGrade}` : ''}, from your club’s results. Drag the strip to move it.`
+                              : `No past games against ${pastOpp}${pastGrade ? ` in ${pastGrade}` : ''} in your club’s results. The strip stays off the post until there are.`}
+                  </p>
+                </section>
+              )
+            })()}
             {PAST_ROUND_TEMPLATES.includes(templateId) && !IS_AFL && !isAssoc && (
               <section className="pb-card p-4" data-testid="past-meetings">
                 <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Past results against each opponent</h2>

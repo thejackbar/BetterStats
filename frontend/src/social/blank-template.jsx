@@ -15,6 +15,7 @@ import { BrandLockup, GrainSVG, CreditMark } from './cricket-templates'
 import { resolveBind, splitPlayerName, bindLabel, autoMarks } from './boundResolve'
 import FramedImage, { hasImageDesign } from './FramedImage'
 import { TEXTURES, halftoneDots, newSeed } from './designFx'
+import { PastLine } from './pastMeetings'
 
 // Colour tokens resolve against the live palette so a palette switch re-tints
 // any block left on a token; a raw hex (custom colour) passes straight through.
@@ -88,7 +89,9 @@ export const BLANK_DATA = [
   { kind: 'results', name: 'Results', group: 'club' },
   { kind: 'record', name: 'W-L-D record', group: 'club' },
   { kind: 'scorecard', name: 'Scorecard', group: 'club' },
-].filter(d => !(IS_AFL && d.kind === 'scorecard'))
+  // Our last five results and record against the post's opponent (/admin/social/head-to-head).
+  { kind: 'past', name: 'Past results v opponent', group: 'club' },
+].filter(d => !(IS_AFL && (d.kind === 'scorecard' || d.kind === 'past')))
 
 // Clip-path polygons for the fill-only decorative shapes (scale with w/h).
 const CLIP_SHAPES = {
@@ -165,6 +168,7 @@ export function newBlankItem(type, opts = {}) {
     if (kind === 'playerphoto') return { ...base, x: 540, y: 300, w: 460, h: 620, playerId: opts.playerId || null, fit: 'cover' }
     if (kind === 'playername') return { ...base, x: 70, y: 560, w: 900, h: 260, playerId: opts.playerId || null, showRole: true }
     if (kind === 'scorecard') return { ...base, w: 940, h: 520 }
+    if (kind === 'past') return { ...base, x: opts.x ?? 60, y: opts.y ?? 860, w: opts.w ?? 960, h: opts.h ?? 64, panel: opts.panel || 'dark' }
     return { ...base, h: 70 + 5 * 70 } // fixtures / results
   }
   return null
@@ -196,7 +200,7 @@ export function itemLabel(it) {
   if (it.type === 'element') return ELEMENT_NAMES[it.shape] || 'Element'
   if (it.type === 'data') return {
     fixtures: 'Fixtures', results: 'Results', record: 'Record', scorecard: 'Scorecard',
-    player: 'Player stats', playerphoto: 'Player photo', playername: 'Player name',
+    player: 'Player stats', playerphoto: 'Player photo', playername: 'Player name', past: 'Past results',
   }[it.kind] || 'Data'
   return it.type
 }
@@ -458,9 +462,12 @@ export const headshotUrl = (p) => (p?.photo_url ? `${BASE_URL}/images/players/${
 
 // "LAST, First" / "First Last" split, mirroring splitName in AdminSocialPost.
 
-function DataBlock({ item, palette, data = {} }) {
+function DataBlock({ item, palette, data = {}, interactive = false }) {
   const ink = resolveBlankColor(item.color, palette)
   const accent = resolveBlankColor(item.accent || 'accent', palette)
+  if (item.kind === 'past') {
+    return <PastLine past={data.past} w={item.w} h={item.h || 64} color={ink} accent={accent} panel={item.panel || 'dark'} interactive={interactive} opponent={data.pastOpponent} />
+  }
   const rule = `${ink}22`
   const count = Math.max(1, Math.min(12, item.count || 5))
   const wrap = { width: item.w, fontFamily: DISPLAY_FONT, color: ink }
@@ -684,11 +691,11 @@ function SponsorGridBlock({ item, data }) {
   )
 }
 
-function renderContent(item, palette, team, data) {
+function renderContent(item, palette, team, data, interactive = false) {
   if (item.type === 'text') return <TextBlock item={item} palette={palette} data={data} />
   if (item.type === 'image') return <ImageBlock item={item} palette={palette} data={data} />
   if (item.type === 'element') return <ElementBlock item={item} palette={palette} />
-  if (item.type === 'data') return <DataBlock item={item} palette={palette} data={data} />
+  if (item.type === 'data') return <DataBlock item={item} palette={palette} data={data} interactive={interactive} />
   if (item.type === 'sponsors') return <SponsorGridBlock item={item} data={data} />
   return <BrandLockup team={team} palette={palette} size={item.size} layout={item.layout} align={item.align} showName={item.showName} showLogo={item.showLogo !== false} nameColor={resolveBlankColor(item.color, palette)} />
 }
@@ -739,7 +746,7 @@ function BlankBlock({ item, palette, team, data, interactive, selected, single, 
         ...(interactive ? { pointerEvents: 'auto' } : null),
         ...(item.locked ? { pointerEvents: 'none' } : null),
       }}>
-      {renderContent(item, palette, team, data)}
+      {renderContent(item, palette, team, data, interactive)}
       {interactive && adjusting && (
         <div style={{ position: 'absolute', left: '50%', top: '100%', transform: `translate(-50%, ${handle * 0.8}px)`, whiteSpace: 'nowrap', padding: `${handle * 0.3}px ${handle * 0.6}px`, borderRadius: handle, background: accent, color: '#000', fontFamily: "'JetBrains Mono', monospace", fontSize: handle * 0.85, letterSpacing: 1, pointerEvents: 'none' }}>
           DRAG TO MOVE THE PHOTO · SCROLL TO ZOOM · ESC TO FINISH
