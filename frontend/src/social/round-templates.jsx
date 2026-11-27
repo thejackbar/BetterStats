@@ -7,6 +7,7 @@
 // Shared visual primitives (grain/halftone/stripes/club logo) come from
 // cricket-templates; the few extra atoms this set needs (Slab, Kicker, Bug,
 // SponsorFooter, AutoFit, Monogram) are defined locally.
+import { RowForm } from './pastMeetings'
 import { useRef, useState, useLayoutEffect } from 'react'
 import { GrainSVG as Grain, Halftone, Stripes, ClubLogo, BrandLockup, CreditMark } from './cricket-templates'
 import { aspectOf, pick, share, grow } from './postAspect'
@@ -394,7 +395,7 @@ export function FixtureList({ palette: pal, width = 1080, height = 1080, meta = 
                   ? <Crest logo={r.oppLogo} mono={r.oppMono} size={cs} {...crestArgs} />
                   : <Monogram text={r.oppMono} logo={r.oppLogo} size={50} {...crestArgs} />}
                 <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontFamily: DISPLAY, fontSize: t(31), letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{r.opp}</div>
+                  <div style={{ fontFamily: DISPLAY, fontSize: t(31), letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{r.opp}<RowForm past={r.past} size={20} /></div>
                   <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 1.5, color: pc(parts, 'haColor', pal.ink), opacity: 0.55, marginTop: 4 }}>{haWord(r, home)}</div>
                 </div>
               </div>
@@ -474,7 +475,7 @@ export function FixtureHype({ palette: pal, width = 1080, height = 1080, meta = 
               <div style={{ fontFamily: DISPLAY, fontSize: t(30), letterSpacing: 0.5, lineHeight: 0.95, color: pc(parts, 'gradeColor', undefined) }}>{r.grade}</div>
               <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 14 }}>
                 <span style={{ fontFamily: DISPLAY, fontSize: 22, letterSpacing: 1, color: home ? pc(parts, 'homeColor', pal.accent) : pc(parts, 'awayColor', pal.ink), opacity: home ? 1 : 0.5, flexShrink: 0 }}>{home || meta.allVs ? 'V' : '@'}</span>
-                <div style={{ flex: 1, minWidth: 0, fontFamily: DISPLAY, fontSize: t(38), letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{r.opp}</div>
+                <div style={{ flex: 1, minWidth: 0, fontFamily: DISPLAY, fontSize: t(38), letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{r.opp}</div><RowForm past={r.past} size={24} />
               </div>
               <div style={{ textAlign: 'right' }}>
                 <div style={{ fontFamily: DISPLAY, fontSize: 26, color: pc(parts, 'timeColor', pal.ink), lineHeight: 1, whiteSpace: 'nowrap' }}>{r.time}</div>
@@ -551,7 +552,7 @@ export function FixtureGrid({ palette: pal, width = 1080, height = 1080, meta = 
                 {r.neutral
                   ? <Crest logo={r.oppLogo} mono={r.oppMono} size={84} fg={pc(parts, 'crestColor', pal.ink)} bg={pc(parts, 'crestBg', `${pal.ink}14`)} ring={pc(parts, 'crestRing', `${pal.ink}33`)} />
                   : <Monogram text={r.oppMono} logo={r.oppLogo} size={46} fg={pc(parts, 'crestColor', pal.ink)} bg={pc(parts, 'crestBg', `${pal.ink}14`)} ring={pc(parts, 'crestRing', `${pal.ink}33`)} />}
-                <div style={{ fontFamily: DISPLAY, fontSize: t(28), letterSpacing: 0.5, lineHeight: 0.95, minWidth: 0, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{r.opp}</div>
+                <div style={{ fontFamily: DISPLAY, fontSize: t(28), letterSpacing: 0.5, lineHeight: 0.95, minWidth: 0, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{r.opp}<RowForm past={r.past} size={18} /></div>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', borderTop: `1px solid ${pc(parts, 'dividerColor', `${pal.ink}1a`)}`, paddingTop: 12 }}>
                 <div style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 1.2, color: pc(parts, 'venueColor', pal.ink), opacity: 0.7 }}>{r.venue}</div>
@@ -622,7 +623,7 @@ export function FixtureBoard({ palette: pal, width = 1080, height = 1080, meta =
               <div style={{ fontFamily: DISPLAY, fontSize: t(26), letterSpacing: 0.5, lineHeight: 0.92, color: pc(parts, 'gradeColor', undefined) }}>{r.grade}</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
                 <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1, color: home ? pc(parts, 'homeColor', pal.accent) : pc(parts, 'awayColor', pal.ink), opacity: home ? 1 : 0.5, flexShrink: 0, width: 22 }}>{home || meta.allVs ? 'VS' : '@'}</span>
-                <span style={{ fontFamily: DISPLAY, fontSize: t(28), letterSpacing: 0.5, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{r.opp}</span>
+                <span style={{ fontFamily: DISPLAY, fontSize: t(28), letterSpacing: 0.5, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{r.opp}</span><RowForm past={r.past} size={20} />
                 {r.neutral ? null : <span style={{ fontFamily: MONO, fontSize: 10, letterSpacing: 1.2, padding: '2px 7px', borderRadius: 3, border: `1px solid ${pc(parts, 'fx4TagBorder', `${pal.ink}30`)}`, color: pc(parts, 'haColor', pal.ink), opacity: 0.6, flexShrink: 0 }}>{home ? 'HOME' : 'AWAY'}</span>}
               </div>
               <div style={{ fontFamily: MONO, fontSize: 20, fontWeight: 700, letterSpacing: 0.5, color: pc(parts, 'timeColor', pal.accent), textAlign: 'right', whiteSpace: 'nowrap' }}>{r.time}</div>
@@ -703,6 +704,7 @@ export function FixtureHeadline({ palette: pal, width = 1080, height = 1080, met
           <div style={{ textAlign: 'center', width: 280 }}>
             <Shield logo={feat.oppLogo} monogram={feat.oppMono} color={pal.ink} size={crest} />
             <AutoFit max={30} min={16} style={{ fontFamily: DISPLAY, letterSpacing: 0.5, marginTop: 12, textAlign: 'center', color: pc(parts, 'nameColor', undefined) }} deps={[feat.opp]}>{feat.opp}</AutoFit>
+            <div style={{ display: 'flex', justifyContent: 'center', marginTop: 8 }}><RowForm past={feat.past} size={22} style={{ marginLeft: 0 }} /></div>
           </div>
         </div>
         <div style={{ display: 'flex', gap: 26, marginTop: 26, fontFamily: MONO, fontSize: 14, letterSpacing: 1.5, color: pal.ink, opacity: 0.85, alignItems: 'center' }}>
@@ -718,7 +720,7 @@ export function FixtureHeadline({ palette: pal, width = 1080, height = 1080, met
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '7px 0', borderBottom: `1px solid ${pc(parts, 'dividerColor', `${pal.ink}14`)}` }}>
                 <span style={{ fontFamily: DISPLAY, fontSize: t(19), width: 104, flexShrink: 0, lineHeight: 1, color: pc(parts, 'gradeColor', undefined) }}>{r.grade}</span>
                 <span style={{ fontFamily: MONO, fontSize: 11, color: home ? pc(parts, 'homeColor', pal.accent) : pc(parts, 'awayColor', pal.ink), opacity: home ? 1 : 0.5, flexShrink: 0 }}>{home || meta.allVs ? 'v' : '@'}</span>
-                <span style={{ fontFamily: DISPLAY, fontSize: t(20), flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{r.opp}</span>
+                <span style={{ fontFamily: DISPLAY, fontSize: t(20), flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{r.opp}</span><RowForm past={r.past} size={16} />
                 <span style={{ fontFamily: MONO, fontSize: 12, color: pc(parts, 'fx5ListTimeColor', pal.accent), flexShrink: 0 }}>{r.time}</span>
               </div>
             )
@@ -794,7 +796,7 @@ export function FixtureSchedule({ palette: pal, width = 1080, height = 1080, met
                 <div style={{ flex: 1, minWidth: 0, paddingLeft: 26, display: 'flex', alignItems: 'center', gap: 14 }}>
                   <span style={{ fontFamily: DISPLAY, fontSize: 26, width: 132, flexShrink: 0, lineHeight: 0.95, color: pc(parts, 'gradeColor', undefined) }}>{r.grade}</span>
                   <span style={{ fontFamily: MONO, fontSize: 13, color: home ? pc(parts, 'homeColor', pal.accent) : pc(parts, 'awayColor', pal.ink), opacity: home ? 1 : 0.5, flexShrink: 0, width: 24 }}>{home || meta.allVs ? 'VS' : '@'}</span>
-                  <span style={{ fontFamily: DISPLAY, fontSize: t(30), flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{r.opp}</span>
+                  <span style={{ fontFamily: DISPLAY, fontSize: t(30), flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{r.opp}</span><RowForm past={r.past} size={20} />
                   <span style={{ fontFamily: MONO, fontSize: 12, color: pc(parts, 'venueColor', pal.ink), opacity: 0.6, flexShrink: 0, whiteSpace: 'nowrap' }}>{r.neutral ? r.venue : <>{r.venue} · {home ? 'H' : 'A'}</>}</span>
                 </div>
               </div>
@@ -1575,7 +1577,7 @@ export function ResultsList({ palette: pal, width = 1080, height = 1080, meta = 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
                   <span style={{ fontFamily: DISPLAY, fontSize: scoreF, letterSpacing: -0.5, color: pc(parts, 'statColor', pal.ink), opacity: w ? 1 : 0.85, flexShrink: 0 }}>{r.us}</span>
                   <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 1.5, color: c, fontWeight: 700, flexShrink: 0 }}>{lv ? 'V' : w ? 'DEF' : 'DEF BY'}</span>
-                  <span style={{ fontFamily: DISPLAY, fontSize: oppF, letterSpacing: 0.5, lineHeight: 1, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', opacity: 0.85, color: pc(parts, 'nameColor', undefined) }}>{r.opp} {r.them}</span>
+                  <span style={{ fontFamily: DISPLAY, fontSize: oppF, letterSpacing: 0.5, lineHeight: 1, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', opacity: 0.85, color: pc(parts, 'nameColor', undefined) }}>{r.opp} {r.them}</span><RowForm past={r.past} size={18} />
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'flex-end' }}>
                   <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 1, color: pc(parts, 'subColor', pal.ink), opacity: 0.6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.margin}</span>
@@ -1687,7 +1689,7 @@ export function ResultsListLeaders({ palette: pal, width = 1080, height = 1080, 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                   <span style={{ fontFamily: DISPLAY, fontSize: scoreF, letterSpacing: -0.5, color: pc(parts, 'statColor', pal.ink), opacity: w ? 1 : 0.85, flexShrink: 0 }}>{r.us}</span>
                   <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1.2, color: c, fontWeight: 700, flexShrink: 0 }}>{lv ? 'V' : w ? 'DEF' : 'DEF BY'}</span>
-                  <span style={{ fontFamily: DISPLAY, fontSize: oppF, letterSpacing: 0.5, lineHeight: 1, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', opacity: 0.85, color: pc(parts, 'nameColor', undefined) }}>{r.opp} {r.them}</span>
+                  <span style={{ fontFamily: DISPLAY, fontSize: oppF, letterSpacing: 0.5, lineHeight: 1, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', opacity: 0.85, color: pc(parts, 'nameColor', undefined) }}>{r.opp} {r.them}</span><RowForm past={r.past} size={18} />
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'flex-end' }}>
                   <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1, color: pc(parts, 'subColor', pal.ink), opacity: 0.6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.margin}</span>
@@ -1794,7 +1796,7 @@ export function ResultsScoreboard({ palette: pal, width = 1080, height = 1080, m
                     ? <Crest logo={r.oppLogo} mono={r.oppMono} size={64} fg={pc(parts, 'crestColor', pal.ink)} bg={pc(parts, 'crestBg', `${pal.ink}14`)} ring={pc(parts, 'crestRing', `${pal.ink}33`)} />
                     : <Monogram text={r.oppMono} logo={r.oppLogo} size={40} fg={pc(parts, 'crestColor', pal.ink)} bg={pc(parts, 'crestBg', `${pal.ink}14`)} ring={pc(parts, 'crestRing', `${pal.ink}33`)} />}
                 </div>
-                <div style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 1.2, color: pc(parts, 'subColor', pal.ink), opacity: 0.65, marginTop: 10 }}>{r.opp} · {r.margin}</div>
+                <div style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 1.2, color: pc(parts, 'subColor', pal.ink), opacity: 0.65, marginTop: 10 }}>{r.opp} · {r.margin}<RowForm past={r.past} size={14} /></div>
               </div>
             </div>
           )
@@ -1864,7 +1866,7 @@ export function ResultsRecord({ palette: pal, width = 1080, height = 1080, meta 
                 <span style={{ fontFamily: DISPLAY, fontSize: 18, letterSpacing: 1, color: rrOnFill(parts, lv ? 'liveColor' : w ? 'winColor' : 'lossColor', c, pal.primary), background: c, width: 44, height: 32, display: 'grid', placeItems: 'center', flexShrink: 0 }}>{lv ? 'LV' : r.neutral ? neutralTag(r, true) : w ? 'W' : 'L'}</span>
                 <div style={{ width: 150, fontFamily: DISPLAY, fontSize: t(26), letterSpacing: 0.5, flexShrink: 0, color: pc(parts, 'gradeColor', undefined) }}>{r.grade}</div>
                 <div style={{ flex: 1, minWidth: 0, fontFamily: DISPLAY, fontSize: t(24), letterSpacing: 0.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>
-                  <span style={{ color: w ? pc(parts, 'defColor', pal.ink) : c }}>{lv || r.neutral ? 'V' : w ? 'DEF' : 'LOST TO'}</span> {r.opp}
+                  <span style={{ color: w ? pc(parts, 'defColor', pal.ink) : c }}>{lv || r.neutral ? 'V' : w ? 'DEF' : 'LOST TO'}</span> {r.opp}<RowForm past={r.past} size={18} />
                 </div>
                 <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1, color: pc(parts, 'statColor', pal.ink), opacity: 0.7, flexShrink: 0 }}>{r.us} v {r.them}</div>
                 <div style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 1, color: c, width: 130, textAlign: 'right', flexShrink: 0 }}>{r.margin}</div>
@@ -1954,6 +1956,7 @@ export function ResultsHeadline({ palette: pal, width = 1080, height = 1080, met
           </div>
         </div>
         <div style={{ textAlign: 'center', fontFamily: DISPLAY, fontSize: b(40), letterSpacing: 0, marginTop: 20, lineHeight: 1, color: pc(parts, 'rr4SummaryColor', undefined) }}>{firstSide(f, club).name} {flv || f.neutral ? 'V' : fw ? 'DEF' : 'LOST TO'} {f.opp} {f.margin}</div>
+        <div style={{ display: 'flex', justifyContent: 'center', marginTop: 12 }}><RowForm past={f.past} size={24} style={{ marginLeft: 0 }} /></div>
       </div>
       <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(560) + lift, bottom: rrFoot(width, height).reserve }}>
         <Kicker color={pc(parts, 'rr4OtherColor', pal.ink)} size={12} style={{ opacity: 0.55, marginBottom: 8 }}>{`// ${pt(parts, 'rr4OtherWord', 'OTHER RESULTS')}`}</Kicker>
@@ -1966,7 +1969,7 @@ export function ResultsHeadline({ palette: pal, width = 1080, height = 1080, met
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '9px 0', borderBottom: `1px solid ${rrFaint(parts, 'dividerColor', pal.ink, '14')}` }}>
                 <span style={{ fontFamily: DISPLAY, fontSize: 16, letterSpacing: 1, color: rrOnFill(parts, lv ? 'liveColor' : w ? 'winColor' : 'lossColor', c, pal.primary), background: c, width: 40, height: 28, display: 'grid', placeItems: 'center', flexShrink: 0 }}>{lv ? 'LV' : r.neutral ? neutralTag(r, true) : w ? 'W' : 'L'}</span>
                 <span style={{ fontFamily: DISPLAY, fontSize: 22, width: 132, flexShrink: 0, lineHeight: 1, color: pc(parts, 'gradeColor', undefined) }}>{r.grade}</span>
-                <span style={{ fontFamily: DISPLAY, fontSize: 22, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}><span style={{ color: w ? pc(parts, 'defColor', pal.ink) : c }}>{lv ? 'v' : w ? 'def' : 'lost to'}</span> {r.opp}</span>
+                <span style={{ fontFamily: DISPLAY, fontSize: 22, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}><span style={{ color: w ? pc(parts, 'defColor', pal.ink) : c }}>{lv ? 'v' : w ? 'def' : 'lost to'}</span> {r.opp}</span><RowForm past={r.past} size={18} />
                 <span style={{ fontFamily: MONO, fontSize: 12, color: pc(parts, 'statColor', pal.ink), opacity: 0.65, flexShrink: 0, whiteSpace: 'nowrap' }}>{r.us} v {r.them}</span>
                 <span style={{ fontFamily: MONO, fontSize: 12, color: c, width: 124, textAlign: 'right', flexShrink: 0 }}>{r.margin}</span>
               </div>
@@ -2040,7 +2043,7 @@ export function ResultsBoard({ palette: pal, width = 1080, height = 1080, meta =
             <div key={i} style={{ flex: 1, display: 'grid', gridTemplateColumns: cols, gap: 18, alignItems: 'center', padding: '0 14px', background: i % 2 ? rrFaint(parts, 'cardBg', pal.ink, '08') : 'transparent' }}>
               <div style={{ fontFamily: DISPLAY, fontSize: t(26), letterSpacing: 0.5, lineHeight: 0.92, color: pc(parts, 'gradeColor', undefined) }}>{r.grade}</div>
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontFamily: DISPLAY, fontSize: t(24), letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}><span style={{ color: w ? pc(parts, 'defColor', pal.ink) : c }}>{lv || r.neutral ? 'V' : w ? 'DEF' : 'LOST TO'}</span> {r.opp}</div>
+                <div style={{ fontFamily: DISPLAY, fontSize: t(24), letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}><span style={{ color: w ? pc(parts, 'defColor', pal.ink) : c }}>{lv || r.neutral ? 'V' : w ? 'DEF' : 'LOST TO'}</span> {r.opp}<RowForm past={r.past} size={18} /></div>
                 <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 1, color: c, marginTop: 4 }}>{r.margin}</div>
               </div>
               <div style={{ fontFamily: MONO, fontSize: 17, letterSpacing: 0.5, color: pc(parts, 'statColor', pal.ink), opacity: 0.85, textAlign: 'right', whiteSpace: 'nowrap' }}>{r.us} v {r.them}</div>
@@ -2097,7 +2100,7 @@ export function ResultsSplit({ palette: pal, width = 1080, height = 1080, meta =
               <span style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 1, color: pc(parts, 'subColor', pal.ink), opacity: 0.5, marginLeft: 'auto', flexShrink: 0, whiteSpace: 'nowrap' }}>{r.margin}</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginTop: 4, minWidth: 0 }}>
-              <span style={{ fontFamily: DISPLAY, fontSize: t(26), letterSpacing: 0.5, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{r.opp}</span>
+              <span style={{ fontFamily: DISPLAY, fontSize: t(26), letterSpacing: 0.5, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{r.opp}</span><RowForm past={r.past} size={18} />
               <span style={{ fontFamily: MONO, fontSize: 12, color: pc(parts, 'statColor', pal.ink), opacity: 0.7, flexShrink: 0 }}>{r.us} v {r.them}</span>
             </div>
           </div>

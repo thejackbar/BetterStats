@@ -17,6 +17,7 @@
 // the sponsor slot are; `rr8SponsorSlot` reads it, so the room the layout keeps
 // and the place the editor puts the grid cannot drift apart. The slot widens
 // with the logo count, anchored to the right edge.
+import { RowForm } from './pastMeetings'
 import { useLayoutEffect, useRef, useState } from 'react'
 import { aspectOf, pick, grow } from './postAspect'
 import { LayerRoot } from './postLayers'
@@ -214,6 +215,7 @@ export function ResultsCards({
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: f(12), minWidth: 0, flexShrink: 0 }}>
                 <div style={{ flex: '1 1 auto', minWidth: 0, fontFamily: FONT, fontWeight: WEIGHT, fontSize: kickF, letterSpacing: 3, lineHeight: 1.1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'rr8CardKicker', accent) }}>{kicker}</div>
+                <RowForm past={r.past} size={f(22)} />
                 {tagWord ? (
                   <span data-tag={story.tone} style={{
                     flexShrink: 0, fontFamily: FONT, fontWeight: WEIGHT, fontSize: tagF, letterSpacing: 2, lineHeight: 1,

@@ -48,6 +48,12 @@ import StandingsControls from '../../components/admin/socialpost/StandingsContro
 import { SignedStamp, QuoteCard, Birthday, SquadUpdate, Countdown, StatHero, CoinToss, BigNumber, TheOval, SplitFinal, NumberedList, DESIGN_PANEL_ALIAS_2 } from '../../social/design-templates-2'
 // Which built-in layout's Content panel (and props) each design layout shares.
 const DESIGN_ALIAS = { ...DESIGN_PANEL_ALIAS, ...DESIGN_PANEL_ALIAS_2 }
+// The design layouts that can show our past results against the one opponent.
+const PAST_TEMPLATES = ['DL1', 'DL2', 'DL8', 'DL9', 'DL20', 'DL3', 'DL19', 'DL16', 'DL22']
+// The roundups put each row's last results beside that row's opponent.
+const PAST_ROUND_TEMPLATES = ['FX1', 'FX2', 'FX3', 'FX4', 'FX5', 'FX6', 'RR1', 'RR2', 'RR3', 'RR4', 'RR5', 'RR6', 'RR7', 'RR8', 'DL4', 'DL5']
+// What a roundup row is looked up by: the club (not the team) and, when asked, the row's grade.
+const rowPastKey = (r, gradeOnly) => `${String(r.oppClub || r.opp || '').trim().toLowerCase()}|${gradeOnly ? String(r.grade || '').trim().toLowerCase() : ''}`
 import { MilestoneCards, MilestoneBoard, MILESTONE_MAX } from '../../social/milestone-templates'
 import { ReviewWrap, ReviewPerformers, ReviewPlayer, ReviewMatch, ReviewResults, ReviewLeaders, ReviewMilestones, ReviewLadder, ReviewFixtures } from '../../social/round-review-templates'
 import { reviewPost } from '../../social/roundReviewPost'
@@ -1962,6 +1968,13 @@ export default function AdminSocialPost() {
   const [leaderRows, setLeaderRows] = useState({ key: '', status: 'idle', rows: [] })
   const [clubSeasons, setClubSeasons] = useState(null)
   const patchStandings = (p) => setStandingsPick((cur) => ({ ...cur, ...p }))
+  // Past results against the opponent: shown by default, the grade filter off.
+  const [pastOpts, setPastOpts] = useState(() => {
+    try { const v = JSON.parse(localStorage.getItem('bs_social_past') || 'null'); if (v && typeof v === 'object') return { on: v.on !== false, gradeOnly: !!v.gradeOnly } } catch { /* private window */ }
+    return { on: true, gradeOnly: false }
+  })
+  useEffect(() => { try { localStorage.setItem('bs_social_past', JSON.stringify(pastOpts)) } catch { /* private window */ } }, [pastOpts])
+  const [pastRec, setPastRec] = useState({ key: '', status: 'idle', data: null })
   // A photo look for the pictures a built-in layout draws (its cut-outs, the
   // Hero Image upload, the player of the match). Set in Effects with nothing
   // selected; saved with a template. null means the photos are left alone.
@@ -3686,6 +3699,64 @@ export default function AdminSocialPost() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, settings])
+  // Which opponent and grade the past results are for: the ladder pick on Head
+  // to Head, the post's own opponent everywhere else.
+  const pastOpp = templateId === 'DL22' ? (standingsPick.opp || '') : (opponent.name || '')
+  const pastGrade = !pastOpts.gradeOnly ? ''
+    : templateId === 'DL22' ? ((ladders && Array.isArray(ladders.teams) ? ladders.teams.find((t) => t.team_id === standingsPick.teamKey) : null)?.grade_name || '')
+      : (activeTab === 'result' && result.grade) ? result.grade : (match.competition && match.competition !== 'COMPETITION' ? match.competition : '')
+  const pastKey = PAST_TEMPLATES.includes(templateId) && pastOpts.on && !IS_AFL && settings && settings.workspace_kind !== 'association' && pastOpp.trim()
+    ? `${pastOpp.trim().toLowerCase()}|${pastGrade.toLowerCase()}` : ''
+  useEffect(() => {
+    if (!pastKey || pastRec.key === pastKey) return undefined
+    let live = true
+    // Typing an opponent name fires a change per key; ask once it settles.
+    const t = setTimeout(() => {
+      setPastRec({ key: pastKey, status: 'loading', data: null })
+      api.getSocialHeadToHead(pastOpp.trim(), pastGrade)
+        .then((d) => { if (live) setPastRec({ key: pastKey, status: 'ok', data: d || null }) })
+        .catch(() => { if (live) setPastRec({ key: pastKey, status: 'error', data: null }) })
+    }, 450)
+    return () => { live = false; clearTimeout(t) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pastKey])
+  const pastData = pastKey && pastRec.key === pastKey && pastRec.status === 'ok' ? pastRec.data : null
+  // Roundups: one ask for every row's opponent (the full round, not one page),
+  // answered by row key. A row naming two other clubs (a workspace) has none.
+  const roundRowsAll = templateId && PAST_ROUND_TEMPLATES.includes(templateId) ? (TAB_MAP[templateId] === 'fixtures' ? fixtures : TAB_MAP[templateId] === 'results' ? results : []) : []
+  const roundPastItems = (() => {
+    if (!pastOpts.on || IS_AFL || !settings || settings.workspace_kind === 'association') return []
+    const seen = new Map()
+    for (const r of roundRowsAll || []) {
+      if (!r || r.neutral) continue
+      const name = String(r.oppClub || r.opp || '').trim()
+      if (!name) continue
+      const k = rowPastKey(r, pastOpts.gradeOnly)
+      if (!seen.has(k)) seen.set(k, { key: k, opponent: name, grade: pastOpts.gradeOnly ? String(r.grade || '') : '' })
+    }
+    return [...seen.values()].slice(0, 40)
+  })()
+  const roundPastSig = roundPastItems.map((x) => x.key).join('\n')
+  const [roundPast, setRoundPast] = useState({ sig: '', status: 'idle', map: {} })
+  useEffect(() => {
+    if (!roundPastSig || roundPast.sig === roundPastSig) return undefined
+    let live = true
+    const t = setTimeout(() => {
+      setRoundPast({ sig: roundPastSig, status: 'loading', map: {} })
+      api.getSocialHeadToHeadBatch(roundPastItems)
+        .then((d) => {
+          const res = (d && d.results) || []
+          const map = {}
+          roundPastItems.forEach((it, i) => { if (res[i]) map[it.key] = res[i] })
+          if (live) setRoundPast({ sig: roundPastSig, status: 'ok', map })
+        })
+        .catch(() => { if (live) setRoundPast({ sig: roundPastSig, status: 'error', map: {} }) })
+    }, 300)
+    return () => { live = false; clearTimeout(t) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roundPastSig])
+  const roundPastMap = roundPastSig && roundPast.sig === roundPastSig && roundPast.status === 'ok' ? roundPast.map : null
+  const withRowPast = (rows) => (roundPastMap ? (rows || []).map((r) => (r && !r.neutral && roundPastMap[rowPastKey(r, pastOpts.gradeOnly)] ? { ...r, past: roundPastMap[rowPastKey(r, pastOpts.gradeOnly)] } : r)) : rows)
   const leaderKey = activeTab === 'standings' && settings?.id && standingsPick.leaderSeason !== null
     ? `${standingsPick.leaderKind}|${standingsPick.leaderSeason}|${standingsPick.leaderGrade}` : ''
   useEffect(() => {
@@ -4200,6 +4271,10 @@ export default function AdminSocialPost() {
       },
     }
   }
+  if (PAST_TEMPLATES.includes(templateId) && pastData) {
+    extraProps.past = pastData
+    if (extraProps.standings) extraProps.standings = { ...extraProps.standings, past: pastData }
+  }
   if (templateId === 'DL9') extraProps.heroes = collagePlayers.filter((p) => !collage.off.includes(String(p._id))).slice(0, COLLAGE_MAX)
   const matchData = {
     competition: match.competition || 'COMPETITION',
@@ -4356,12 +4431,12 @@ export default function AdminSocialPost() {
   const asClubs = (rows) => (roundOpts.clubOnly ? rows.map((r) => clubOnlyRow(r, shortClubNames)) : rows)
   if (tmpl.kind === 'fixtures') {
     extraProps.meta = roundMeta
-    extraProps.fixtures = asClubs(roundPagesOn ? chunkEven(fixtures, roundPage.count)[roundPage.idx] || [] : fixtures)
+    extraProps.fixtures = asClubs(withRowPast(roundPagesOn ? chunkEven(fixtures, roundPage.count)[roundPage.idx] || [] : fixtures))
     extraProps.club = clubMark
   }
   if (tmpl.kind === 'results') {
     extraProps.meta = roundMeta
-    extraProps.results = asClubs(roundPagesOn ? chunkEven(results, roundPage.count)[roundPage.idx] || [] : results)
+    extraProps.results = asClubs(withRowPast(roundPagesOn ? chunkEven(results, roundPage.count)[roundPage.idx] || [] : results))
     if (tmpl.hasLeaders) extraProps.perfSide = rrPerfSide
     extraProps.club = clubMark
   }
@@ -4708,7 +4783,7 @@ export default function AdminSocialPost() {
       }))
     }
     if (roundPagesOn) {
-      return chunkEven(asClubs(tmpl.kind === 'fixtures' ? fixtures : results), roundPage.count).map((chunk, i) => ({
+      return chunkEven(asClubs(withRowPast(tmpl.kind === 'fixtures' ? fixtures : results)), roundPage.count).map((chunk, i) => ({
         key: `round-${i}`, label: `Page ${i + 1}`,
         setRef: (el) => { roundPageRefs.current[i] = el },
         content: <>{pageBackground}{templateNode(tmpl.kind === 'fixtures' ? { fixtures: chunk } : { results: chunk })}</>,
@@ -7060,6 +7135,51 @@ export default function AdminSocialPost() {
                   {!heroImage.blobUrl && <p className="text-[11px] text-pb-faintest">Without a photo the cover sits on a dark ground. Add the match photo the whole carousel opens with.</p>}
                   <HeroFocusControl src={heroImage.blobUrl || null} value={highlightsFocus} onChange={setHighlightsFocus} defaults={HIGHLIGHTS_FOCUS} aspect={W / H} />
                 </div>
+              </section>
+            )}
+
+            {/* Past results against the opponent, on the layouts that draw them */}
+            {PAST_ROUND_TEMPLATES.includes(templateId) && !IS_AFL && !isAssoc && (
+              <section className="pb-card p-4" data-testid="past-meetings">
+                <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Past results against each opponent</h2>
+                <label className="flex items-center gap-2 text-[12px] text-pb-text mb-1.5">
+                  <input type="checkbox" checked={pastOpts.on} data-testid="past-on" onChange={(e) => setPastOpts((o) => ({ ...o, on: e.target.checked }))} />
+                  Show our last five results against each opponent beside their name
+                </label>
+                <label className="flex items-center gap-2 text-[12px] text-pb-text mb-2">
+                  <input type="checkbox" checked={pastOpts.gradeOnly} disabled={!pastOpts.on} data-testid="past-grade" onChange={(e) => setPastOpts((o) => ({ ...o, gradeOnly: e.target.checked }))} />
+                  Only games in each row’s own grade
+                </label>
+                <p className="text-[11px] text-pb-dim leading-snug" data-testid="past-status">
+                  {!pastOpts.on ? 'Off: no past results on the rows.'
+                    : !roundPastItems.length ? 'Pull the round in Data first.'
+                      : !roundPastMap ? (roundPast.status === 'error' ? 'Your past results could not be read just now.' : `Looking up your games against ${roundPastItems.length} opponent${roundPastItems.length === 1 ? '' : 's'}…`)
+                        : (() => {
+                          const found = roundPastItems.filter((it) => roundPastMap[it.key]?.found && roundPastMap[it.key]?.meetings > 0).length
+                          return `Past games found against ${found} of ${roundPastItems.length} opponent${roundPastItems.length === 1 ? '' : 's'}${pastOpts.gradeOnly ? ' in their grade' : ''}, from your club’s results. A row with none shows nothing.`
+                        })()}
+                </p>
+              </section>
+            )}
+            {PAST_TEMPLATES.includes(templateId) && !IS_AFL && !isAssoc && (
+              <section className="pb-card p-4" data-testid="past-meetings">
+                <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Past results against them</h2>
+                <label className="flex items-center gap-2 text-[12px] text-pb-text mb-1.5">
+                  <input type="checkbox" checked={pastOpts.on} data-testid="past-on" onChange={(e) => setPastOpts((o) => ({ ...o, on: e.target.checked }))} />
+                  Show our record and last five results {templateId === 'DL22' ? 'under the ladder comparison' : 'on the post'}
+                </label>
+                <label className="flex items-center gap-2 text-[12px] text-pb-text mb-2">
+                  <input type="checkbox" checked={pastOpts.gradeOnly} disabled={!pastOpts.on} data-testid="past-grade" onChange={(e) => setPastOpts((o) => ({ ...o, gradeOnly: e.target.checked }))} />
+                  Only games in {pastGrade || (templateId === 'DL22' ? 'this team’s grade' : 'this grade (set it in Match Info)')}
+                </label>
+                <p className="text-[11px] text-pb-dim leading-snug" data-testid="past-status">
+                  {!pastOpts.on ? 'Off: the post shows no past results.'
+                    : !pastOpp.trim() ? (templateId === 'DL22' ? 'Pick the opponent from the ladder in Data.' : 'Type the opponent in Opponent to look up your games against them.')
+                      : pastRec.status === 'loading' || pastRec.key !== pastKey ? `Looking up your games against ${pastOpp}…`
+                        : pastRec.status === 'error' ? 'Your past results could not be read just now.'
+                          : pastData && pastData.found && pastData.meetings > 0 ? `${pastData.wins}-${pastData.losses}${pastData.draws ? `, ${pastData.draws} drawn` : ''}${pastData.ties ? `, ${pastData.ties} tied` : ''} in ${pastData.meetings} game${pastData.meetings === 1 ? '' : 's'} against ${pastData.opponent}${pastGrade ? ` in ${pastGrade}` : ''}, from your club’s results. Shown on the post.`
+                            : `No past games against ${pastOpp}${pastGrade ? ` in ${pastGrade}` : ''} in your club’s results${pastData?.reason === 'no past games' ? '' : ' (or the name fits more than one club: try the full club name)'}. Nothing is shown.`}
+                </p>
               </section>
             )}
 

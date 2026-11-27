@@ -28,6 +28,7 @@ import { niceName } from './card-kit'
 import { pc, pt, inkOn, registerParts, colorPart, textPart } from './layoutParts'
 import { usePostLook } from './postLook'
 import FramedImage from './FramedImage'
+import { PastStrip, hasPast, RowForm } from './pastMeetings'
 import { FRAMES, framePoints, frameClip, burstPaths, speedPaths, brushPaths, tornPaperPaths, grungePaths, splatterPaths } from './designFx'
 
 export const FONT = "var(--social-display-font, 'Anton', 'Hanken Grotesk', sans-serif)"
@@ -128,7 +129,7 @@ export const keptLook = (keep, { edge = 0, glow = null, contrast = 18 } = {}) =>
 // dark type, our player in a V-based panel in the club colour with their head
 // out of the top, the opposition crest in the other, the club crest where the
 // panels meet, the date and the ground along the bottom.
-export function MatchDayV({ width = 1080, height = 1080, team = {}, opponent = {}, match = {}, players = [], palette = {}, featuredId, heroImage, parts }) {
+export function MatchDayV({ width = 1080, height = 1080, team = {}, opponent = {}, match = {}, players = [], palette = {}, featuredId, heroImage, parts, past }) {
   const g = geo(width, height)
   const { f, A } = g
   const paper = pc(parts, 'dl1Paper', '#ebe8e1')
@@ -148,7 +149,8 @@ export function MatchDayV({ width = 1080, height = 1080, team = {}, opponent = {
   const footY = g.slotY - footH - 8
   const names = players.map((p) => upper(p.last || p.first) + (p.captain ? ' (C)' : '') + (p.keeper ? ' (WK)' : ''))
   const namesH = names.length ? Math.round(68 * f) : 0
-  const panelH = Math.max(260, footY - namesH - 18 - panelTop)
+  const pastH = hasPast(past) ? Math.round(46 * f) : 0
+  const panelH = Math.max(260, footY - namesH - 18 - pastH - panelTop)
   const gap = Math.round(width * 0.025)
   const pw = Math.round((width - 140 - gap) / 2)
   const usName = upper(team.name || team.short)
@@ -199,6 +201,7 @@ export function MatchDayV({ width = 1080, height = 1080, team = {}, opponent = {
         <ClubLogo src={team.logo} monogram={team.monogram} color={ink} size={Math.round(crest * 0.78)} shape="shield" />
       </div>
 
+      <PastStrip past={past} x={60} y={panelTop + panelH + Math.round(16 * f)} w={width - 120} f={f * 0.9} color={ink} />
       {names.length > 0 && (
         <div data-layer="Team list" style={{ position: 'absolute', left: 70, right: 70, top: footY - namesH - 6, height: namesH, textAlign: 'center', fontSize: Math.round(23 * f), lineHeight: 1.35, color: ink, overflow: 'hidden' }}>
           {names.join('  ·  ')}
@@ -229,7 +232,7 @@ MatchDayV.displayName = 'MatchDayV'
 // post in outline with one copy filled, the player in black and white with the
 // kit colour kept, a tagline and the date in the top corners, the two crests
 // with VS at the foot and the player's name beside them.
-export function GamedayEcho({ width = 1080, height = 1080, team = {}, opponent = {}, match = {}, players = [], palette = {}, featuredId, heroImage, parts }) {
+export function GamedayEcho({ width = 1080, height = 1080, team = {}, opponent = {}, match = {}, players = [], palette = {}, featuredId, heroImage, parts, past }) {
   const texture = usePostLook().texture !== false
   const g = geo(width, height)
   const { f, A } = g
@@ -243,7 +246,7 @@ export function GamedayEcho({ width = 1080, height = 1080, team = {}, opponent =
   const fs = Math.round(Math.min(210 * f, (width * 0.9) / Math.max(4, word.length) * 1.85))
   const step = Math.round(fs * 0.8)
   const echoTop = g.top + Math.round(pick(A, { square: 120, portrait: 160, story: 200 }) * f)
-  const footH = Math.round(150 * f)
+  const footH = Math.round((hasPast(past) ? 186 : 150) * f)
   const footY = g.slotY - footH
   const echoN = Math.max(4, Math.min(9, Math.floor((footY - echoTop) / step)))
   const filled = Math.min(echoN - 1, Math.max(1, Math.round(echoN * 0.6)))
@@ -286,6 +289,7 @@ export function GamedayEcho({ width = 1080, height = 1080, team = {}, opponent =
         <span style={{ fontSize: Math.round(46 * f), color: ink, letterSpacing: 2 }}>VS</span>
         <ClubLogo src={opponent.logo} monogram={opponent.monogram || ''} color={ink} size={crest} shape="circle" />
       </div>
+      <PastStrip past={past} x={48} y={footY + Math.round(30 * f) + crest + Math.round(12 * f)} w={width - 96} f={f * 0.85} color={ink} />
       {name && (
         <div data-layer="Player name" style={{ position: 'absolute', right: 48, top: footY - Math.round(10 * f), textAlign: 'right', fontSize: Math.round(40 * f), lineHeight: 0.95, color: ink, maxWidth: width * 0.34 }}>{name.split(' ').map((w, i) => <div key={i}>{w}</div>)}</div>
       )}
@@ -300,7 +304,7 @@ GamedayEcho.displayName = 'GamedayEcho'
 // the whole post, a bordered card on top, GAME DAY in giant type with the
 // player cut out over it and breaking out of the card, a live badge, the date
 // in a box, a tagline, and the ground and opposition along the foot.
-export function GameDayCard({ width = 1080, height = 1080, team = {}, opponent = {}, match = {}, players = [], palette = {}, featuredId, heroImage, parts }) {
+export function GameDayCard({ width = 1080, height = 1080, team = {}, opponent = {}, match = {}, players = [], palette = {}, featuredId, heroImage, parts, past }) {
   const texture = usePostLook().texture !== false
   const g = geo(width, height)
   const { f, A } = g
@@ -353,6 +357,7 @@ export function GameDayCard({ width = 1080, height = 1080, team = {}, opponent =
           <FramedImage item={{ w: Math.round(width * 0.66), h: cardH + Math.round(20 * f), fit: 'contain', objPos: 'center bottom', fx: { contrast: 8, shadow: { x: 0, y: 24, blur: 40, opacity: 60 } } }} src={photo} resolve={resolve} />
         </div>
       )}
+      <PastStrip past={past} x={inset + 34} y={cardBottom - Math.round(140 * f)} w={Math.round(width * 0.52)} f={f * 0.85} color={ink} align="left" />
       <div data-layer="Ground and time" style={{ position: 'absolute', left: inset + 34, bottom: height - cardBottom + Math.round(30 * f), fontFamily: MONO, fontSize: Math.round(18 * f), letterSpacing: 2, lineHeight: 1.6 }}>
         <div>{upper(`GROUND : ${match.venue || ''}`)}</div>
         <div style={{ color: accent }}>{upper(joinDot(match.time, match.round, match.competition))}</div>
@@ -396,7 +401,7 @@ export function collageSlots(n, w, h) {
   return slots
 }
 
-export function SquadCollage({ width = 1080, height = 1080, team = {}, opponent = {}, match = {}, heroes = [], palette = {}, parts }) {
+export function SquadCollage({ width = 1080, height = 1080, team = {}, opponent = {}, match = {}, heroes = [], palette = {}, parts, past }) {
   const texture = usePostLook().texture !== false
   const g = geo(width, height)
   const { f, A } = g
@@ -458,6 +463,7 @@ export function SquadCollage({ width = 1080, height = 1080, team = {}, opponent 
           <div style={{ fontFamily: MONO, fontSize: Math.round(15 * f), letterSpacing: 2, marginTop: 8 }}>{upper(joinDot(match.date, match.time))}</div>
           <div style={{ fontFamily: MONO, fontSize: Math.round(13 * f), letterSpacing: 2, opacity: 0.7 }}>{upper(match.venue)}</div>
         </div>
+        <PastStrip past={past} x={Math.round(pw * 0.03)} y={Math.round(ph * 0.8 - 44 * f)} w={Math.round(pw * 0.7)} f={f * 0.8} color="#111111" align="left" bg={paper} />
       </div>
       <div data-layer="Platform credit" style={{ position: 'absolute', right: 30, bottom: g.bottom, pointerEvents: 'none' }}><CreditMark ink="#ffffff" h={Math.round(30 * f)} /></div>
     </LayerRoot>
@@ -466,7 +472,7 @@ export function SquadCollage({ width = 1080, height = 1080, team = {}, opponent 
 SquadCollage.displayName = 'SquadCollage'
 
 // ── DL3 Final Score V ────────────────────────────────────────────────────────
-export function FinalScoreV({ width = 1080, height = 1080, palette = {}, result: r = {}, parts }) {
+export function FinalScoreV({ width = 1080, height = 1080, palette = {}, result: r = {}, parts, past }) {
   const texture = usePostLook().texture !== false
   const g = geo(width, height)
   const { f } = g
@@ -487,7 +493,8 @@ export function FinalScoreV({ width = 1080, height = 1080, palette = {}, result:
   const potmName = [potm.first, potm.last].filter(Boolean).join(' ')
   const potmH = potmName ? Math.round(86 * f) : 0
   const metaY = g.slotY - Math.round(48 * f)
-  const potmY = metaY - 12 - potmH
+  const pastH = hasPast(past) ? Math.round(44 * f) : 0
+  const potmY = metaY - 12 - potmH - pastH
   const frameH = Math.max(240, potmY - 22 - frameTop)
   const gap = Math.round(width * 0.05)
   const fw = Math.round((width - 96 - gap) / 2)
@@ -517,6 +524,7 @@ export function FinalScoreV({ width = 1080, height = 1080, palette = {}, result:
           {potm.line && <span style={{ fontSize: Math.round(26 * f), color: base, whiteSpace: 'nowrap' }}>{upper(potm.line)}</span>}
         </div>
       )}
+      <PastStrip past={past} x={48} y={metaY - pastH + 4} w={width - 96} f={f * 0.85} color={ink} />
       <div data-layer="Match details" style={{ position: 'absolute', left: 48, right: 48, top: metaY, textAlign: 'center', fontFamily: MONO, fontSize: Math.round(20 * f), letterSpacing: 2, opacity: 0.85 }}>
         {upper(joinDot(r.grade || r.comp, r.round, r.date))}
       </div>
@@ -576,6 +584,7 @@ function RoundEcho({ width, height, palette, meta = {}, rows = [], club = {}, pa
                 <span style={{ flex: 1, minWidth: 0, fontSize: Math.round(Math.min(40, h * 0.42) * f), lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {kind === 'fixtures' ? `${r.ha === 'A' ? '@ ' : 'V '}${upper(r.opp)}` : upper(r.opp)}
                 </span>
+                <RowForm past={r.past} size={Math.round(Math.min(24, h * 0.3) * f)} />
                 {kind === 'fixtures' ? (
                   <span style={{ fontSize: Math.round(Math.min(30, h * 0.34) * f), whiteSpace: 'nowrap', color: base }}>{upper(joinDot(r.time, r.venue))}</span>
                 ) : (

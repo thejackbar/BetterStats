@@ -18,6 +18,7 @@ import { usePostLook } from './postLook'
 import FramedImage from './FramedImage'
 import { grungePaths, halftoneDots } from './designFx'
 import { geo, slotOf, joinDot, upper, readable, Paths, resolver, FONT, WEIGHT, MONO } from './design-templates'
+import { PastBlock, hasPast } from './pastMeetings'
 
 const Credit = ({ g, ink }) => (
   <div data-layer="Platform credit" style={{ position: 'absolute', right: 30, bottom: g.bottom, pointerEvents: 'none' }}><CreditMark ink={ink} h={Math.round(30 * g.f)} /></div>
@@ -129,7 +130,11 @@ export function HeadToHead({ width = 1080, height = 1080, team = {}, opponent = 
   const stats = H2H_STATS.filter((st) => num(statOf(us, st.id)) !== null || num(statOf(them, st.id)) !== null)
   const crest = Math.round(150 * f)
   const top = g.top + Math.round(330 * f)
-  const avail = g.slotY - 70 - top
+  // Past meetings take the foot of the post when there are any; the ladder bars fill the rest.
+  const past = s.past
+  const pastH = hasPast(past) ? Math.round(Math.min(5, (past.recent || []).length) * 44 * f + 70 * f) : 0
+  const pastY = g.slotY - 56 - pastH
+  const avail = (pastH ? pastY - 16 : g.slotY - 70) - top
   const rowH = Math.min(Math.round(100 * f), Math.floor(avail / Math.max(1, stats.length)))
   // Each side's column, less room for its figure, so a full bar never pushes the number off the post.
   const half = (width - 96 - Math.round(180 * f)) / 2 - Math.round(110 * f)
@@ -180,8 +185,9 @@ export function HeadToHead({ width = 1080, height = 1080, team = {}, opponent = 
             )
           })}
         </div>
-      ) : <Empty g={{ ...g, top: g.top + 120 * f }} text={s.status === 'loading' ? 'READING THE LADDER…' : !us ? 'PICK A TEAM IN DATA' : 'PICK THE OPPONENT FROM THE LADDER IN DATA'} />}
-      <div data-layer="Source" style={{ position: 'absolute', left: 48, right: 48, top: g.slotY - Math.round(40 * f), textAlign: 'center', fontFamily: MONO, fontSize: Math.round(13 * f), letterSpacing: 2, opacity: 0.6 }}>{us && them ? 'THIS SEASON ON THE LADDER · CRICKET AUSTRALIA' : ''}</div>
+      ) : (!pastH && <Empty g={{ ...g, top: g.top + 120 * f }} text={s.status === 'loading' ? 'READING THE LADDER…' : !us ? 'PICK A TEAM IN DATA' : 'PICK THE OPPONENT FROM THE LADDER IN DATA'} />)}
+      {pastH > 0 && <PastBlock past={past} x={48} y={pastY} w={width - 96} h={pastH} f={f} color={ink} usC={usC} rows={5} />}
+      <div data-layer="Source" style={{ position: 'absolute', left: 48, right: 48, top: g.slotY - Math.round(40 * f), textAlign: 'center', fontFamily: MONO, fontSize: Math.round(13 * f), letterSpacing: 2, opacity: 0.6 }}>{[us && them ? 'LADDER: CRICKET AUSTRALIA' : '', pastH ? 'PAST MEETINGS: YOUR CLUB\'S RESULTS' : ''].filter(Boolean).join(' · ')}</div>
       <Credit g={g} ink={ink} />
     </LayerRoot>
   )
