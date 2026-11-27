@@ -166,6 +166,13 @@ async def main() -> int:
         db.add(CommsContact(organisation_id=outreach.id, email="quit@kilo.org", name="Kit", source="admin",
                             subscribed=False, unsubscribed_at=NOW))
         await make_admin(db, "kilo", "k1", email="quit@kilo.org", display="Kit Kilo", primary=True)
+        # M's admin is a test account on a throwaway-mail domain (a subdomain too, for N).
+        await make_club(db, "mike")
+        await make_admin(db, "mike", "m1", email="Tester@YOPmail.com", display="Test Mike", primary=True)
+        await make_club(db, "november")
+        await make_admin(db, "november", "n1", email="t@x.yopmail.com", display="Test November", primary=True)
+        await make_club(db, "oscar")
+        await make_admin(db, "oscar", "o1", email="real@notyopmail.com.au", display="Oz Real", primary=True)
         # L has a club_member (not an admin) and a crawled officer who is NOT on PlayHQ any more.
         _, mcL = await make_club(db, "lima")
         await make_admin(db, "lima", "l1", email="member@lima.org", display="Mia Member", role="club_member")
@@ -214,6 +221,9 @@ async def main() -> int:
     check("an ordinary address is not flagged (the flag can be absent)", e["c1"].get("blocked") is False)
     check("an archived club's admin is left out", "i1" not in e)
     check("a club_member is not an admin", "l1" not in e)
+    check("a test account on a throwaway-mail domain is skipped (any case)", e["m1"]["status"] == "test_account", e["m1"]["status"])
+    check("...a subdomain of one too", e["n1"]["status"] == "test_account", e["n1"]["status"])
+    check("control: a real address that merely contains the word is added", e["o1"]["status"] == "add", e["o1"]["status"])
     check("a person who asked to be removed is not added", e["j1"]["status"] == "privacy_removed", e["j1"]["status"])
 
     print("the plan with --email-only")
@@ -230,7 +240,7 @@ async def main() -> int:
         dry = await adc.backfill(db, apply=False)
         await db.commit()
     check("a dry run creates nothing", len(await all_contacts()) == n0, f"{n0} -> {len(await all_contacts())}")
-    check("...and says how many it would store", len(dry["add"]) == 6 and dry["created"] == 0,
+    check("...and says how many it would store", len(dry["add"]) == 7 and dry["created"] == 0,
           f"{len(dry['add'])} / {dry['created']}")
     would = {(x["club"], x["email"], x["name"]) for x in dry["add"]}
 
@@ -241,7 +251,7 @@ async def main() -> int:
         await db.commit()
     rows = await all_contacts()
     new = [c for c in rows if c.id not in before]
-    check("it creates exactly what the dry run said", res["created"] == len(new) == 6, f"{res['created']} / {len(new)}")
+    check("it creates exactly what the dry run said", res["created"] == len(new) == 7, f"{res['created']} / {len(new)}")
     got = {(next(o.name for o, m in clubs.values() if m and m.id == c.marketing_club_id), c.email, c.full_name)
            for c in new}
     check("...the same people", got == would, f"{sorted(got, key=str)} vs {sorted(would, key=str)}")
@@ -269,7 +279,8 @@ async def main() -> int:
     check("every existing contact is untouched", all(snap(c) == before[c.id] for c in rows if c.id in before),
           str([c.full_name for c in rows if c.id in before and snap(c) != before[c.id]]))
     check("nothing for the skipped clubs / people",
-          not any(c.email in ("e1@echo.org", "i1@india.org", "gone@juliet.org", "member@lima.org") for c in rows))
+          not any(c.email in ("e1@echo.org", "i1@india.org", "gone@juliet.org", "member@lima.org",
+                          "tester@yopmail.com", "t@x.yopmail.com") for c in rows))
 
     print("running it again")
     async with Session() as db:

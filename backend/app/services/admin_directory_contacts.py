@@ -15,7 +15,8 @@ and the Sales Workspace without the person who actually uses the product.
                     (the committee member who signed up with a personal address);
   * ``add``         not a Contact, so one is stored;
   * a reason it cannot be: the club has no Directory row, or the person has
-    neither an address nor a mobile, or they asked to be removed.
+    neither an address nor a mobile, or they asked to be removed, or the address is
+    on a throwaway-mail domain (a test account, ``TEST_MAIL_DOMAINS``).
 
 ``apply`` writes only the ``add`` entries. ``backfill`` is the two together, and with
 ``apply=False`` writes nothing, so the dry run and the real run read one plan.
@@ -65,6 +66,11 @@ ROLE = "Club Admin"
 ROLE_RANK = 1
 #: ``marketing_club_contacts.source``. Anything but 'api' is spared by a Rediscover.
 SOURCE = "club_admin"
+
+#: Throwaway-mail domains: an admin on one of these is a test account, not a person at the club,
+#: so the backfill leaves them out (and says so) rather than file a fake "Club Admin" contact that
+#: is ticked for outreach. Matched on the address's domain, subdomains included.
+TEST_MAIL_DOMAINS = ("yopmail.com", "yopmail.fr", "yopmail.net")
 
 _CHUNK = 500   # keeps every IN list far under the driver's bind-parameter ceiling
 
@@ -161,6 +167,12 @@ async def is_opted_out(session: AsyncSession, email) -> bool:
     return bool(e) and e in await _opted_out_emails(session, [e])
 
 
+def is_test_address(email) -> bool:
+    """Whether the address is on a throwaway-mail domain (``TEST_MAIL_DOMAINS``)."""
+    domain = (email or "").strip().lower().rpartition("@")[2]
+    return bool(domain) and any(domain == d or domain.endswith("." + d) for d in TEST_MAIL_DOMAINS)
+
+
 def _chunks(items, n=_CHUNK):
     items = list(items)
     for i in range(0, len(items), n):
@@ -233,6 +245,9 @@ async def plan(session: AsyncSession, *, club_id=None, allow_name_match: bool = 
         if mc is None:
             entries.append({**base, "status": "no_directory_row"})
             continue
+        if is_test_address(email):
+            entries.append({**base, "status": "test_account"})
+            continue
         if not email and not mobile:
             entries.append({**base, "status": "nothing_to_store"})
             continue
@@ -300,6 +315,7 @@ def summarise(entries) -> dict:
         "have_name": by.get("have_name", []),
         "no_directory_row": by.get("no_directory_row", []),
         "nothing_to_store": by.get("nothing_to_store", []),
+        "test_account": by.get("test_account", []),
         "privacy_removed": by.get("privacy_removed", []),
     }
 

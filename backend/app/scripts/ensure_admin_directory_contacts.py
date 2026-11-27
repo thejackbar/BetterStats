@@ -41,7 +41,8 @@ PlayHQ itself listed), so the next committee refresh does not undo it.
 A club with no Clubs Directory row is reported and skipped: there is nothing to attach a
 contact to, and creating Directory clubs is not this script's job. An admin with neither an
 address nor a mobile is reported. A person who asked to be taken off the public site is
-not added. An address that is suppressed or unsubscribed is stored as a contact that says
+not added. An admin on a throwaway-mail domain (yopmail) is a test account and is
+reported and skipped. An address that is suppressed or unsubscribed is stored as a contact that says
 so (not subscribed, not ticked), never one that reads as reachable. An ARCHIVED club's
 admins are left out, the house rule for "stop treating this club as live".
 
@@ -131,7 +132,8 @@ async def run(target: str | None, apply: bool, allow_name_match: bool) -> int:
         print(f"  already a Contact (same name)      {len(r['have_name'])}")
         print(f"  not a Contact, " + ("stored" if apply else "would store") +
               f"             {len(r['add'])}")
-        gaps = (len(r['no_directory_row']) + len(r['nothing_to_store']) + len(r['privacy_removed']))
+        gaps = (len(r['no_directory_row']) + len(r['nothing_to_store']) + len(r['privacy_removed'])
+                + len(r['test_account']))
         if gaps:
             print(f"  could not be added                 {gaps}")
 
@@ -160,6 +162,10 @@ async def run(target: str | None, apply: bool, allow_name_match: bool) -> int:
             print(f"\nNO EMAIL AND NO MOBILE ON THE ACCOUNT, SKIPPED ({len(r['nothing_to_store'])}):")
             for e in sorted(r["nothing_to_store"], key=lambda x: (x["club"], x["name"] or "")):
                 print(f"  {_who(e)}")
+        if r["test_account"]:
+            print(f"\nTEST ACCOUNTS (THROWAWAY MAIL), SKIPPED ({len(r['test_account'])}):")
+            for e in sorted(r["test_account"], key=lambda x: (x["club"], x["name"] or "")):
+                print(f"  {_who(e)}  {e['email']}")
         if r["privacy_removed"]:
             print(f"\nASKED TO BE REMOVED, NOT ADDED ({len(r['privacy_removed'])}):")
             for e in r["privacy_removed"]:
