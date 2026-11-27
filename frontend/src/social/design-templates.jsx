@@ -30,14 +30,14 @@ import { usePostLook } from './postLook'
 import FramedImage from './FramedImage'
 import { FRAMES, framePoints, frameClip, burstPaths, speedPaths, brushPaths, tornPaperPaths, grungePaths, splatterPaths } from './designFx'
 
-const FONT = "var(--social-display-font, 'Anton', 'Hanken Grotesk', sans-serif)"
-const WEIGHT = 'var(--social-display-font-weight, 700)'
-const MONO = "'JetBrains Mono', monospace"
+export const FONT = "var(--social-display-font, 'Anton', 'Hanken Grotesk', sans-serif)"
+export const WEIGHT = 'var(--social-display-font-weight, 700)'
+export const MONO = "'JetBrains Mono', monospace"
 const VBASE = framePoints(FRAMES.find((f) => f.key === 'vbottom'))
 
 // Shared geometry: the safe top and bottom (a story's ends sit under the app's
 // own bars), a size factor, and the sponsor strip along the bottom.
-function geo(width, height) {
+export function geo(width, height) {
   const A = aspectOf(width, height)
   const f = pick(A, { square: 1, portrait: 1.06, story: 1.12 })
   const top = pick(A, { square: 40, portrait: 56, story: 210 })
@@ -46,13 +46,13 @@ function geo(width, height) {
   const slotY = height - bottom - slotH
   return { A, f, top, bottom, slotH, slotY }
 }
-const slotOf = (width, height) => {
+export const slotOf = (width, height) => {
   const g = geo(width, height)
   const w = Math.min(width - 220, 640)
   return { x: Math.round((width - w) / 2), y: g.slotY, w, h: g.slotH, pad: 6, gap: 22, panel: 'light' }
 }
 
-const hasText = (v) => v && v !== 'COMPETITION'
+export const hasText = (v) => v && v !== 'COMPETITION'
 
 // A colour that reads on `ground`: `want` when the two differ enough in
 // lightness, else `fallback` (a navy kit colour on a black poster is invisible).
@@ -64,11 +64,11 @@ const lum = (hex) => {
   return 0.2126 * ch((n >> 16) & 255) + 0.7152 * ch((n >> 8) & 255) + 0.0722 * ch(n & 255)
 }
 const contrast = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05) }
-const readable = (want, ground, fallback) => (contrast(want, ground) >= 2.2 ? want : fallback)
-const joinDot = (...xs) => xs.filter(hasText).join(' · ')
-const upper = (v) => String(v || '').toUpperCase()
+export const readable = (want, ground, fallback) => (contrast(want, ground) >= 2.2 ? want : fallback)
+export const joinDot = (...xs) => xs.filter(hasText).join(' · ')
+export const upper = (v) => String(v || '').toUpperCase()
 
-function Paths({ layer, paths, color, width, height, left = 0, top = 0, opacity = 1, rotate = 0 }) {
+export function Paths({ layer, paths, color, width, height, left = 0, top = 0, opacity = 1, rotate = 0 }) {
   return (
     <svg data-layer={layer} width={width} height={height} viewBox={`0 0 ${width} ${height}`}
       style={{ position: 'absolute', left, top, opacity, overflow: 'visible', transform: rotate ? `rotate(${rotate}deg)` : undefined, pointerEvents: 'none' }}>
@@ -78,7 +78,7 @@ function Paths({ layer, paths, color, width, height, left = 0, top = 0, opacity 
 }
 
 // A crest drawn inside a V-base frame, on the frame's fill.
-function CrestFrame({ layer, x, y, w, h, fill, logo, mono, ink, children }) {
+export function CrestFrame({ layer, x, y, w, h, fill, logo, mono, ink, children }) {
   const clip = frameClip(VBASE, h, 0)
   const size = Math.round(Math.min(w * 0.62, h * 0.42))
   return (
@@ -92,14 +92,14 @@ function CrestFrame({ layer, x, y, w, h, fill, logo, mono, ink, children }) {
   )
 }
 
-const resolver = (palette) => (c) => ({
+export const resolver = (palette) => (c) => ({
   primary: palette.primary, secondary: palette.secondary, accent: palette.accent, ink: palette.ink,
   white: '#ffffff', black: '#0a0a0a',
 }[c] || c)
 
 // Small line icons for the details rows (drawn here; the app kit has none that
 // survive the PNG export at poster scale).
-function CalendarIcon({ size, color }) {
+export function CalendarIcon({ size, color }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.2" strokeLinejoin="round">
       <rect x="3" y="5" width="18" height="16" rx="1" /><path d="M3 10h18M8 3v4M16 3v4" />
@@ -107,7 +107,7 @@ function CalendarIcon({ size, color }) {
     </svg>
   )
 }
-function PinIcon({ size, color }) {
+export function PinIcon({ size, color }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.2">
       <path d="M12 22s7-7.4 7-12.5A7 7 0 0 0 5 9.5C5 14.6 12 22 12 22Z" /><circle cx="12" cy="9.5" r="2.6" fill={color} stroke="none" />
@@ -117,7 +117,7 @@ function PinIcon({ size, color }) {
 
 // A cut-out in black and white with the kit colour kept: the look all the
 // photo-led layouts here share. `edge` adds a thin outline round it.
-const keptLook = (keep, { edge = 0, glow = null, contrast = 18 } = {}) => ({
+export const keptLook = (keep, { edge = 0, glow = null, contrast = 18 } = {}) => ({
   tone: 'mono', splash: [{ color: keep, range: 34, soft: 34 }], splashStrength: 100, contrast,
   ...(edge ? { outline: { width: edge, color: 'white' } } : null),
   ...(glow ? { glow } : null),

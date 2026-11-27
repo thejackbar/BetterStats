@@ -60,11 +60,13 @@ async function openEditor({ settings = CLUB, assoc = false, viewport = { width: 
   const ctx = await browser.newContext({ viewport, acceptDownloads: true })
   const page = await ctx.newPage()
   const errors = []
+  const writes = []
   page.on('pageerror', (e) => errors.push(String(e)))
   page.on('dialog', (d) => d.accept())
   const json = (b) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(b) })
   await page.route('**/api/**', (route) => {
     const url = route.request().url()
+    if (route.request().method() !== 'GET') writes.push({ url, method: route.request().method(), body: route.request().postData() })
     if (/\/social\/media\/m1\/file/.test(url)) return route.fulfill({ status: 200, contentType: 'image/png', body: PHOTO })
     if (/\/social\/media\/m2\/file/.test(url)) return route.fulfill({ status: 200, contentType: 'image/png', body: CUTOUT })
     if (/\/auth\/me/.test(url)) return route.fulfill(json(assoc
@@ -83,7 +85,7 @@ async function openEditor({ settings = CLUB, assoc = false, viewport = { width: 
   if (viewport.width < 768) await page.getByRole('button', { name: /full editor/i }).first().waitFor({ timeout: 25000 })
   else await page.getByRole('button', { name: /DOWNLOAD PNG|SLIDES/ }).first().waitFor({ timeout: 25000 })
   await page.waitForTimeout(500)
-  return { ctx, page, errors }
+  return { ctx, page, errors, writes }
 }
 
 const tool = (page, label) => press(page.locator(`nav button[title="${label}"]`))
@@ -302,6 +304,9 @@ const openEffects = async (page) => { await tool(page, 'Effects'); await page.wa
 const LAYOUTS = [
   ['DL1', 'Match Day V', 'Our panel'], ['DL2', 'Gameday Echo', 'Echo word'], ['DL3', 'Final Score V', 'Opposition side'],
   ['DL8', 'Game Day Card', 'Game day word'], ['DL9', 'Squad Collage', 'Players'], ['DL4', 'Fixtures Echo', 'Rows'], ['DL5', 'Results Echo', 'Rows'], ['DL6', 'Colour Pop', 'Name'], ['DL7', 'Colour Pop', 'Name'],
+  ['DL10', 'Signed Stamp', 'Stamp'], ['DL11', 'Quote Card', 'Quote'], ['DL12', 'Birthday', 'Greeting'], ['DL13', 'Squad Update', 'Status'],
+  ['DL14', 'Countdown', 'Number'], ['DL15', 'Stat Hero', 'Big figure'], ['DL16', 'Coin Toss', 'Coin'], ['DL17', 'Big Number', 'Number'],
+  ['DL18', 'The Oval', 'Field'], ['DL19', 'Split Final', 'Ribbon'], ['DL20', 'Numbered List', 'Team list'],
 ]
 async function openLayout(id, opts = {}) {
   const o = await openEditor({ ...opts, query: `?template=${id}` })
@@ -406,6 +411,44 @@ async function pickRoster(page, n) {
   await page.waitForTimeout(300)
   ck('taking the look off restores the original photo', (await imgs()).some((s) => /images\/players\/p1\/photo/.test(s)))
   ck('no page errors through the layout photo look', errors.length === 0, errors.slice(0, 2).join(' | '))
+  await ctx.close()
+}
+
+// ── 4e. Favourites: starred layouts lead their post type's list ────────────
+const tilesOf = async (page) => page.evaluate(() => [...document.querySelectorAll('[data-testid^="layout-tile-"]')].map((e) => e.getAttribute('data-testid').slice(12)))
+{
+  const { ctx, page, errors, writes } = await openEditor({ query: '?template=T11' })
+  await press(page.getByRole('button', { name: 'Design', exact: true }))
+  await page.waitForTimeout(200)
+  const t0 = await tilesOf(page)
+  ck('control: the Lineup list opens in its usual order (Split Poster first)', t0[0] === 'T11' && t0.includes('DL9') && t0.includes('DL2'), t0.slice(0, 4).join(','))
+  ck('every layout tile carries a star', t0.length > 0 && (await page.locator('button[data-testid^="fav-"]').count()) === t0.length)
+  await press(page.getByTestId('fav-DL9'))
+  await press(page.getByTestId('fav-DL2'))
+  await page.waitForTimeout(200)
+  const t1 = await tilesOf(page)
+  ck('starred layouts move to the top, in the order they were starred', t1[0] === 'DL9' && t1[1] === 'DL2' && t1[2] === 'T11', t1.slice(0, 4).join(','))
+  ck('the star shows as pressed', (await page.getByTestId('fav-DL9').getAttribute('aria-pressed').catch(() => null)) === 'true')
+  ck('the list says how many are starred', /2 starred/.test(await textOf(page.getByTestId('fav-hint'))))
+  await page.waitForTimeout(1800)
+  const saved = writes.filter((w) => /club-admin\/settings/.test(w.url) && /favourite_layouts/.test(w.body || '')).map((w) => JSON.parse(w.body).socials_style?.favourite_layouts)
+  ck('favourites are saved to the club settings for every admin', saved.length > 0 && JSON.stringify(saved[saved.length - 1]) === JSON.stringify(['DL9', 'DL2']), JSON.stringify(saved.slice(-1)))
+  await press(page.getByTestId('fav-DL9'))
+  await press(page.getByTestId('fav-DL2'))
+  await page.waitForTimeout(200)
+  ck('unstarring puts the list back as it was', t0.length > 0 && JSON.stringify(await tilesOf(page)) === JSON.stringify(t0))
+  ck('no page errors through favourites', errors.length === 0, errors.slice(0, 2).join(' | '))
+  await ctx.close()
+}
+{
+  const settings = { ...CLUB, socials_style: { palette: 'club', favourite_layouts: ['DL20', 'NOPE'] } }
+  const { ctx, page, errors } = await openEditor({ query: '?template=T11', settings })
+  await press(page.getByRole('button', { name: 'Design', exact: true }))
+  await page.waitForTimeout(300)
+  const t = await tilesOf(page)
+  ck("a club's stored favourite leads the list in another admin's browser", t[0] === 'DL20', t.slice(0, 3).join(','))
+  ck('an unknown id in the stored list is ignored, not shown', t.length > 0 && !t.includes('NOPE'))
+  ck('no page errors on load with stored favourites', errors.length === 0, errors.slice(0, 2).join(' | '))
   await ctx.close()
 }
 

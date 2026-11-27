@@ -1006,6 +1006,9 @@ _SOCIALS_STYLE_KEYS = {
     # allowlist they were stripped on the way in, so a saved template only ever
     # lived in the one browser that made it and never reached another admin.
     "templates",
+    # The club's starred layouts (template ids), listed first in each post
+    # type's layout list for every admin of the club.
+    "favourite_layouts",
 }
 # Raised from 32KB when Saved Templates joined the blob: a Blank Canvas
 # template carries its whole block layout, so a club with a few of those runs

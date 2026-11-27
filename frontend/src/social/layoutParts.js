@@ -43,6 +43,7 @@ export const PARTS_FAMILY = {
   EV8: 'EVENT', EV9: 'EVENT', EV10: 'EVENT', EV11: 'EVENT',
   EL1: 'EVENTLIST', EL2: 'EVENTLIST', EL3: 'EVENTLIST',
   DL1: 'LINEUP', DL2: 'LINEUP', DL8: 'LINEUP', DL9: 'LINEUP', DL3: 'RESULT', DL4: 'FIXTURES', DL5: 'RESULTS', DL6: 'MOTM', DL7: 'ANNOUNCE',
+  DL10: 'ANNOUNCE', DL11: 'ANNOUNCE', DL12: 'ANNOUNCE', DL13: 'ANNOUNCE', DL14: 'ANNOUNCE', DL15: 'MOTM', DL16: 'TOSS', DL17: 'MILESTONES', DL18: 'TOTW', DL19: 'RESULT', DL20: 'LINEUP',
 }
 
 // The keys that recur across families. A layout that has the element uses the key,

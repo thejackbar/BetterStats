@@ -43,6 +43,9 @@ import { RoundCover } from '../../social/round-cover-template'
 import { ResultHighlights, HIGHLIGHTS_FOCUS } from '../../social/highlights-cover-template'
 import { GiantType } from '../../social/giant-type-template'
 import { MatchDayV, GamedayEcho, GameDayCard, SquadCollage, COLLAGE_MAX, FinalScoreV, FixturesEcho, ResultsEcho, ColourPopSpotlight, ColourPopAnnounce, DESIGN_PANEL_ALIAS } from '../../social/design-templates'
+import { SignedStamp, QuoteCard, Birthday, SquadUpdate, Countdown, StatHero, CoinToss, BigNumber, TheOval, SplitFinal, NumberedList, DESIGN_PANEL_ALIAS_2 } from '../../social/design-templates-2'
+// Which built-in layout's Content panel (and props) each design layout shares.
+const DESIGN_ALIAS = { ...DESIGN_PANEL_ALIAS, ...DESIGN_PANEL_ALIAS_2 }
 import { MilestoneCards, MilestoneBoard, MILESTONE_MAX } from '../../social/milestone-templates'
 import { ReviewWrap, ReviewPerformers, ReviewPlayer, ReviewMatch, ReviewResults, ReviewLeaders, ReviewMilestones, ReviewLadder, ReviewFixtures } from '../../social/round-review-templates'
 import { reviewPost } from '../../social/roundReviewPost'
@@ -115,12 +118,20 @@ const ALL_TEMPLATES = [
   { id: 'DL2', name: 'Gameday Echo',   component: GamedayEcho,        desc: 'Stacked GAMEDAY, player in black and white, kit colour kept', maxPlayers: LINEUP_MAX },
   { id: 'DL8', name: 'Game Day Card',  component: GameDayCard,        desc: 'Duotone photo, GAME DAY with the player breaking out', maxPlayers: LINEUP_MAX },
   { id: 'DL9', name: 'Squad Collage',  component: SquadCollage,       desc: 'Up to seven players stacked on a torn poster', maxPlayers: LINEUP_MAX },
+  { id: 'DL20', name: 'Numbered List', component: NumberedList,       desc: 'Outlined numbers, names stacked, duotone hero', maxPlayers: LINEUP_MAX },
   { id: 'C1', name: 'Announcement',    component: C1_CaptainAnnounce, desc: 'Captain / debut / award',         maxPlayers: 1 },
   { id: 'C5', name: 'Giant Type',      component: GiantType,          desc: 'FIRST XI / 100 / 5FA behind the player', maxPlayers: 1 },
   { id: 'C2', name: 'Toss',            component: C2_TossWon,         desc: 'Toss result post',                maxPlayers: 0 },
   { id: 'C3', name: 'Player Spotlight',component: C3_ManOfMatch,      desc: 'Man of match / player stats',     maxPlayers: 1 },
-  { id: 'DL6', name: 'Colour Pop',     component: ColourPopSpotlight, desc: 'Black and white photo, kit colour kept, torn strip', maxPlayers: 1 },
-  { id: 'DL7', name: 'Colour Pop',     component: ColourPopAnnounce,  desc: 'Black and white photo, kit colour kept, torn strip', maxPlayers: 1 },
+  { id: 'DL6', name: 'Colour Pop',     component: ColourPopSpotlight, desc: 'Faded face behind, brush strokes, kit colour kept', maxPlayers: 1 },
+  { id: 'DL7', name: 'Colour Pop',     component: ColourPopAnnounce,  desc: 'Faded face behind, brush strokes, kit colour kept', maxPlayers: 1 },
+  { id: 'DL10', name: 'Signed Stamp',  component: SignedStamp,        desc: 'Duotone photo with a rubber stamp across it', maxPlayers: 1 },
+  { id: 'DL11', name: 'Quote Card',    component: QuoteCard,          desc: 'The headline as a quote beside a halftone portrait', maxPlayers: 1 },
+  { id: 'DL12', name: 'Birthday',      component: Birthday,           desc: 'Confetti, outlined cut-out, handwritten greeting', maxPlayers: 1 },
+  { id: 'DL13', name: 'Squad Update',  component: SquadUpdate,        desc: 'Muted photo and a status pill (injury, availability)', maxPlayers: 1 },
+  { id: 'DL14', name: 'Countdown',     component: Countdown,          desc: 'One huge number (the headline), days to go', maxPlayers: 1 },
+  { id: 'DL15', name: 'Stat Hero',     component: StatHero,           desc: 'The first figure huge, the player in front of it', maxPlayers: 1 },
+  { id: 'DL16', name: 'Coin Toss',     component: CoinToss,           desc: "Split post, the winner's crest on a coin", maxPlayers: 0 },
   { id: 'C4', name: 'Result · Classic', component: C4_FinalScore,     desc: 'Result + top performers', maxPlayers: 0 },
   // Single-match result layouts (fold into the Final Score tab alongside C4).
   { id: 'RS1', name: 'Margin Hero',    component: ResultMarginHero,   desc: 'Big WIN headline + margin',       maxPlayers: 0, kind: 'singleresult' },
@@ -133,6 +144,7 @@ const ALL_TEMPLATES = [
   { id: 'RS7', name: 'Glass Card',     component: ResultGlass,        desc: 'Your photo, glass scorecards, six positions', maxPlayers: 0, kind: 'singleresult' },
   { id: 'RS8', name: 'Highlights Cover', component: ResultHighlights, desc: 'Full-bleed photo, title and one score card', maxPlayers: 0, kind: 'singleresult' },
   { id: 'DL3', name: 'Final Score V',  component: FinalScoreV,        desc: 'Both crests in V frames, winner lit', maxPlayers: 0, kind: 'singleresult' },
+  { id: 'DL19', name: 'Split Final',   component: SplitFinal,         desc: 'Diagonal split, giant scores, FULL TIME ribbon', maxPlayers: 0, kind: 'singleresult' },
   // Fixtures roundup — one post, all grades.
   { id: 'FX1', name: 'List',           component: FixtureList,        desc: 'Clean factual rows',              maxPlayers: 0, kind: 'fixtures' },
   { id: 'FX2', name: 'Match-day Hype', component: FixtureHype,        desc: 'Diagonal poster',                 maxPlayers: 0, kind: 'fixtures' },
@@ -154,10 +166,12 @@ const ALL_TEMPLATES = [
   // Team of the week — the round's best performers across every grade, 6 to 14 of them.
   { id: 'TW1', name: 'Team Sheet',     component: TeamOfWeekGrid,     desc: 'Photo cards, any team size',      maxPlayers: TOTW_MAX, kind: 'totw' },
   { id: 'TW2', name: 'Ranked Board',   component: TeamOfWeekBoard,    desc: 'One row per player, best first',  maxPlayers: TOTW_MAX, kind: 'totw' },
+  { id: 'DL18', name: 'The Oval',      component: TheOval,            desc: 'The team placed round a cricket oval', maxPlayers: TOTW_MAX, kind: 'totw' },
   { id: 'TW3', name: 'Round Cards',    component: TeamOfWeekCards,    desc: 'Crest, sponsor and white photo cards', maxPlayers: TOTW_MAX, kind: 'totw' },
   // Player milestones — the club ticks which recorded milestones to feature.
   { id: 'MS1', name: 'Milestone Cards', component: MilestoneCards,    desc: 'Photo cards with the big number', maxPlayers: 0, kind: 'milestones' },
   { id: 'MS2', name: 'Milestone Board', component: MilestoneBoard,    desc: 'One row per milestone',           maxPlayers: 0, kind: 'milestones' },
+  { id: 'DL17', name: 'Big Number',    component: BigNumber,          desc: 'The first milestone huge, the rest as rows', maxPlayers: 0, kind: 'milestones' },
   // Round review (association workspaces): read from a round saved in the Performance Tracker.
   { id: 'RV1', name: 'Round Wrap',      component: ReviewWrap,        desc: "The round's headlines",           maxPlayers: 0, kind: 'review' },
   { id: 'RV2', name: 'Top Performers',  component: ReviewPerformers,  desc: 'Top scores and best bowling',     maxPlayers: 0, kind: 'review' },
@@ -188,7 +202,7 @@ const ALL_TEMPLATES = [
 // The football build drops the layouts that only mean anything with cricket
 // data: the batting order, the results wrap's batting/bowling leaders, and
 // every layout of the three hidden post types (toss, scorecard, final score).
-const AFL_HIDDEN_TEMPLATES = new Set([...CUSTOM_LAYOUT_IDS, 'DL3', 'T4', 'T11', 'T12', 'T13', 'C5', 'RR7', 'RR8', 'C2', 'C4', 'RS1', 'RS2', 'RS3', 'RS4', 'RS5', 'RS6', 'RS7', 'RS8', 'RS9', 'SC1', 'SC2', 'SC3', 'TW1', 'TW2', 'TW3', 'MS1', 'MS2', 'RV1', 'RV2', 'RV3', 'RV4', 'RV5', 'RV6', 'RV7', 'RV8', 'RV9'])
+const AFL_HIDDEN_TEMPLATES = new Set([...CUSTOM_LAYOUT_IDS, 'DL3', 'DL16', 'DL17', 'DL18', 'DL19', 'T4', 'T11', 'T12', 'T13', 'C5', 'RR7', 'RR8', 'C2', 'C4', 'RS1', 'RS2', 'RS3', 'RS4', 'RS5', 'RS6', 'RS7', 'RS8', 'RS9', 'SC1', 'SC2', 'SC3', 'TW1', 'TW2', 'TW3', 'MS1', 'MS2', 'RV1', 'RV2', 'RV3', 'RV4', 'RV5', 'RV6', 'RV7', 'RV8', 'RV9'])
 const TEMPLATES = IS_AFL ? ALL_TEMPLATES.filter(t => !AFL_HIDDEN_TEMPLATES.has(t.id)) : ALL_TEMPLATES
 
 // The lineup templates that crop the hero photo into a fixed box, and the shape
@@ -199,12 +213,12 @@ const HERO_CROP_ASPECT = { T1: 480 / 845, T3: 380 / 1080, T10: 720 / 1080, T13: 
 const HERO_FOCUS_TEMPLATES = Object.keys(HERO_CROP_ASPECT)
 // The layouts drawn around a hero photo. Derived from the same id list the Hero
 // Image panel is gated on, so the two can't drift apart.
-const HERO_SLOT_TEMPLATES = ['T1', 'T3', 'T6', 'T7', 'T10', 'T11', 'T13', 'C1', 'C3', 'C5', 'DL1', 'DL2', 'DL8', 'DL6', 'DL7', CUSTOM_LAYOUTS.lineup, CUSTOM_LAYOUTS.result, CUSTOM_LAYOUTS.motm, CUSTOM_LAYOUTS.announcement]
+const HERO_SLOT_TEMPLATES = ['T1', 'T3', 'T6', 'T7', 'T10', 'T11', 'T13', 'C1', 'C3', 'C5', 'DL1', 'DL2', 'DL8', 'DL20', 'DL6', 'DL7', 'DL10', 'DL11', 'DL12', 'DL13', 'DL14', 'DL15', CUSTOM_LAYOUTS.lineup, CUSTOM_LAYOUTS.result, CUSTOM_LAYOUTS.motm, CUSTOM_LAYOUTS.announcement]
 // The lineups that can mark which listed player is the one in the photo, and
 // the ones whose Hero Player picker names that player. T7 and the announcement
 // layouts have a single player, so there is no list to mark.
 const HERO_MARK_TEMPLATES = ['T1', 'T3', 'T10', 'T11']
-const HERO_PLAYER_TEMPLATES = ['T1', 'T3', 'T6', 'T10', 'T11', 'DL1', 'DL2', 'DL8', CUSTOM_LAYOUT_ID]
+const HERO_PLAYER_TEMPLATES = ['T1', 'T3', 'T6', 'T10', 'T11', 'DL1', 'DL2', 'DL8', 'DL20', CUSTOM_LAYOUT_ID]
 // The lineups that draw a DEBUT tag beside a flagged player. The flag is kept
 // on the player either way, so switching layout never loses it.
 const DEBUT_TEMPLATES = ['T1', 'T3', 'T10', 'T11', 'T12']
@@ -220,7 +234,9 @@ const matchDayIso = (v) => (/^\d{4}-\d{2}-\d{2}/.test(String(v || '')) ? String(
 const TAB_MAP = {
   T1: 'lineup', T2: 'lineup', T3: 'lineup', T4: 'lineup', T5: 'lineup',
   T6: 'lineup', T7: 'lineup', T8: 'lineup', T9: 'lineup', T10: 'lineup', T11: 'lineup', T12: 'lineup', T13: 'lineup',
-  DL1: 'lineup', DL2: 'lineup', DL8: 'lineup', DL9: 'lineup', DL3: 'result', DL4: 'fixtures', DL5: 'results', DL6: 'motm', DL7: 'announcement',
+  DL1: 'lineup', DL2: 'lineup', DL8: 'lineup', DL9: 'lineup', DL20: 'lineup', DL3: 'result', DL19: 'result',
+  DL10: 'announcement', DL11: 'announcement', DL12: 'announcement', DL13: 'announcement', DL14: 'announcement',
+  DL15: 'motm', DL16: 'toss', DL17: 'milestones', DL18: 'totw', DL4: 'fixtures', DL5: 'results', DL6: 'motm', DL7: 'announcement',
   ...Object.fromEntries(Object.entries(CUSTOM_LAYOUTS).map(([type, id]) => [id, type])),
   FX1: 'fixtures', FX2: 'fixtures', FX3: 'fixtures', FX4: 'fixtures', FX5: 'fixtures', FX6: 'fixtures',
   C1: 'announcement', C5: 'announcement', C2: 'toss', C3: 'motm',
@@ -1681,7 +1697,12 @@ const DEFAULT_STYLE_JSON = JSON.stringify({
   bg_colors: {}, palettes: [], designs: [], lineup_card: LINEUP_CARD_DEFAULTS,
   bg_url: null, bg_tint: null, bg_texture: null, bg_logo: false, bg_logo_op: 0.15, bg_text: '', bg_text_op: 0.16,
   bg_finish: {},
+  // The club's starred layouts (template ids), shown first in each post type's list.
+  favourite_layouts: [],
 })
+// Only real layout ids, once each: a stored list may name a layout this build
+// does not have (football, or one since removed), which is kept but never shown.
+const cleanFavourites = (v) => (Array.isArray(v) ? [...new Set(v.filter((x) => typeof x === 'string' && x.length <= 16))] : [])
 
 // Saved templates live in their own table now (one row each), not in the Style
 // blob. The browser keeps a copy so the editor opens with them before the
@@ -1963,6 +1984,11 @@ export default function AdminSocialPost() {
   // savedPalettes list/lookup as a Custom palette (so paletteKey resolution
   // needs no changes); the extra fields (bgStyle/fontKey/dark) live here,
   // keyed by the same key.
+  const [favLayouts, setFavLayouts] = useState(() => {
+    try { return cleanFavourites(JSON.parse(localStorage.getItem('bs_social_fav_layouts') || '[]')) } catch { return [] }
+  })
+  useEffect(() => { try { localStorage.setItem('bs_social_fav_layouts', JSON.stringify(favLayouts)) } catch { /* private window */ } }, [favLayouts])
+  const toggleFavourite = (id) => setFavLayouts((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]))
   const [savedDesigns, setSavedDesigns] = useState(() => {
     try { return JSON.parse(localStorage.getItem('bs_social_designs') || '[]') } catch { return [] }
   })
@@ -2595,6 +2621,7 @@ export default function AdminSocialPost() {
     bg_url: bgCustomUrl && !String(bgCustomUrl).startsWith('blob:') ? bgCustomUrl : null, bg_tint: bgTint, bg_texture: bgTexture, bg_logo: bgLogoOn, bg_logo_op: bgLogoOpacity,
     bg_text: bgBigText, bg_text_op: bgBigTextOpacity,
     bg_finish: bgFinish,
+    favourite_layouts: favLayouts,
   })
   useEffect(() => {
     if (!settings) return undefined
@@ -2639,6 +2666,8 @@ export default function AdminSocialPost() {
             bg_text: 'bg_text' in st ? (typeof st.bg_text === 'string' ? st.bg_text : '') : bgBigText,
             bg_text_op: typeof st.bg_text_op === 'number' ? st.bg_text_op : bgBigTextOpacity,
             bg_finish: 'bg_finish' in st ? cleanFinish(st.bg_finish) : bgFinish,
+            // Absent on a style stored before favourites: keep this browser's.
+            favourite_layouts: 'favourite_layouts' in st ? cleanFavourites(st.favourite_layouts) : favLayouts,
           }
           setPaletteKey(applied.palette)
           setDarkMode(applied.dark)
@@ -2656,6 +2685,7 @@ export default function AdminSocialPost() {
           setBgBigText(applied.bg_text)
           setBgBigTextOpacity(applied.bg_text_op)
           setBgFinish(applied.bg_finish)
+          setFavLayouts(applied.favourite_layouts)
           styleServerRef.current = JSON.stringify(applied)
         }
         setAllPlayers(p)
@@ -3647,7 +3677,13 @@ export default function AdminSocialPost() {
     }
   }, [sourceFixtures, pcFixtures])
   // The imported-template layout is offered only once there is one (it is its blocks, so an empty one is a blank post).
-  const tabTemplates = TEMPLATES.filter(t => TAB_MAP[t.id] === activeTab && (!isCustomLayout(t.id) || templateId === t.id))
+  // Starred layouts first, in the order the club starred them, then the rest as listed.
+  const tabTemplates = (() => {
+    const list = TEMPLATES.filter(t => TAB_MAP[t.id] === activeTab && (!isCustomLayout(t.id) || templateId === t.id))
+    const rank = (id) => { const i = favLayouts.indexOf(id); return i < 0 ? Infinity : i }
+    return list.map((t, i) => ({ t, i })).sort((a, b) => (rank(a.t.id) - rank(b.t.id)) || (a.i - b.i)).map((x) => x.t)
+  })()
+  const favCount = tabTemplates.filter((t) => favLayouts.includes(t.id)).length
   const displayFont = (fontKey === 'club_font' && clubFont)
     ? clubFont
     : (DISPLAY_FONTS.find(f => f.key === fontKey) || DISPLAY_FONTS[0])
@@ -3707,7 +3743,7 @@ export default function AdminSocialPost() {
   const nameFormat = settings?.player_name_format || 'last_first'
   const tmpl = TEMPLATES.find(t => t.id === templateId) || TEMPLATES[0]
   // The Content panel the open layout shares with its type's built-in layouts (an imported toss uses the toss panel).
-  const panelId = CUSTOM_PANEL_ALIAS[templateId] || DESIGN_PANEL_ALIAS[templateId] || templateId
+  const panelId = CUSTOM_PANEL_ALIAS[templateId] || DESIGN_ALIAS[templateId] || templateId
   const isScorecard = !!(tmpl.isScorecard)
   const TemplateComponent = tmpl.component
   // Scorecard split into 2 square Instagram posts (batted-first team, then
@@ -3945,7 +3981,7 @@ export default function AdminSocialPost() {
       player: milestonePlayer ? withHeroSource(playerToTemplatePlayer(milestonePlayer.player, milestonePlayer, nameFormat, swapNames), shotChoice) : undefined,
     }
   }
-  if (templateId === 'C1' || templateId === 'C5' || templateId === 'DL7') {
+  if (templateId === 'C1' || templateId === 'C5' || DESIGN_ALIAS[templateId] === 'C1') {
     const annPlayer = selectedPlayers[announcement.playerIdx]
     let annTemplatePlayer = annPlayer ? asPicture(playerToTemplatePlayer(annPlayer.player, annPlayer, nameFormat, swapNames), shotChoice) : undefined
     if (annTemplatePlayer && heroMode === 'hero' && heroImage.blobUrl) {
@@ -3956,8 +3992,8 @@ export default function AdminSocialPost() {
       player: annTemplatePlayer,
     }
   }
-  if (templateId === 'C2') extraProps.toss = { winner: toss.winner, decision: toss.decision }
-  if (templateId === 'C3' || templateId === 'DL6') {
+  if (templateId === 'C2' || DESIGN_ALIAS[templateId] === 'C2') extraProps.toss = { winner: toss.winner, decision: toss.decision }
+  if (templateId === 'C3' || DESIGN_ALIAS[templateId] === 'C3') {
     const motmPlayer = selectedPlayers[motm.playerIdx]
     let motmTemplatePlayer = motmPlayer ? asPicture(playerToTemplatePlayer(motmPlayer.player, motmPlayer, nameFormat, swapNames), shotChoice) : undefined
     if (motmTemplatePlayer && heroMode === 'hero' && heroImage.blobUrl) {
@@ -3969,7 +4005,7 @@ export default function AdminSocialPost() {
       summary: motm.summary,
     }
   }
-  if (['T1', 'T3', 'T6', 'T7', 'T10', 'T11', 'T13', 'DL1', 'DL2', 'DL8'].includes(templateId) && heroImage.blobUrl) {
+  if (['T1', 'T3', 'T6', 'T7', 'T10', 'T11', 'T13', 'DL1', 'DL2', 'DL8', 'DL20'].includes(templateId) && heroImage.blobUrl) {
     extraProps.heroImage = heroImage.blobUrl
   }
   // Only the templates that crop a photo into a box can act on a focal point;
@@ -6085,20 +6121,38 @@ export default function AdminSocialPost() {
                   )}
                   {tabTemplates.length > 1 && activeTab !== 'events' && (
                     <div className="flex flex-col gap-1.5">
-                      <div className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2">This tab</div>
+                      <div className="flex items-baseline justify-between gap-2">
+                        <div className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2">This tab</div>
+                        <div className="text-[10px] text-pb-faint" data-testid="fav-hint">
+                          {favCount ? `${favCount} starred, shown first for everyone at the club` : 'Star a layout to put it first for everyone at the club'}
+                        </div>
+                      </div>
                       <div className="grid grid-cols-2 gap-2">
-                        {tabTemplates.map(t => (
-                          <button
-                            key={t.id}
-                            onClick={() => selectTemplate(t.id)}
-                            className={`text-left p-2.5 rounded border transition-colors ${templateId === t.id ? 'bg-pb-surface2' : 'border-transparent bg-pb-surface hover:bg-pb-surface2'}`}
-                            style={templateId === t.id ? { borderColor: 'var(--pb-accent)' } : {}}
-                          >
-                            <div className="font-mono text-[9px] text-pb-faintest mb-0.5">{t.id}</div>
-                            <div className="font-medium text-pb-text text-xs leading-tight">{t.name}</div>
-                            <div className="text-[10px] text-pb-faint leading-tight mt-0.5">{t.desc}</div>
-                          </button>
-                        ))}
+                        {tabTemplates.map(t => {
+                          const fav = favLayouts.includes(t.id)
+                          return (
+                            <div key={t.id} className="relative" data-testid={`layout-tile-${t.id}`}>
+                              <button
+                                onClick={() => selectTemplate(t.id)}
+                                className={`w-full h-full text-left p-2.5 pr-8 rounded border transition-colors ${templateId === t.id ? 'bg-pb-surface2' : 'border-transparent bg-pb-surface hover:bg-pb-surface2'}`}
+                                style={templateId === t.id ? { borderColor: 'var(--pb-accent)' } : {}}
+                              >
+                                <div className="font-mono text-[9px] text-pb-faintest mb-0.5">{t.id}</div>
+                                <div className="font-medium text-pb-text text-xs leading-tight">{t.name}</div>
+                                <div className="text-[10px] text-pb-faint leading-tight mt-0.5">{t.desc}</div>
+                              </button>
+                              <button
+                                onClick={() => toggleFavourite(t.id)}
+                                aria-pressed={fav}
+                                aria-label={fav ? `Remove ${t.name} from favourites` : `Add ${t.name} to favourites`}
+                                title={fav ? 'Starred: shown first. Click to unstar.' : 'Star to show this layout first'}
+                                data-testid={`fav-${t.id}`}
+                                className="absolute top-1.5 right-1.5 w-6 h-6 grid place-items-center rounded text-[15px] leading-none hover:bg-pb-surface2"
+                                style={{ color: fav ? 'var(--pb-accent)' : 'var(--pb-faint)' }}
+                              >{fav ? '★' : '☆'}</button>
+                            </div>
+                          )
+                        })}
                       </div>
                     </div>
                   )}
