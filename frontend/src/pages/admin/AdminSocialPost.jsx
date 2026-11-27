@@ -3982,6 +3982,26 @@ export default function AdminSocialPost() {
   // held by `tlayers`, and a block added this render is not in `stackIds` yet,
   // so the move waits for the next render (pendingMoves) and runs once it is.
   const pendingMoves = useRef([])
+  // A strip placed by v9.160.0 on Toss or Result · Classic sat on the layout's
+  // own content. One still exactly where that version put it (nobody has moved
+  // it) goes to the layout's spot now; a strip the club dragged stays put.
+  useEffect(() => {
+    const spots = PAST_BLOCK_SPOTS[templateId]
+    if (!spots) return
+    const sz = postSizeOf(postSize)
+    const w = sz.w, h = sz.h
+    const spot = spots[shapeOf(w, h)]
+    const slot = sponsorSlotFor(templateId, w, h, 1)
+    const oldY = Math.max(20, Math.round(slot && slot.y > h * 0.5 ? slot.y - 64 - 18 : h - 64 - 96))
+    const patch = {}
+    overlay.items.forEach((it) => {
+      if (isPastBlock(it) && it.x === 60 && it.y === oldY && it.w === w - 120 && (it.h || 64) === 64 && !it.rotation
+        && !(it.y === spot.y && (it.h || 64) === (spot.h || 64))) patch[it.id] = { y: spot.y, h: spot.h || 64 }
+    })
+    if (Object.keys(patch).length) overlay.patchMany(patch)
+    // overlay.patchMany is a fresh function each render; the items are what matter
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [templateId, postSize, overlay.items])
   useEffect(() => {
     if (!pendingMoves.current.length) return
     const [a, b] = pendingMoves.current[0]

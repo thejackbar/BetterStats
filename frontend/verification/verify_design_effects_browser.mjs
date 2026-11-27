@@ -777,6 +777,53 @@ const tilesOf = async (page) => page.evaluate(() => [...document.querySelectorAl
   }
 }
 
+// ── 4k. Strips saved where v9.160.0 put them move to the new spot ───────────
+{
+  const PAST = { found: true, opponent: 'Subiaco-Floreat', meetings: 5, wins: 3, losses: 1, draws: 0, ties: 1, no_result: 0, form: ['W', 'W', 'L', 'T', 'W'], recent: [] }
+  const strip = (id, y) => ({ id, type: 'data', kind: 'past', x: 60, y, w: 960, h: 64, color: 'ink', accent: 'accent', count: 5, rotation: 0, panel: 'dark' })
+  const TPLS = [
+    { key: 'tpl_toss_old', name: 'Old toss', templateId: 'C2', custom: true, style: { palette: 'club' }, blank: [strip('s1', 884)], updated_at: '2026-11-28T10:00:00Z' },
+    { key: 'tpl_toss_moved', name: 'Moved toss', templateId: 'C2', custom: true, style: { palette: 'club' }, blank: [strip('s2', 500)], updated_at: '2026-11-28T09:00:00Z' },
+    { key: 'tpl_c4_old', name: 'Old result', templateId: 'C4', custom: true, style: { palette: 'club' }, blank: [strip('s3', 782)], updated_at: '2026-11-28T08:00:00Z' },
+  ]
+  const json = (b) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(b) })
+  const stripY = async (page) => page.evaluate(() => {
+    const h = [...document.querySelectorAll('div')].find((d) => d.style.left === '-9999px')
+    const root = h && h.firstElementChild
+    const el = root && root.querySelector('[data-past-line]')
+    if (!el) return null
+    return Math.round(el.getBoundingClientRect().top - root.getBoundingClientRect().top)
+  })
+  for (const [name, tplId, want, why] of [['Old toss', 'C2', 762, 'a Toss strip still at the v9.160.0 spot moves to the new one'],
+    ['Moved toss', 'C2', 500, 'a strip the club dragged elsewhere stays where they put it'],
+    ['Old result', 'C4', 312, 'a Result · Classic strip at the v9.160.0 spot moves above Top Performers']]) {
+    const ctx = await browser.newContext({ viewport: { width: 1600, height: 1000 } })
+    const page = await ctx.newPage()
+    page.on('dialog', (d) => d.accept())
+    await page.route('**/api/**', (route) => {
+      const url = route.request().url()
+      if (/\/admin\/social\/head-to-head\?/.test(url)) return route.fulfill(json(PAST))
+      if (/\/admin\/social\/templates/.test(url)) return route.fulfill(json(route.request().method() === 'GET' ? TPLS : {}))
+      if (/\/auth\/me/.test(url)) return route.fulfill(json({ id: 'u1', role: 'club_admin', club_slug: 'tcc', entitlements: { modules: ['socials'], status: 'active' } }))
+      if (/\/club-admin\/settings/.test(url)) return route.fulfill(json(CLUB))
+      if (/social\/media|sponsors|players|ladders/.test(url)) return route.fulfill(json([]))
+      return route.fulfill(json({}))
+    })
+    await page.goto(`${BASE}/admin/social-post?template=${tplId}`, { waitUntil: 'domcontentloaded' })
+    await page.getByRole('button', { name: /DOWNLOAD PNG|SLIDES/ }).first().waitFor({ timeout: 25000 }).catch(() => {})
+    await press(page.getByRole('button', { name: 'Design', exact: true }))
+    await page.waitForTimeout(300)
+    await press(page.locator('[data-testid="your-templates"]').getByRole('button', { name: new RegExp(name) }))
+    await page.waitForTimeout(400)
+    await press(page.getByRole('button', { name: 'Content', exact: true }))
+    await page.getByPlaceholder('Subiaco CC').first().fill('Subiaco-Floreat').catch(() => {})
+    await page.waitForTimeout(1300)
+    const y = await stripY(page)
+    ck(why, y === want, String(y))
+    await ctx.close()
+  }
+}
+
 // ── 5. Association Socials workspace has the same tools ────────────────────
 {
   const { ctx, page, errors } = await openEditor({ settings: WORKSPACE, assoc: true })

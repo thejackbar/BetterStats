@@ -1512,3 +1512,8 @@ Asked for (November 2026, a club's own results graphic as the reference): a Resu
 ## Past results strip placed higher on Toss and Result · Classic (v9.160.1)
 - Asked for: move the strip higher on those two. Measured each at three sizes from the export node: Toss has a clear gap from FIRST to the date row (762, 962 and 1300px tops); Result · Classic's boxes are 18px apart everywhere, so `C4_FinalScore` takes `pastRoom` (76px spacer after the score row, only while a strip is on) and the strip sits at 312.
 - A text-only overlap check passed on the old C4 spot (it covered the empty performers box, not text); the added check that the strip ends above the panel's top failed on v9.160.0 and on the first new spot, which led to the spacer. Proof: browser check 257/257 (v9.160.0: the 3 Toss and 3 panel checks fail); post designer 122/8 with the same pre-existing 8, so C4 without a strip is unchanged.
+
+
+## Existing strips moved on Toss and Result · Classic (v9.160.2)
+- Asked for: move strips already placed to the new spot. Done on open, in the editor, for a strip still exactly at v9.160.0's default (square: Toss y 884, Result · Classic y 782); a dragged one is the club's choice and stays. Saved templates are not rewritten on the server; re-saving keeps the new spot.
+- Proof: browser check 260/260 with saved templates at the old spots and one dragged; v9.160.1 control fails the two move checks (884, 782) and passes the dragged guard.
