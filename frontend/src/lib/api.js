@@ -239,6 +239,8 @@ export const api = {
   getSocialScorecard: (matchId) => request(`/admin/social/scorecard/${matchId}`),
   socialMatchLookup: (q) => request(`/admin/social/match-lookup?q=${encodeURIComponent(q)}`),
   getSocialFixtures: (q) => request(`/admin/social/fixtures${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  // Our past results against one opponent (matched by club name), optionally one grade.
+  getSocialHeadToHead: (opponent, grade = '') => request(`/admin/social/head-to-head?opponent=${encodeURIComponent(opponent || '')}${grade ? `&grade=${encodeURIComponent(grade)}` : ''}`),
   getSocialResults: (q, { live = false } = {}) => {
     const p = new URLSearchParams()
     if (q) p.set('q', q)

@@ -475,6 +475,7 @@ const tilesOf = async (page) => page.evaluate(() => [...document.querySelectorAl
     gets.push(url)
     if (/\/auth\/me/.test(url)) return route.fulfill(json({ id: 'u1', role: 'club_admin', club_slug: 'tcc', entitlements: { modules: ['socials', 'select', 'stats'], status: 'active' } }))
     if (/\/club-admin\/settings/.test(url)) return route.fulfill(json(CLUB))
+    if (/\/admin\/social\/head-to-head/.test(url)) return route.fulfill(json({ found: true, opponent: 'Rival 1', meetings: 3, wins: 1, losses: 2, draws: 0, ties: 0, no_result: 0, form: ['L', 'W', 'L'], recent: [{ played_at: '2026-11-01', grade_name: 'A Grade', home_away: 'AWAY', outcome: 'L' }, { played_at: '2026-01-10', grade_name: 'A Grade', home_away: 'HOME', outcome: 'W' }, { played_at: '2025-12-01', grade_name: 'A Grade', home_away: 'AWAY', outcome: 'L' }] }))
     if (/\/ladders\/teams/.test(url)) return route.fulfill(json(LADDERS))
     if (/\/club-admin\/seasons/.test(url)) return route.fulfill(json(SEASONS))
     if (/\/leaderboard\/batting/.test(url)) return route.fulfill(json(BAT))
@@ -509,6 +510,11 @@ const tilesOf = async (page) => page.evaluate(() => [...document.querySelectorAl
   const h2 = await html()
   ck('Head to Head compares the two ladder rows stat by stat', ['rank', 'played', 'won', 'lost', 'competitionPoints', 'netRunRate'].every((id) => h2.includes(`data-h2h-row="${id}"`)))
   ck('it names both sides from the ladder', h2.includes('TEST CRICKET CLUB 1ST XI') && h2.includes('RIVAL 1'))
+  await page.waitForTimeout(900)
+  const askH2H = gets.filter((u) => /\/admin\/social\/head-to-head/.test(u))
+  ck('Head to Head asks for past results against the ladder opponent', askH2H.length > 0 && /opponent=Rival%201/.test(askH2H[askH2H.length - 1]), askH2H.slice(-1)[0] || 'none')
+  const h2b = await html()
+  ck('Head to Head draws the past meetings under the ladder comparison', /data-past-block/.test(h2b) && (h2b.match(/data-past-row=""/g) || []).length === 3 && /1-2 IN 3 MEETINGS/.test(h2b))
   // Stat Leaders
   await press(page.getByRole('button', { name: 'Design', exact: true }))
   await press(page.getByRole('button', { name: /^DL23\s*Stat Leaders/ }))
@@ -535,6 +541,72 @@ const tilesOf = async (page) => page.evaluate(() => [...document.querySelectorAl
 {
   const { ctx, page } = await openEditor({ settings: WORKSPACE, assoc: true, query: '?type=lineup' })
   ck('workspace: Ladder & Leaders is not offered (no club teams; Round Review has the ladder)', !(await seen(page.getByRole('button', { name: /Ladder & Leaders/ }))))
+  await ctx.close()
+}
+
+// ── 4g. Past results against the opponent ──────────────────────────────────
+{
+  const PAST = {
+    found: true, opponent: 'Subiaco-Floreat', meetings: 5, wins: 3, losses: 1, draws: 0, ties: 1, no_result: 0,
+    form: ['W', 'W', 'L', 'T', 'W'],
+    recent: [
+      { played_at: '2026-11-15', grade_name: 'A Grade', home_away: 'HOME', outcome: 'W' },
+      { played_at: '2026-11-08', grade_name: 'B Grade', home_away: 'HOME', outcome: 'W' },
+      { played_at: '2026-10-18', grade_name: 'A Grade', home_away: 'AWAY', outcome: 'L' },
+      { played_at: '2026-09-18', grade_name: 'A Grade', home_away: 'HOME', outcome: 'T' },
+      { played_at: '2026-08-19', grade_name: 'A Grade', home_away: 'HOME', outcome: 'W' },
+    ],
+  }
+  const NONE = { found: false, opponent: 'Nobody CC', meetings: 0, wins: 0, losses: 0, draws: 0, ties: 0, no_result: 0, form: [], recent: [], reason: 'no past games against that club' }
+  const ctx = await browser.newContext({ viewport: { width: 1600, height: 1000 } })
+  const page = await ctx.newPage()
+  const errors = []
+  const asks = []
+  page.on('pageerror', (e) => errors.push(String(e)))
+  const json = (b) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(b) })
+  await page.route('**/api/**', (route) => {
+    const url = route.request().url()
+    if (/\/admin\/social\/head-to-head/.test(url)) { asks.push(url); return route.fulfill(json(/Nobody/i.test(decodeURIComponent(url)) ? NONE : PAST)) }
+    if (/\/auth\/me/.test(url)) return route.fulfill(json({ id: 'u1', role: 'club_admin', club_slug: 'tcc', entitlements: { modules: ['socials', 'select', 'stats'], status: 'active' } }))
+    if (/\/club-admin\/settings/.test(url)) return route.fulfill(json(CLUB))
+    if (/\/club-admin\/players/.test(url)) return route.fulfill(json(ROSTER))
+    if (/\/images\/players\//.test(url)) return route.fulfill({ status: 200, contentType: 'image/png', body: CUTOUT })
+    if (/social\/media|templates|sponsors|ladders/.test(url)) return route.fulfill(json([]))
+    return route.fulfill(json({}))
+  })
+  await page.goto(`${BASE}/admin/social-post?template=DL1`, { waitUntil: 'domcontentloaded' })
+  await page.getByRole('button', { name: /DOWNLOAD PNG|SLIDES/ }).first().waitFor({ timeout: 25000 }).catch(() => {})
+  await page.waitForTimeout(500)
+  const html = async () => exportBlocks(page)
+  ck('control: with no opponent typed nothing is asked and no strip is drawn', asks.length === 0 && !/data-past-strip/.test(await html()))
+  await press(page.getByRole('button', { name: 'Content', exact: true }))
+  await page.waitForTimeout(200)
+  ck('Content offers the past results switch on a layout that draws them', await seen(page.getByTestId('past-meetings')))
+  await page.getByPlaceholder('Subiaco CC').first().fill('Subiaco-Floreat').catch(() => {})
+  await page.waitForTimeout(1300)
+  ck('typing the opponent asks once it settles, for that club and every grade', asks.length === 1 && /opponent=Subiaco-Floreat/.test(asks[0]) && !/grade=/.test(asks[0]), asks.join(' | '))
+  const h1 = await html()
+  ck('Match Day V draws the last-meetings strip with five results', /data-past-strip/.test(h1) && (h1.match(/>W<|>L<|>T</g) || []).length >= 5)
+  ck('and the record line', /3-1 1 T IN 5 MEETINGS/.test(h1))
+  ck('the panel says what was found and where it came from', /3-1, 1 tied in 5 games against Subiaco-Floreat/.test(await textOf(page.getByTestId('past-status'))), await textOf(page.getByTestId('past-status')))
+  await press(page.getByTestId('past-on'))
+  await page.waitForTimeout(300)
+  ck('switching it off takes the strip off the post', !/data-past-strip/.test(await html()))
+  await press(page.getByTestId('past-on'))
+  await page.getByPlaceholder('Subiaco CC').first().fill('Nobody CC').catch(() => {})
+  await page.waitForTimeout(1300)
+  ck('an opponent never played draws nothing and says so', !/data-past-strip/.test(await html()) && /No past games against Nobody CC/.test(await textOf(page.getByTestId('past-status'))))
+  // Other layouts take the same strip.
+  for (const id of ['DL2', 'DL8', 'DL20', 'DL3', 'DL19', 'DL16']) {
+    await page.getByPlaceholder('Subiaco CC').first().fill('Subiaco-Floreat').catch(() => {})
+    await page.goto(`${BASE}/admin/social-post?template=${id}`, { waitUntil: 'domcontentloaded' }).catch(() => {})
+    await page.getByRole('button', { name: /DOWNLOAD PNG|SLIDES/ }).first().waitFor({ timeout: 25000 }).catch(() => {})
+    await press(page.getByRole('button', { name: 'Content', exact: true }))
+    await page.getByPlaceholder('Subiaco CC').first().fill('Subiaco-Floreat').catch(() => {})
+    await page.waitForTimeout(1300)
+    ck(`${id} draws the last-meetings strip`, /data-past-strip/.test(await html()))
+  }
+  ck('no page errors through past results', errors.length === 0, errors.slice(0, 2).join(' | '))
   await ctx.close()
 }
 

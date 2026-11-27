@@ -48,6 +48,8 @@ import StandingsControls from '../../components/admin/socialpost/StandingsContro
 import { SignedStamp, QuoteCard, Birthday, SquadUpdate, Countdown, StatHero, CoinToss, BigNumber, TheOval, SplitFinal, NumberedList, DESIGN_PANEL_ALIAS_2 } from '../../social/design-templates-2'
 // Which built-in layout's Content panel (and props) each design layout shares.
 const DESIGN_ALIAS = { ...DESIGN_PANEL_ALIAS, ...DESIGN_PANEL_ALIAS_2 }
+// The design layouts that can show our past results against the one opponent.
+const PAST_TEMPLATES = ['DL1', 'DL2', 'DL8', 'DL9', 'DL20', 'DL3', 'DL19', 'DL16', 'DL22']
 import { MilestoneCards, MilestoneBoard, MILESTONE_MAX } from '../../social/milestone-templates'
 import { ReviewWrap, ReviewPerformers, ReviewPlayer, ReviewMatch, ReviewResults, ReviewLeaders, ReviewMilestones, ReviewLadder, ReviewFixtures } from '../../social/round-review-templates'
 import { reviewPost } from '../../social/roundReviewPost'
@@ -1962,6 +1964,13 @@ export default function AdminSocialPost() {
   const [leaderRows, setLeaderRows] = useState({ key: '', status: 'idle', rows: [] })
   const [clubSeasons, setClubSeasons] = useState(null)
   const patchStandings = (p) => setStandingsPick((cur) => ({ ...cur, ...p }))
+  // Past results against the opponent: shown by default, the grade filter off.
+  const [pastOpts, setPastOpts] = useState(() => {
+    try { const v = JSON.parse(localStorage.getItem('bs_social_past') || 'null'); if (v && typeof v === 'object') return { on: v.on !== false, gradeOnly: !!v.gradeOnly } } catch { /* private window */ }
+    return { on: true, gradeOnly: false }
+  })
+  useEffect(() => { try { localStorage.setItem('bs_social_past', JSON.stringify(pastOpts)) } catch { /* private window */ } }, [pastOpts])
+  const [pastRec, setPastRec] = useState({ key: '', status: 'idle', data: null })
   // A photo look for the pictures a built-in layout draws (its cut-outs, the
   // Hero Image upload, the player of the match). Set in Effects with nothing
   // selected; saved with a template. null means the photos are left alone.
@@ -3686,6 +3695,28 @@ export default function AdminSocialPost() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, settings])
+  // Which opponent and grade the past results are for: the ladder pick on Head
+  // to Head, the post's own opponent everywhere else.
+  const pastOpp = templateId === 'DL22' ? (standingsPick.opp || '') : (opponent.name || '')
+  const pastGrade = !pastOpts.gradeOnly ? ''
+    : templateId === 'DL22' ? ((ladders && Array.isArray(ladders.teams) ? ladders.teams.find((t) => t.team_id === standingsPick.teamKey) : null)?.grade_name || '')
+      : (activeTab === 'result' && result.grade) ? result.grade : (match.competition && match.competition !== 'COMPETITION' ? match.competition : '')
+  const pastKey = PAST_TEMPLATES.includes(templateId) && pastOpts.on && !IS_AFL && settings && settings.workspace_kind !== 'association' && pastOpp.trim()
+    ? `${pastOpp.trim().toLowerCase()}|${pastGrade.toLowerCase()}` : ''
+  useEffect(() => {
+    if (!pastKey || pastRec.key === pastKey) return undefined
+    let live = true
+    // Typing an opponent name fires a change per key; ask once it settles.
+    const t = setTimeout(() => {
+      setPastRec({ key: pastKey, status: 'loading', data: null })
+      api.getSocialHeadToHead(pastOpp.trim(), pastGrade)
+        .then((d) => { if (live) setPastRec({ key: pastKey, status: 'ok', data: d || null }) })
+        .catch(() => { if (live) setPastRec({ key: pastKey, status: 'error', data: null }) })
+    }, 450)
+    return () => { live = false; clearTimeout(t) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pastKey])
+  const pastData = pastKey && pastRec.key === pastKey && pastRec.status === 'ok' ? pastRec.data : null
   const leaderKey = activeTab === 'standings' && settings?.id && standingsPick.leaderSeason !== null
     ? `${standingsPick.leaderKind}|${standingsPick.leaderSeason}|${standingsPick.leaderGrade}` : ''
   useEffect(() => {
@@ -4199,6 +4230,10 @@ export default function AdminSocialPost() {
         })).filter((r) => r.name && r.value !== '' && r.value !== '0') : [],
       },
     }
+  }
+  if (PAST_TEMPLATES.includes(templateId) && pastData) {
+    extraProps.past = pastData
+    if (extraProps.standings) extraProps.standings = { ...extraProps.standings, past: pastData }
   }
   if (templateId === 'DL9') extraProps.heroes = collagePlayers.filter((p) => !collage.off.includes(String(p._id))).slice(0, COLLAGE_MAX)
   const matchData = {
@@ -7060,6 +7095,29 @@ export default function AdminSocialPost() {
                   {!heroImage.blobUrl && <p className="text-[11px] text-pb-faintest">Without a photo the cover sits on a dark ground. Add the match photo the whole carousel opens with.</p>}
                   <HeroFocusControl src={heroImage.blobUrl || null} value={highlightsFocus} onChange={setHighlightsFocus} defaults={HIGHLIGHTS_FOCUS} aspect={W / H} />
                 </div>
+              </section>
+            )}
+
+            {/* Past results against the opponent, on the layouts that draw them */}
+            {PAST_TEMPLATES.includes(templateId) && !IS_AFL && !isAssoc && (
+              <section className="pb-card p-4" data-testid="past-meetings">
+                <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Past results against them</h2>
+                <label className="flex items-center gap-2 text-[12px] text-pb-text mb-1.5">
+                  <input type="checkbox" checked={pastOpts.on} data-testid="past-on" onChange={(e) => setPastOpts((o) => ({ ...o, on: e.target.checked }))} />
+                  Show our record and last five results {templateId === 'DL22' ? 'under the ladder comparison' : 'on the post'}
+                </label>
+                <label className="flex items-center gap-2 text-[12px] text-pb-text mb-2">
+                  <input type="checkbox" checked={pastOpts.gradeOnly} disabled={!pastOpts.on} data-testid="past-grade" onChange={(e) => setPastOpts((o) => ({ ...o, gradeOnly: e.target.checked }))} />
+                  Only games in {pastGrade || (templateId === 'DL22' ? 'this team’s grade' : 'this grade (set it in Match Info)')}
+                </label>
+                <p className="text-[11px] text-pb-dim leading-snug" data-testid="past-status">
+                  {!pastOpts.on ? 'Off: the post shows no past results.'
+                    : !pastOpp.trim() ? (templateId === 'DL22' ? 'Pick the opponent from the ladder in Data.' : 'Type the opponent in Opponent to look up your games against them.')
+                      : pastRec.status === 'loading' || pastRec.key !== pastKey ? `Looking up your games against ${pastOpp}…`
+                        : pastRec.status === 'error' ? 'Your past results could not be read just now.'
+                          : pastData && pastData.found && pastData.meetings > 0 ? `${pastData.wins}-${pastData.losses}${pastData.draws ? `, ${pastData.draws} drawn` : ''}${pastData.ties ? `, ${pastData.ties} tied` : ''} in ${pastData.meetings} game${pastData.meetings === 1 ? '' : 's'} against ${pastData.opponent}${pastGrade ? ` in ${pastGrade}` : ''}, from your club’s results. Shown on the post.`
+                            : `No past games against ${pastOpp}${pastGrade ? ` in ${pastGrade}` : ''} in your club’s results${pastData?.reason === 'no past games' ? '' : ' (or the name fits more than one club: try the full club name)'}. Nothing is shown.`}
+                </p>
               </section>
             )}
 

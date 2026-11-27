@@ -25,6 +25,7 @@ import { usePostLook } from './postLook'
 import FramedImage from './FramedImage'
 import { halftoneDots, grungePaths, burstPaths, rng } from './designFx'
 import { geo, slotOf, joinDot, upper, readable, Paths, resolver, keptLook, FONT, WEIGHT, MONO } from './design-templates'
+import { PastStrip, hasPast } from './pastMeetings'
 
 const Credit = ({ g, ink }) => (
   <div data-layer="Platform credit" style={{ position: 'absolute', right: 30, bottom: g.bottom, pointerEvents: 'none' }}><CreditMark ink={ink} h={Math.round(30 * g.f)} /></div>
@@ -278,7 +279,7 @@ export function StatHero({ width = 1080, height = 1080, team = {}, palette = {},
 StatHero.displayName = 'StatHero'
 
 // ── DL16 Coin Toss ───────────────────────────────────────────────────────────
-export function CoinToss({ width = 1080, height = 1080, team = {}, opponent = {}, match = {}, palette = {}, toss = {}, parts }) {
+export function CoinToss({ width = 1080, height = 1080, team = {}, opponent = {}, match = {}, palette = {}, toss = {}, parts, past }) {
   const texture = usePostLook().texture !== false
   const g = geo(width, height)
   const { f } = g
@@ -308,6 +309,7 @@ export function CoinToss({ width = 1080, height = 1080, team = {}, opponent = {}
         <div style={{ fontSize: Math.round(44 * f), marginTop: 10, color: coinC }}>WON THE TOSS AND WILL {decision}</div>
         <div style={{ fontFamily: MONO, fontSize: Math.round(18 * f), letterSpacing: 2, marginTop: 12, opacity: 0.8 }}>{upper(joinDot(match.competition, match.round, match.venue))}</div>
       </div>
+      <PastStrip past={past} x={48} y={g.slotY - Math.round(48 * f)} w={width - 96} f={f * 0.85} color={ink} />
       <Credit g={g} ink={ink} />
     </Root>
   )
@@ -413,7 +415,7 @@ export function TheOval({ width = 1080, height = 1080, team = {}, palette = {}, 
 TheOval.displayName = 'TheOval'
 
 // ── DL19 Split Final ─────────────────────────────────────────────────────────
-export function SplitFinal({ width = 1080, height = 1080, palette = {}, result: r = {}, parts }) {
+export function SplitFinal({ width = 1080, height = 1080, palette = {}, result: r = {}, parts, past }) {
   const texture = usePostLook().texture !== false
   const g = geo(width, height)
   const { f } = g
@@ -448,6 +450,7 @@ export function SplitFinal({ width = 1080, height = 1080, palette = {}, result: 
       <div data-layer="Ribbon" style={{ position: 'absolute', left: -40, right: -40, top: mid - Math.round(42 * f), height: Math.round(84 * f), background: ribbon, color: inkOn(ribbon), transform: 'rotate(-8.5deg)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 30, fontSize: Math.round(46 * f), letterSpacing: 3 }}>
         <span>{upper(pt(parts, 'dl19Word', 'FULL TIME'))}</span><span style={{ opacity: 0.6 }}>·</span><span style={{ whiteSpace: 'nowrap' }}>{line}</span>
       </div>
+      <PastStrip past={past} x={56} y={g.slotY - Math.round(92 * f)} w={width - 112} f={f * 0.85} color={ink} />
       <div data-layer="Match details" style={{ position: 'absolute', left: 56, right: 56, top: g.slotY - Math.round(48 * f), fontFamily: MONO, fontSize: Math.round(18 * f), letterSpacing: 2, textAlign: 'center', opacity: 0.85 }}>
         {upper(joinDot(r.grade || r.comp, r.round, r.date, r.potm && (r.potm.first || r.potm.last) ? `POTM ${[r.potm.first, r.potm.last].filter(Boolean).join(' ')}` : ''))}
       </div>
@@ -458,7 +461,7 @@ export function SplitFinal({ width = 1080, height = 1080, palette = {}, result: 
 SplitFinal.displayName = 'SplitFinal'
 
 // ── DL20 Numbered List ───────────────────────────────────────────────────────
-export function NumberedList({ width = 1080, height = 1080, team = {}, opponent = {}, match = {}, players = [], palette = {}, featuredId, heroImage, parts }) {
+export function NumberedList({ width = 1080, height = 1080, team = {}, opponent = {}, match = {}, players = [], palette = {}, featuredId, heroImage, parts, past }) {
   const g = geo(width, height)
   const { f } = g
   const ground = pc(parts, 'dl20Ground', palette.primary || '#0b1530')
@@ -468,7 +471,8 @@ export function NumberedList({ width = 1080, height = 1080, team = {}, opponent 
   const hero = featuredOf(players, featuredId)
   const photo = heroImage || heroSrcOf(hero)
   const top = g.top + Math.round(150 * f)
-  const listH = g.slotY - 20 - top
+  const pastH = hasPast(past) ? Math.round(50 * f) : 0
+  const listH = g.slotY - 20 - top - pastH
   const n = Math.max(1, players.length)
   const rowH = Math.min(Math.round(76 * f), Math.floor(listH / n))
   return (
@@ -492,6 +496,7 @@ export function NumberedList({ width = 1080, height = 1080, team = {}, opponent 
         {!players.length && <div style={{ fontFamily: MONO, fontSize: 22, letterSpacing: 2, opacity: 0.8 }}>PICK THE TEAM IN PLAYERS</div>}
       </div>
       <div data-layer="Club logo" style={{ position: 'absolute', right: 40, top: g.top }}><ClubLogo src={team.logo} monogram={team.monogram} color={ink} size={Math.round(80 * f)} shape="shield" /></div>
+      <PastStrip past={past} x={48} y={g.slotY - pastH} w={Math.round(width * 0.62)} f={f * 0.85} color={ink} align="left" />
       <Credit g={g} ink={ink} />
     </Root>
   )
