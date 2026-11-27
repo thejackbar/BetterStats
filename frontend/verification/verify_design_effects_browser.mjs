@@ -1,7 +1,7 @@
 // Drives the real BetterPosts editor in Chromium (API stubbed at the network
 // layer) through the design effects: frames and pop-out, colour splash with the
 // eyedropper, looks, cut-out outline, motion trail, the faded copy, echo and
-// hollow text, textures, the design starters, and the same tools inside an
+// hollow text, textures, the seven design layouts (DL1-DL7), and the same tools inside an
 // Association Socials workspace. Effects are proved on a REAL downloaded PNG,
 // sampled pixel by pixel, because a preview that looks right is not an export
 // that is right.
@@ -37,7 +37,7 @@ const MEDIA = [
 
 const browser = await chromium.launch(existsSync(EXE) ? { executablePath: EXE } : {})
 
-async function openEditor({ settings = CLUB, assoc = false, viewport = { width: 1600, height: 1000 } } = {}) {
+async function openEditor({ settings = CLUB, assoc = false, viewport = { width: 1600, height: 1000 }, query = '?type=blank' } = {}) {
   const ctx = await browser.newContext({ viewport, acceptDownloads: true })
   const page = await ctx.newPage()
   const errors = []
@@ -58,7 +58,7 @@ async function openEditor({ settings = CLUB, assoc = false, viewport = { width: 
     if (/templates|players|sponsors/.test(url)) return route.fulfill(json([]))
     return route.fulfill(json({}))
   })
-  await page.goto(`${BASE}/admin/social-post?type=blank`, { waitUntil: 'domcontentloaded' })
+  await page.goto(`${BASE}/admin/social-post${query}`, { waitUntil: 'domcontentloaded' })
   if (viewport.width < 768) await page.getByRole('button', { name: /full editor/i }).first().waitFor({ timeout: 25000 })
   else await page.getByRole('button', { name: /DOWNLOAD PNG|SLIDES/ }).first().waitFor({ timeout: 25000 })
   await page.waitForTimeout(500)
@@ -256,7 +256,7 @@ const openEffects = async (page) => { await tool(page, 'Effects'); await page.wa
   await ctx.close()
 }
 
-// ── 4. Textures and the design starters ─────────────────────────────────────
+// ── 4. Textures ─────────────────────────────────────
 {
   const { ctx, page, errors } = await openEditor()
   await clearCanvas(page)
@@ -273,22 +273,52 @@ const openEffects = async (page) => { await tool(page, 'Effects'); await page.wa
   ck('Shuffle draws a new brush stroke', d1.length > 100 && d1 !== d0)
   const px = await exportPixels(page, [[540, 530]])
   ck('PNG: the brush stroke is painted in the accent colour', near(px.px[0], [255, 194, 51], 50), JSON.stringify(px.px[0]))
-  // Starter
-  await press(page.locator('nav button[title="Layers"]'))
-  await page.keyboard.press('Escape')
-  await page.locator('[data-testid="layer-row-block"]').first().click().catch(() => {})
-  await openEffects(page)
-  // Deselect (a press on the empty canvas) so the panel shows the starters.
-  const cv = await page.locator('div[style*="scale("]').first().boundingBox().catch(() => null)
-  if (cv) await page.mouse.click(cv.x + 6, cv.y + 6)
-  await page.waitForTimeout(150)
-  const starter = page.getByTestId('starter-matchday')
-  ck('the Effects panel offers the design starters when nothing is selected', await seen(starter))
-  await press(starter)
-  await page.waitForTimeout(300)
+  ck('no page errors through textures', errors.length === 0, errors.slice(0, 2).join(' | '))
+  await ctx.close()
+}
+
+// ── 4b. The design layouts, one per post type ──────────────────────────────
+const LAYOUTS = [
+  ['DL1', 'Match Day V', 'Our frame'], ['DL2', 'Gameday Echo', 'Echo word'], ['DL3', 'Final Score V', 'Opposition side'],
+  ['DL4', 'Fixtures Echo', 'Rows'], ['DL5', 'Results Echo', 'Rows'], ['DL6', 'Colour Pop', 'Torn strip'], ['DL7', 'Colour Pop', 'Torn strip'],
+]
+async function openLayout(id, opts = {}) {
+  const o = await openEditor({ ...opts, query: `?template=${id}` })
+  return o
+}
+for (const [id, name, layer] of LAYOUTS) {
+  const { ctx, page, errors } = await openLayout(id)
   const html = await exportBlocks(page)
-  ck('the Match day starter adds two framed photo slots', (html.match(/polygon\(0\.00% 0\.000%, 100\.00% 0\.000%, 100\.00% 74\.000%/g) || []).length >= 2 || (html.match(/clip-path: polygon/g) || []).length >= 2)
-  ck('no page errors through textures and starters', errors.length === 0, errors.slice(0, 2).join(' | '))
+  ck(`${id} ${name} opens from its link and draws its own parts`, html.includes(`data-layer="${layer}"`) && html.includes('data-layer="Platform credit"'))
+  await press(page.getByRole('button', { name: 'Design', exact: true }))
+  await page.waitForTimeout(150)
+  const tile = page.getByRole('button', { name: new RegExp(`^${id}\\s*${name}`) })
+  ck(`${id} is listed by name in its post type's layouts`, await seen(tile))
+  // Clicking another layout and back proves the tile really selects it.
+  await press(tile)
+  for (const size of ['Portrait', 'Story']) {
+    await press(page.getByRole('button', { name: 'Design', exact: true }))
+    await press(page.getByRole('button', { name: new RegExp(`^${size}`) }))
+    await page.waitForTimeout(200)
+  }
+  const tall = await exportBlocks(page)
+  ck(`${id} still draws at story size`, tall.includes(`data-layer="${layer}"`))
+  ck(`${id}: no page errors at three sizes`, errors.length === 0, errors.slice(0, 2).join(' | '))
+  await ctx.close()
+}
+{
+  // Match Day V on a square post with no players: the V frames are cut, so the
+  // bottom corner of our frame is the background and its top is the accent.
+  const { ctx, page } = await openLayout('DL1')
+  const px = await exportPixels(page, [[70, 262], [52, 872]])
+  ck('PNG: Match Day V paints our frame in the accent', near(px.px[0], [255, 194, 51], 40), JSON.stringify(px.px[0]))
+  ck('PNG: and cuts its bottom corner into a V', !near(px.px[1], [255, 194, 51], 60), JSON.stringify(px.px[1]))
+  await ctx.close()
+}
+{
+  const { ctx, page, errors } = await openLayout('DL1', { settings: WORKSPACE, assoc: true })
+  ck('workspace: Match Day V opens in an Association workspace', (await exportBlocks(page)).includes('data-layer="Our frame"'))
+  ck('workspace: no page errors on the design layout', errors.length === 0, errors.slice(0, 2).join(' | '))
   await ctx.close()
 }
 

@@ -6,20 +6,19 @@
 //       glow, shadow, motion trail, opacity, blend, a faded copy behind
 //   text   hollow, outline, shadow, 3D block, echo stack, slant, put behind a photo
 //   texture (brush, splatter, …)  shuffle, density, opacity, blend
-//   nothing selected   the design starters, added on top of the post
+//   nothing selected   where the design layouts are
 //
 // Every control writes plain settings onto the block (see social/designFx.js);
 // nothing is baked, so any effect can be changed or taken off later.
 import { useEffect, useRef, useState } from 'react'
 import { FRAMES, framePoints, LOOKS, newSeed, toHex } from '../../../../social/designFx'
-import { BLANK_STARTERS, TEXTURE_SHAPES, resolveBlankColor } from '../../../../social/blank-template'
+import { TEXTURE_SHAPES, resolveBlankColor } from '../../../../social/blank-template'
 
 const TOKENS = ['primary', 'secondary', 'accent', 'ink', 'white', 'black']
 const BLENDS = [
   ['normal', 'Normal'], ['multiply', 'Multiply'], ['screen', 'Screen'], ['overlay', 'Overlay'],
   ['soft-light', 'Soft light'], ['lighten', 'Lighten'], ['darken', 'Darken'], ['luminosity', 'Luminosity'],
 ]
-const DESIGN_STARTERS = ['matchday', 'gameday', 'colourpop']
 
 const Label = ({ children }) => <span className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faint">{children}</span>
 
@@ -368,26 +367,14 @@ function TextureEffects({ item, patch }) {
   )
 }
 
-export default function EffectsPanel({ item, selCount = 0, palette, onPatch, previewSrc, onGhost, onTextBehind, canBehind, onAddStarter }) {
+export default function EffectsPanel({ item, selCount = 0, palette, onPatch, previewSrc, onGhost, onTextBehind, canBehind }) {
   const isPicture = item && (item.type === 'image' || (item.type === 'data' && item.kind === 'playerphoto')) && !item.design
   return (
     <div data-testid="effects-panel" className="flex flex-col">
       {!item && (
-        <>
-          <p className="text-[11px] text-pb-dim leading-relaxed mb-3">
-            {selCount > 1 ? 'Select one thing at a time to give it effects.' : 'Select a photo, some text or a texture on the canvas to style it. Or start from a design:'}
-          </p>
-          {selCount <= 1 && (
-            <div className="grid grid-cols-1 gap-1.5">
-              {BLANK_STARTERS.filter((s) => DESIGN_STARTERS.includes(s.key)).map((s) => (
-                <button key={s.key} data-testid={`starter-${s.key}`} onClick={() => onAddStarter(s.key)}
-                  className="h-10 px-3 rounded-md border pb-hairline2 bg-pb-surface2 text-left text-[12px] text-pb-text hover:border-pb-accent">
-                  {s.name} <span className="text-pb-faint text-[10px]">· adds its blocks on top</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </>
+        <p className="text-[11px] text-pb-dim leading-relaxed mb-3" data-testid="effects-empty">
+          {selCount > 1 ? 'Select one thing at a time to give it effects.' : 'Select a photo, some text or a texture on the canvas to style it. The ready-made design layouts (Match Day V, Gameday Echo, Final Score V, Fixtures Echo, Results Echo, Colour Pop) are in each post type\'s layout list.'}
+        </p>
       )}
       {isPicture && <PictureEffects item={item} patch={onPatch} palette={palette} previewSrc={previewSrc} onGhost={onGhost} />}
       {item && item.type === 'text' && <TextEffects item={item} patch={onPatch} palette={palette} onTextBehind={onTextBehind} canBehind={canBehind} />}

@@ -42,6 +42,7 @@ import { ResultsCards } from '../../social/results-cards-template'
 import { RoundCover } from '../../social/round-cover-template'
 import { ResultHighlights, HIGHLIGHTS_FOCUS } from '../../social/highlights-cover-template'
 import { GiantType } from '../../social/giant-type-template'
+import { MatchDayV, GamedayEcho, FinalScoreV, FixturesEcho, ResultsEcho, ColourPopSpotlight, ColourPopAnnounce, DESIGN_PANEL_ALIAS } from '../../social/design-templates'
 import { MilestoneCards, MilestoneBoard, MILESTONE_MAX } from '../../social/milestone-templates'
 import { ReviewWrap, ReviewPerformers, ReviewPlayer, ReviewMatch, ReviewResults, ReviewLeaders, ReviewMilestones, ReviewLadder, ReviewFixtures } from '../../social/round-review-templates'
 import { reviewPost } from '../../social/roundReviewPost'
@@ -59,7 +60,7 @@ import { NO_WINNER_KINDS, noWinnerLine, noWinnerWord, detectNoWinner } from '../
 import { SocialBackground, SocialBackgroundDefs, SOCIAL_BACKGROUNDS, GRADIENT_ANGLES, LINED_BACKGROUNDS, DEFAULT_COLORS as BG_DEFAULT_COLORS } from '../../social/SocialBackgrounds'
 import { EVENT_TEMPLATES, EVENT_PRESETS, DEFAULT_EVENT, resolveMotif, eventPaletteFor, prepareEventList, defaultEventList } from '../../social/event-templates'
 import EventPostEditor from '../../components/admin/EventPostEditor'
-import { BlankCanvas, newBlankItem, defaultBlankItems, withDesign, starterItems, itemBBox, headshotUrl } from '../../social/blank-template'
+import { BlankCanvas, newBlankItem, defaultBlankItems, withDesign, itemBBox, headshotUrl } from '../../social/blank-template'
 import { resolveBind } from '../../social/boundResolve'
 import { parseTemplateFile, itemsFromTemplate, templateWarnings, boundSlotCount } from '../../social/boundFields'
 import { CustomLayout, CUSTOM_LAYOUT_ID, CUSTOM_LAYOUTS, CUSTOM_LAYOUT_IDS, CUSTOM_PANEL_ALIAS, isCustomLayout } from '../../social/custom-layout'
@@ -108,10 +109,15 @@ const ALL_TEMPLATES = [
   { id: 'T8', name: 'Mosaic',          component: T8_Mosaic,          desc: 'Asymmetric photo mosaic',         maxPlayers: LINEUP_MAX },
   { id: 'T9', name: 'Flyer',           component: T9_Flyer,           desc: 'Festival poster style',           maxPlayers: LINEUP_MAX },
   { id: 'T10', name: 'Team Sheet',     component: T10_TeamSheet,      desc: 'Full-bleed photo + torn strip',   maxPlayers: LINEUP_MAX },
+  // Design layouts (design-templates.jsx): frames, echo type and colour splash.
+  { id: 'DL1', name: 'Match Day V',    component: MatchDayV,          desc: 'Cut-out and opposition crest in V frames, XI below', maxPlayers: LINEUP_MAX },
+  { id: 'DL2', name: 'Gameday Echo',   component: GamedayEcho,        desc: 'Stacked GAMEDAY behind an outlined cut-out', maxPlayers: LINEUP_MAX },
   { id: 'C1', name: 'Announcement',    component: C1_CaptainAnnounce, desc: 'Captain / debut / award',         maxPlayers: 1 },
   { id: 'C5', name: 'Giant Type',      component: GiantType,          desc: 'FIRST XI / 100 / 5FA behind the player', maxPlayers: 1 },
   { id: 'C2', name: 'Toss',            component: C2_TossWon,         desc: 'Toss result post',                maxPlayers: 0 },
   { id: 'C3', name: 'Player Spotlight',component: C3_ManOfMatch,      desc: 'Man of match / player stats',     maxPlayers: 1 },
+  { id: 'DL6', name: 'Colour Pop',     component: ColourPopSpotlight, desc: 'Black and white photo, kit colour kept, torn strip', maxPlayers: 1 },
+  { id: 'DL7', name: 'Colour Pop',     component: ColourPopAnnounce,  desc: 'Black and white photo, kit colour kept, torn strip', maxPlayers: 1 },
   { id: 'C4', name: 'Result · Classic', component: C4_FinalScore,     desc: 'Result + top performers', maxPlayers: 0 },
   // Single-match result layouts (fold into the Final Score tab alongside C4).
   { id: 'RS1', name: 'Margin Hero',    component: ResultMarginHero,   desc: 'Big WIN headline + margin',       maxPlayers: 0, kind: 'singleresult' },
@@ -123,6 +129,7 @@ const ALL_TEMPLATES = [
   { id: 'RS9', name: 'Match Summary', component: ResultSummary,     desc: 'Score bar per side with batters and the bowlers they faced', maxPlayers: 0, kind: 'singleresult' },
   { id: 'RS7', name: 'Glass Card',     component: ResultGlass,        desc: 'Your photo, glass scorecards, six positions', maxPlayers: 0, kind: 'singleresult' },
   { id: 'RS8', name: 'Highlights Cover', component: ResultHighlights, desc: 'Full-bleed photo, title and one score card', maxPlayers: 0, kind: 'singleresult' },
+  { id: 'DL3', name: 'Final Score V',  component: FinalScoreV,        desc: 'Both crests in V frames, winner lit', maxPlayers: 0, kind: 'singleresult' },
   // Fixtures roundup — one post, all grades.
   { id: 'FX1', name: 'List',           component: FixtureList,        desc: 'Clean factual rows',              maxPlayers: 0, kind: 'fixtures' },
   { id: 'FX2', name: 'Match-day Hype', component: FixtureHype,        desc: 'Diagonal poster',                 maxPlayers: 0, kind: 'fixtures' },
@@ -130,6 +137,7 @@ const ALL_TEMPLATES = [
   { id: 'FX4', name: 'Board',          component: FixtureBoard,       desc: 'Departure-board table',           maxPlayers: 0, kind: 'fixtures' },
   { id: 'FX5', name: 'Headline',       component: FixtureHeadline,    desc: 'Feature match + also-on',         maxPlayers: 0, kind: 'fixtures' },
   { id: 'FX6', name: 'Schedule',       component: FixtureSchedule,    desc: 'Match-day timeline',              maxPlayers: 0, kind: 'fixtures' },
+  { id: 'DL4', name: 'Fixtures Echo',  component: FixturesEcho,       desc: 'Stacked heading, torn paper strips', maxPlayers: 0, kind: 'fixtures' },
   // Results roundup — one post, all grades, win/loss coded.
   { id: 'RR1', name: 'Weekend Wrap',   component: ResultsList,        desc: 'Win/loss list',                   maxPlayers: 0, kind: 'results' },
   { id: 'RR7', name: 'Wrap + Leaders', component: ResultsListLeaders, desc: 'Win/loss list + our top scorers & wicket takers', maxPlayers: 0, kind: 'results', hasLeaders: true },
@@ -139,6 +147,7 @@ const ALL_TEMPLATES = [
   { id: 'RR5', name: 'Board',          component: ResultsBoard,       desc: 'Results table',                   maxPlayers: 0, kind: 'results' },
   { id: 'RR6', name: 'Win/Loss Split', component: ResultsSplit,       desc: 'Wins vs losses columns',          maxPlayers: 0, kind: 'results' },
   { id: 'RR8', name: 'Match Cards',    component: ResultsCards,       desc: 'Your photo, one card per match, live chases and results', maxPlayers: 0, kind: 'results', hasLeaders: true, hasInnings: true },
+  { id: 'DL5', name: 'Results Echo',   component: ResultsEcho,        desc: 'Stacked heading, torn paper strips, win or loss tag', maxPlayers: 0, kind: 'results' },
   // Team of the week — the round's best performers across every grade, 6 to 14 of them.
   { id: 'TW1', name: 'Team Sheet',     component: TeamOfWeekGrid,     desc: 'Photo cards, any team size',      maxPlayers: TOTW_MAX, kind: 'totw' },
   { id: 'TW2', name: 'Ranked Board',   component: TeamOfWeekBoard,    desc: 'One row per player, best first',  maxPlayers: TOTW_MAX, kind: 'totw' },
@@ -176,7 +185,7 @@ const ALL_TEMPLATES = [
 // The football build drops the layouts that only mean anything with cricket
 // data: the batting order, the results wrap's batting/bowling leaders, and
 // every layout of the three hidden post types (toss, scorecard, final score).
-const AFL_HIDDEN_TEMPLATES = new Set([...CUSTOM_LAYOUT_IDS, 'T4', 'T11', 'T12', 'T13', 'C5', 'RR7', 'RR8', 'C2', 'C4', 'RS1', 'RS2', 'RS3', 'RS4', 'RS5', 'RS6', 'RS7', 'RS8', 'RS9', 'SC1', 'SC2', 'SC3', 'TW1', 'TW2', 'TW3', 'MS1', 'MS2', 'RV1', 'RV2', 'RV3', 'RV4', 'RV5', 'RV6', 'RV7', 'RV8', 'RV9'])
+const AFL_HIDDEN_TEMPLATES = new Set([...CUSTOM_LAYOUT_IDS, 'DL3', 'T4', 'T11', 'T12', 'T13', 'C5', 'RR7', 'RR8', 'C2', 'C4', 'RS1', 'RS2', 'RS3', 'RS4', 'RS5', 'RS6', 'RS7', 'RS8', 'RS9', 'SC1', 'SC2', 'SC3', 'TW1', 'TW2', 'TW3', 'MS1', 'MS2', 'RV1', 'RV2', 'RV3', 'RV4', 'RV5', 'RV6', 'RV7', 'RV8', 'RV9'])
 const TEMPLATES = IS_AFL ? ALL_TEMPLATES.filter(t => !AFL_HIDDEN_TEMPLATES.has(t.id)) : ALL_TEMPLATES
 
 // The lineup templates that crop the hero photo into a fixed box, and the shape
@@ -187,12 +196,12 @@ const HERO_CROP_ASPECT = { T1: 480 / 845, T3: 380 / 1080, T10: 720 / 1080, T13: 
 const HERO_FOCUS_TEMPLATES = Object.keys(HERO_CROP_ASPECT)
 // The layouts drawn around a hero photo. Derived from the same id list the Hero
 // Image panel is gated on, so the two can't drift apart.
-const HERO_SLOT_TEMPLATES = ['T1', 'T3', 'T6', 'T7', 'T10', 'T11', 'T13', 'C1', 'C3', 'C5', CUSTOM_LAYOUTS.lineup, CUSTOM_LAYOUTS.result, CUSTOM_LAYOUTS.motm, CUSTOM_LAYOUTS.announcement]
+const HERO_SLOT_TEMPLATES = ['T1', 'T3', 'T6', 'T7', 'T10', 'T11', 'T13', 'C1', 'C3', 'C5', 'DL1', 'DL2', 'DL6', 'DL7', CUSTOM_LAYOUTS.lineup, CUSTOM_LAYOUTS.result, CUSTOM_LAYOUTS.motm, CUSTOM_LAYOUTS.announcement]
 // The lineups that can mark which listed player is the one in the photo, and
 // the ones whose Hero Player picker names that player. T7 and the announcement
 // layouts have a single player, so there is no list to mark.
 const HERO_MARK_TEMPLATES = ['T1', 'T3', 'T10', 'T11']
-const HERO_PLAYER_TEMPLATES = ['T1', 'T3', 'T6', 'T10', 'T11', CUSTOM_LAYOUT_ID]
+const HERO_PLAYER_TEMPLATES = ['T1', 'T3', 'T6', 'T10', 'T11', 'DL1', 'DL2', CUSTOM_LAYOUT_ID]
 // The lineups that draw a DEBUT tag beside a flagged player. The flag is kept
 // on the player either way, so switching layout never loses it.
 const DEBUT_TEMPLATES = ['T1', 'T3', 'T10', 'T11', 'T12']
@@ -208,6 +217,7 @@ const matchDayIso = (v) => (/^\d{4}-\d{2}-\d{2}/.test(String(v || '')) ? String(
 const TAB_MAP = {
   T1: 'lineup', T2: 'lineup', T3: 'lineup', T4: 'lineup', T5: 'lineup',
   T6: 'lineup', T7: 'lineup', T8: 'lineup', T9: 'lineup', T10: 'lineup', T11: 'lineup', T12: 'lineup', T13: 'lineup',
+  DL1: 'lineup', DL2: 'lineup', DL3: 'result', DL4: 'fixtures', DL5: 'results', DL6: 'motm', DL7: 'announcement',
   ...Object.fromEntries(Object.entries(CUSTOM_LAYOUTS).map(([type, id]) => [id, type])),
   FX1: 'fixtures', FX2: 'fixtures', FX3: 'fixtures', FX4: 'fixtures', FX5: 'fixtures', FX6: 'fixtures',
   C1: 'announcement', C5: 'announcement', C2: 'toss', C3: 'motm',
@@ -476,7 +486,7 @@ function readEventDraft() {
 // prints the Competition except Round Cover and Giant Type (a round number and a
 // figure are their headlines). A field the open layout ignores says so on screen.
 const HEADLINE_TEMPLATES = ['T1', 'T2', 'T3', 'T5', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', ...CUSTOM_LAYOUT_IDS]
-const NO_COMPETITION_TEMPLATES = ['T13', 'C5', 'RR8']
+const NO_COMPETITION_TEMPLATES = ['T13', 'C5', 'RR8', 'DL3', 'DL6', 'DL7']
 const ROLE_OPTIONS = IS_AFL ? ['', 'FB', 'HB', 'C', 'W', 'MID', 'RUCK', 'HF', 'FF', 'UTIL'] : ['BAT', 'BOWL', 'AR', 'WK']
 const ROLE_LONG = IS_AFL
   ? { FB: 'Full Back', HB: 'Half Back', C: 'Centre', W: 'Wing', MID: 'Midfield', RUCK: 'Ruck', HF: 'Half Forward', FF: 'Full Forward', UTIL: 'Utility' }
@@ -3681,7 +3691,7 @@ export default function AdminSocialPost() {
   const nameFormat = settings?.player_name_format || 'last_first'
   const tmpl = TEMPLATES.find(t => t.id === templateId) || TEMPLATES[0]
   // The Content panel the open layout shares with its type's built-in layouts (an imported toss uses the toss panel).
-  const panelId = CUSTOM_PANEL_ALIAS[templateId] || templateId
+  const panelId = CUSTOM_PANEL_ALIAS[templateId] || DESIGN_PANEL_ALIAS[templateId] || templateId
   const isScorecard = !!(tmpl.isScorecard)
   const TemplateComponent = tmpl.component
   // Scorecard split into 2 square Instagram posts (batted-first team, then
@@ -3809,11 +3819,6 @@ export default function AdminSocialPost() {
     if (!pid) return
     hMoveBefore(textId, pid)
   }
-  const hAddStarter = (key) => {
-    if (!isBlankTab && !customOn) setCustomEdit(true)
-    record('Add design')
-    layer.addMany(starterItems(key))
-  }
 
   // Keyboard: delete removes the selection; ⌘/Ctrl-Z undo, ⇧⌘Z redo. Ignored
   // while typing in a field.
@@ -3924,7 +3929,7 @@ export default function AdminSocialPost() {
       player: milestonePlayer ? withHeroSource(playerToTemplatePlayer(milestonePlayer.player, milestonePlayer, nameFormat, swapNames), shotChoice) : undefined,
     }
   }
-  if (templateId === 'C1' || templateId === 'C5') {
+  if (templateId === 'C1' || templateId === 'C5' || templateId === 'DL7') {
     const annPlayer = selectedPlayers[announcement.playerIdx]
     let annTemplatePlayer = annPlayer ? asPicture(playerToTemplatePlayer(annPlayer.player, annPlayer, nameFormat, swapNames), shotChoice) : undefined
     if (annTemplatePlayer && heroMode === 'hero' && heroImage.blobUrl) {
@@ -3936,7 +3941,7 @@ export default function AdminSocialPost() {
     }
   }
   if (templateId === 'C2') extraProps.toss = { winner: toss.winner, decision: toss.decision }
-  if (templateId === 'C3') {
+  if (templateId === 'C3' || templateId === 'DL6') {
     const motmPlayer = selectedPlayers[motm.playerIdx]
     let motmTemplatePlayer = motmPlayer ? asPicture(playerToTemplatePlayer(motmPlayer.player, motmPlayer, nameFormat, swapNames), shotChoice) : undefined
     if (motmTemplatePlayer && heroMode === 'hero' && heroImage.blobUrl) {
@@ -3948,7 +3953,7 @@ export default function AdminSocialPost() {
       summary: motm.summary,
     }
   }
-  if (['T1', 'T3', 'T6', 'T7', 'T10', 'T11', 'T13'].includes(templateId) && heroImage.blobUrl) {
+  if (['T1', 'T3', 'T6', 'T7', 'T10', 'T11', 'T13', 'DL1', 'DL2'].includes(templateId) && heroImage.blobUrl) {
     extraProps.heroImage = heroImage.blobUrl
   }
   // Only the templates that crop a photo into a box can act on a focal point;
@@ -5534,8 +5539,7 @@ export default function AdminSocialPost() {
                   onPatch={(p) => fxItem && hUpdate(fxItem.id, p)} previewSrc={previewSrc}
                   onGhost={() => fxItem && hGhost(fxItem.id)}
                   onTextBehind={() => fxItem && hTextBehind(fxItem.id)}
-                  canBehind={!!(fxItem && fxItem.type === 'text' && pictureUnder(fxItem.id))}
-                  onAddStarter={hAddStarter} />
+                  canBehind={!!(fxItem && fxItem.type === 'text' && pictureUnder(fxItem.id))} />
               )
             })()}
             {tool === 'data' && <ClubDataPanel onAdd={addBlock} />}

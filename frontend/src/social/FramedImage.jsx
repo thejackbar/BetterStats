@@ -71,7 +71,7 @@ export default function FramedImage({ item, src, resolve, placeholder = null, de
   const img = (u, extra = null) => (
     <img src={u} alt="" draggable={false} style={{
       position: 'absolute', left: 0, top: 0, width: '100%', height: '100%',
-      objectFit: item.fit || defaultFit, display: 'block', pointerEvents: 'none',
+      objectFit: item.fit || defaultFit, objectPosition: item.objPos || undefined, display: 'block', pointerEvents: 'none',
       transform: z !== 1 || cx || cy ? `translate(${cx}px, ${cy}px) scale(${z})` : undefined,
       transformOrigin: 'center center',
       ...extra,

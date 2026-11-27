@@ -9,7 +9,7 @@
 // "does this layout hold up at 4:5" is a question only a picture answers — the
 // geometry checks in verify_post_designer_browser.mjs all passed on a version
 // whose letterbox bands were the wrong colour.
-import { existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { chromium } from 'playwright'
 
 const OUT = process.argv[2] || '/tmp/shots'
@@ -49,6 +49,10 @@ const PNG = Buffer.from(
   'base64',
 )
 
+// PHOTO=path/to/cutout.png gives every player that picture instead of the 2×2 dot,
+// for layouts whose look depends on a real cut-out (the DL design layouts).
+const PLAYER_PHOTO = process.env.PHOTO ? readFileSync(process.env.PHOTO) : PNG
+
 const browser = await chromium.launch(existsSync(EXECUTABLE) ? { executablePath: EXECUTABLE } : {})
 // Tall enough that a 1080×1920 story fits the clip — a clip past the bottom of
 // the viewport comes back short, which reads as a broken layout rather than a
@@ -59,7 +63,7 @@ const json = (body) => ({ status: 200, contentType: 'application/json', body: JS
 await ctx.route('**/api/**', async (route) => {
   const url = route.request().url()
   if (/\/social\/media\/[^/]+\/file/.test(url)) return route.fulfill({ status: 200, contentType: 'image/png', body: PNG })
-    if (/\/images\/players\/[^/]+\/photo/.test(url)) return route.fulfill({ status: 200, contentType: 'image/png', body: PNG })
+    if (/\/images\/players\/[^/]+\/photo/.test(url)) return route.fulfill({ status: 200, contentType: 'image/png', body: PLAYER_PHOTO })
   if (/\/auth\/me/.test(url)) return route.fulfill(json({
     id: 'u1', username: 'admin', role: 'club_admin', club_slug: 'applecross',
     entitlements: { modules: ['socials', 'select', 'stats', 'admin', 'iq'], status: 'active' },

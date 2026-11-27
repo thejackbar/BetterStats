@@ -217,7 +217,6 @@ export function groupBBox(list) {
 const starterBrand = (over = {}) => ({ ...newBlankItem('brand'), ...over })
 const starterText = (text, over = {}) => ({ ...newBlankItem('text'), text, ...over })
 const starterEl = (shape, over = {}) => ({ ...newBlankItem('element', { shape }), ...over })
-const starterImg = (over = {}) => ({ ...newBlankItem('image'), ...over })
 
 export const BLANK_STARTERS = [
   { key: 'blank', name: 'Empty', build: () => [starterBrand({ x: 60, y: 56, size: 150 })] },
@@ -252,41 +251,6 @@ export const BLANK_STARTERS = [
       starterText('1ST XI v OPPONENT', { x: 70, y: 470, w: 940, fontSize: 96, color: 'ink' }),
       starterEl('divider', { x: 70, y: 640, w: 940, h: 4, thickness: 4, color: 'ink', opacity: 0.4 }),
       starterText('SAT · 1:00 PM · HOME GROUND', { x: 72, y: 700, w: 900, fontSize: 46, color: 'ink' }),
-    ],
-  },
-  // The design-led starters: framed photos, echo type, textures. The photo
-  // frames start empty so the shapes show; drop a cut-out into each.
-  {
-    key: 'matchday', name: 'Match day v', build: () => [
-      starterEl('burst', { opacity: 0.06 }),
-      starterText('MATCH DAY', { x: 90, y: 56, w: 900, fontSize: 132, color: 'ink', align: 'center' }),
-      starterImg({ x: 60, y: 250, w: 460, h: 600, mask: 'vbottom', frameFill: 'accent', popOut: 0.14, fit: 'contain' }),
-      starterImg({ x: 560, y: 250, w: 460, h: 600, mask: 'vbottom', frameFill: 'white', popOut: 0.14, fit: 'contain' }),
-      starterText('HOME', { x: 60, y: 690, w: 460, fontSize: 64, color: 'black', align: 'center' }),
-      starterText('AWAY', { x: 560, y: 690, w: 460, fontSize: 64, color: 'black', align: 'center' }),
-      starterText('V', { x: 480, y: 470, w: 120, fontSize: 120, color: 'ink', align: 'center', extrude: { depth: 10, angle: 45, color: 'black' } }),
-      starterText('SAT 1:00 PM · HOME GROUND', { x: 90, y: 930, w: 900, fontSize: 44, color: 'accent', align: 'center' }),
-      starterBrand({ x: 60, y: 940, size: 90, showName: false }),
-    ],
-  },
-  {
-    key: 'gameday', name: 'Gameday echo', build: () => [
-      starterEl('speed', { opacity: 0.18 }),
-      starterText('GAMEDAY', { x: 40, y: 120, w: 1000, fontSize: 200, color: 'accent', align: 'center', echo: { count: 5, step: 0.78, filled: 'first', fade: true } }),
-      starterEl('brush', { x: 40, y: 700, w: 1000, h: 260, color: 'accent', rotation: -5 }),
-      starterImg({ x: 250, y: 150, w: 580, h: 860, fit: 'contain', fx: { outline: { width: 6, color: 'white' }, shadow: { x: 0, y: 18, blur: 30, opacity: 55 } } }),
-      starterText('SATURDAY · 1:00 PM', { x: 70, y: 900, w: 940, fontSize: 56, color: 'black', align: 'center', skew: 8 }),
-      starterBrand({ x: 60, y: 50, size: 120, showName: false }),
-    ],
-  },
-  {
-    key: 'colourpop', name: 'Colour pop poster', build: () => [
-      starterImg({ x: 0, y: 0, w: 1080, h: 1080, fit: 'cover', fx: { tone: 'mono', splash: [{ color: 'primary', range: 26, soft: 16 }], splashStrength: 100, contrast: 14 } }),
-      starterEl('grunge', { opacity: 0.4, color: 'white' }),
-      starterEl('torn', { x: -20, y: 760, w: 1120, h: 240, color: 'white', rotation: -3 }),
-      starterText('PLAYER NAME', { x: 70, y: 800, w: 940, fontSize: 110, color: 'black' }),
-      starterText('YOUR MESSAGE HERE', { x: 72, y: 920, w: 900, fontSize: 40, color: 'primary' }),
-      starterBrand({ x: 60, y: 56, size: 140, showName: false }),
     ],
   },
 ]
