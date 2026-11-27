@@ -307,6 +307,7 @@ const LAYOUTS = [
   ['DL10', 'Signed Stamp', 'Stamp'], ['DL11', 'Quote Card', 'Quote'], ['DL12', 'Birthday', 'Greeting'], ['DL13', 'Squad Update', 'Status'],
   ['DL14', 'Countdown', 'Number'], ['DL15', 'Stat Hero', 'Big figure'], ['DL16', 'Coin Toss', 'Coin'], ['DL17', 'Big Number', 'Number'],
   ['DL18', 'The Oval', 'Field'], ['DL19', 'Split Final', 'Ribbon'], ['DL20', 'Numbered List', 'Team list'],
+  ['DL21', 'Ladder', 'Title'], ['DL22', 'Head to Head', 'Crests'], ['DL23', 'Stat Leaders', 'Title'],
 ]
 async function openLayout(id, opts = {}) {
   const o = await openEditor({ ...opts, query: `?template=${id}` })
@@ -449,6 +450,91 @@ const tilesOf = async (page) => page.evaluate(() => [...document.querySelectorAl
   ck("a club's stored favourite leads the list in another admin's browser", t[0] === 'DL20', t.slice(0, 3).join(','))
   ck('an unknown id in the stored list is ignored, not shown', t.length > 0 && !t.includes('NOPE'))
   ck('no page errors on load with stored favourites', errors.length === 0, errors.slice(0, 2).join(' | '))
+  await ctx.close()
+}
+
+// ── 4f. Ladder & Leaders: ladder, head to head, stat leaders ───────────────
+{
+  const cols = [['played', 'P'], ['won', 'W'], ['lost', 'L'], ['competitionPoints', 'PTS'], ['netRunRate', 'NRR']].map(([id, heading]) => ({ id, heading }))
+  const ladderRows = Array.from({ length: 12 }, (_, i) => ({
+    rank: i + 1, team_name: i === 10 ? 'Test Cricket Club 1st XI' : `Rival ${i + 1}`, logo_url: null, is_club: i === 10,
+    stats: { played: 9, won: 9 - i * 0.5 | 0, lost: i * 0.5 | 0, competitionPoints: 60 - i * 4, netRunRate: (1.2 - i * 0.2).toFixed(3) },
+  }))
+  const LADDERS = { teams: [{ team_id: 't1', team_name: '1st XI', grade_id: 'g1', grade_name: 'A Grade', available: true, views: [{ name: 'Overall', columns: cols, rows: ladderRows }] }], unlinked: [] }
+  const BAT = [1, 2, 3, 4, 5].map((i) => ({ player_id: `p${i}`, name: `Sam Player${i}`, total_runs: 600 - i * 50, innings: 9, average: '45.2', high_score: '102*' }))
+  const BOWL = [1, 2, 3].map((i) => ({ player_id: `p${i}`, name: `Sam Player${i}`, total_wickets: 30 - i, economy: '3.4', best_figures_wickets: 6, best_figures_runs: 22 }))
+  const SEASONS = [{ id: 's1', name: '2024-25', year: 2024 }, { id: 's2', name: '2025-26', year: 2025 }]
+  const ctx = await browser.newContext({ viewport: { width: 1600, height: 1000 } })
+  const page = await ctx.newPage()
+  const errors = []
+  const gets = []
+  page.on('pageerror', (e) => errors.push(String(e)))
+  const json = (b) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(b) })
+  await page.route('**/api/**', (route) => {
+    const url = route.request().url()
+    gets.push(url)
+    if (/\/auth\/me/.test(url)) return route.fulfill(json({ id: 'u1', role: 'club_admin', club_slug: 'tcc', entitlements: { modules: ['socials', 'select', 'stats'], status: 'active' } }))
+    if (/\/club-admin\/settings/.test(url)) return route.fulfill(json(CLUB))
+    if (/\/ladders\/teams/.test(url)) return route.fulfill(json(LADDERS))
+    if (/\/club-admin\/seasons/.test(url)) return route.fulfill(json(SEASONS))
+    if (/\/leaderboard\/batting/.test(url)) return route.fulfill(json(BAT))
+    if (/\/leaderboard\/bowling/.test(url)) return route.fulfill(json(BOWL))
+    if (/\/leaderboard\/fielding/.test(url)) return route.fulfill(json([]))
+    if (/\/images\/players\//.test(url)) return route.fulfill({ status: 200, contentType: 'image/png', body: CUTOUT })
+    if (/\/club-admin\/players/.test(url)) return route.fulfill(json(ROSTER))
+    if (/social\/media|templates|sponsors/.test(url)) return route.fulfill(json([]))
+    return route.fulfill(json({}))
+  })
+  await page.goto(`${BASE}/admin/social-post?template=DL21`, { waitUntil: 'domcontentloaded' })
+  await page.getByRole('button', { name: /DOWNLOAD PNG|SLIDES/ }).first().waitFor({ timeout: 25000 }).catch(() => {})
+  await page.waitForTimeout(800)
+  const html = async () => (await exportBlocks(page))
+  ck('Ladder & Leaders is a post type in the editor', await seen(page.getByRole('button', { name: /Ladder & Leaders/ })))
+  ck('it reads the club\'s team ladders', gets.some((u) => /\/ladders\/teams/.test(u)))
+  const h1 = await html()
+  ck('DL21 draws ten ladder rows on a square post', (h1.match(/data-ladder-row="/g) || []).length === 10, String((h1.match(/data-ladder-row="/g) || []).length))
+  ck('our row is kept although we sit 11th, below the cut', /data-ladder-row="club"/.test(h1) && h1.includes('TEST CRICKET CLUB 1ST XI'))
+  ck('the row above the cut gives way to ours', !h1.includes('RIVAL 10') && h1.includes('RIVAL 9'))
+  await press(page.locator('nav button[title="Data"]'))
+  await page.waitForTimeout(200)
+  ck('the Data step offers the team, opponent and leaderboard picks', await seen(page.getByTestId('standings-controls')) && await seen(page.getByTestId('standings-team')))
+  // Head to Head
+  await press(page.getByRole('button', { name: 'Design', exact: true }))
+  await press(page.getByRole('button', { name: /^DL22\s*Head to Head/ }))
+  await page.waitForTimeout(300)
+  ck('control: Head to Head asks for an opponent before one is picked', /PICK THE OPPONENT/.test(await html()) && !/data-h2h-row/.test(await html()))
+  await press(page.locator('nav button[title="Data"]'))
+  await page.getByTestId('standings-opp').selectOption('Rival 1').catch(() => {})
+  await page.waitForTimeout(300)
+  const h2 = await html()
+  ck('Head to Head compares the two ladder rows stat by stat', ['rank', 'played', 'won', 'lost', 'competitionPoints', 'netRunRate'].every((id) => h2.includes(`data-h2h-row="${id}"`)))
+  ck('it names both sides from the ladder', h2.includes('TEST CRICKET CLUB 1ST XI') && h2.includes('RIVAL 1'))
+  // Stat Leaders
+  await press(page.getByRole('button', { name: 'Design', exact: true }))
+  await press(page.getByRole('button', { name: /^DL23\s*Stat Leaders/ }))
+  await page.waitForTimeout(800)
+  const bat = gets.filter((u) => /\/leaderboard\/batting/.test(u))
+  ck('Stat Leaders reads the batting leaderboard for the newest season by default', bat.length > 0 && /season_id=s2/.test(bat[bat.length - 1]) && !/grade_id=/.test(bat[bat.length - 1]), bat.slice(-1)[0] || 'none')
+  const h3 = await html()
+  ck('the leader is drawn large and four more as rows', (h3.match(/data-leader-row=""/g) || []).length === 4 && h3.includes('550'))
+  ck('the post names the scope it is measured under', h3.includes('2025-26 · ALL GRADES') || /2025-26 · ALL GRADES/i.test(h3))
+  await press(page.locator('nav button[title="Data"]'))
+  await press(page.getByTestId('leaders-bowling'))
+  await page.getByTestId('leaders-grade').selectOption('g1').catch(() => {})
+  await page.waitForTimeout(800)
+  const bowl = gets.filter((u) => /\/leaderboard\/bowling/.test(u))
+  ck('choosing Wickets and the grade reads the bowling leaderboard for that grade', bowl.length > 0 && /grade_id=g1/.test(bowl[bowl.length - 1]) && /season_id=s2/.test(bowl[bowl.length - 1]), bowl.slice(-1)[0] || 'none')
+  ck('and the post shows wicket takers', /WICKET TAKERS/.test(await html()))
+  await page.getByTestId('leaders-season').selectOption('').catch(() => {})
+  await page.waitForTimeout(800)
+  const allTime = gets.filter((u) => /\/leaderboard\/bowling/.test(u)).slice(-1)[0] || ''
+  ck('All time drops the season from the request', allTime && !/season_id=/.test(allTime), allTime)
+  ck('no page errors through Ladder & Leaders', errors.length === 0, errors.slice(0, 2).join(' | '))
+  await ctx.close()
+}
+{
+  const { ctx, page } = await openEditor({ settings: WORKSPACE, assoc: true, query: '?type=lineup' })
+  ck('workspace: Ladder & Leaders is not offered (no club teams; Round Review has the ladder)', !(await seen(page.getByRole('button', { name: /Ladder & Leaders/ }))))
   await ctx.close()
 }
 

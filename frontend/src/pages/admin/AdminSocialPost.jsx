@@ -43,6 +43,8 @@ import { RoundCover } from '../../social/round-cover-template'
 import { ResultHighlights, HIGHLIGHTS_FOCUS } from '../../social/highlights-cover-template'
 import { GiantType } from '../../social/giant-type-template'
 import { MatchDayV, GamedayEcho, GameDayCard, SquadCollage, COLLAGE_MAX, FinalScoreV, FixturesEcho, ResultsEcho, ColourPopSpotlight, ColourPopAnnounce, DESIGN_PANEL_ALIAS } from '../../social/design-templates'
+import { DesignLadder, HeadToHead, StatLeaders } from '../../social/design-templates-3'
+import StandingsControls from '../../components/admin/socialpost/StandingsControls'
 import { SignedStamp, QuoteCard, Birthday, SquadUpdate, Countdown, StatHero, CoinToss, BigNumber, TheOval, SplitFinal, NumberedList, DESIGN_PANEL_ALIAS_2 } from '../../social/design-templates-2'
 // Which built-in layout's Content panel (and props) each design layout shares.
 const DESIGN_ALIAS = { ...DESIGN_PANEL_ALIAS, ...DESIGN_PANEL_ALIAS_2 }
@@ -162,6 +164,10 @@ const ALL_TEMPLATES = [
   { id: 'RR5', name: 'Board',          component: ResultsBoard,       desc: 'Results table',                   maxPlayers: 0, kind: 'results' },
   { id: 'RR6', name: 'Win/Loss Split', component: ResultsSplit,       desc: 'Wins vs losses columns',          maxPlayers: 0, kind: 'results' },
   { id: 'RR8', name: 'Match Cards',    component: ResultsCards,       desc: 'Your photo, one card per match, live chases and results', maxPlayers: 0, kind: 'results', hasLeaders: true, hasInnings: true },
+  // Ladder & Leaders: the grade's live ladder, our row against an opponent's, the club's leaderboards.
+  { id: 'DL21', name: 'Ladder',        component: DesignLadder,       desc: "The grade's live ladder, your row lit", maxPlayers: 0, kind: 'standings' },
+  { id: 'DL22', name: 'Head to Head',  component: HeadToHead,         desc: 'Your ladder row against the opponent, as bars', maxPlayers: 0, kind: 'standings' },
+  { id: 'DL23', name: 'Stat Leaders',  component: StatLeaders,        desc: 'Top run scorers, wicket takers or fielders', maxPlayers: 0, kind: 'standings' },
   { id: 'DL5', name: 'Results Echo',   component: ResultsEcho,        desc: 'Stacked heading, torn paper strips, win or loss tag', maxPlayers: 0, kind: 'results' },
   // Team of the week — the round's best performers across every grade, 6 to 14 of them.
   { id: 'TW1', name: 'Team Sheet',     component: TeamOfWeekGrid,     desc: 'Photo cards, any team size',      maxPlayers: TOTW_MAX, kind: 'totw' },
@@ -236,7 +242,8 @@ const TAB_MAP = {
   T6: 'lineup', T7: 'lineup', T8: 'lineup', T9: 'lineup', T10: 'lineup', T11: 'lineup', T12: 'lineup', T13: 'lineup',
   DL1: 'lineup', DL2: 'lineup', DL8: 'lineup', DL9: 'lineup', DL20: 'lineup', DL3: 'result', DL19: 'result',
   DL10: 'announcement', DL11: 'announcement', DL12: 'announcement', DL13: 'announcement', DL14: 'announcement',
-  DL15: 'motm', DL16: 'toss', DL17: 'milestones', DL18: 'totw', DL4: 'fixtures', DL5: 'results', DL6: 'motm', DL7: 'announcement',
+  DL15: 'motm', DL16: 'toss', DL17: 'milestones', DL18: 'totw',
+  DL21: 'standings', DL22: 'standings', DL23: 'standings', DL4: 'fixtures', DL5: 'results', DL6: 'motm', DL7: 'announcement',
   ...Object.fromEntries(Object.entries(CUSTOM_LAYOUTS).map(([type, id]) => [id, type])),
   FX1: 'fixtures', FX2: 'fixtures', FX3: 'fixtures', FX4: 'fixtures', FX5: 'fixtures', FX6: 'fixtures',
   C1: 'announcement', C5: 'announcement', C2: 'toss', C3: 'motm',
@@ -256,10 +263,12 @@ const TAB_MAP = {
 // Final Score layouts (overs, run rates, batting and bowling columns). Every
 // other type takes football data as it is; fixtures, results, lineups and the
 // player spotlight are fed from the football backend's own /admin/social/*.
-const AFL_HIDDEN_TABS = new Set(['toss', 'scorecard', 'result', 'totw', 'milestones', 'review'])
+const AFL_HIDDEN_TABS = new Set(['toss', 'scorecard', 'result', 'totw', 'milestones', 'review', 'standings'])
 // An association socials workspace (services/social_competition.py) has no club
 // records, so the post types that read them are left out.
-const ASSOC_HIDDEN_TABS = new Set(['milestones'])
+// Ladder & Leaders reads one club's teams and leaderboards; a workspace has
+// neither (its Round Review has the ladder).
+const ASSOC_HIDDEN_TABS = new Set(['milestones', 'standings'])
 // Round Review reads the Performance Tracker, which only an association workspace has.
 const ASSOC_ONLY_TABS = new Set(['review'])
 const TABS = [
@@ -267,6 +276,7 @@ const TABS = [
   { key: 'fixtures',     label: 'Fixtures' },
   { key: 'result',       label: 'Final Score' },
   { key: 'results',      label: 'Results' },
+  { key: 'standings',    label: 'Ladder & Leaders' },
   { key: 'motm',         label: IS_AFL ? 'Best on Ground' : 'Player of Match' },
   { key: 'totw',         label: 'Team of the Week' },
   { key: 'milestones',   label: 'Milestones' },
@@ -279,14 +289,14 @@ const TABS = [
 ].filter(t => !IS_AFL || !AFL_HIDDEN_TABS.has(t.key))
 const TAB_FIRST = {
   lineup: LINEUP_DEFAULT, fixtures: 'FX1', announcement: 'C1', toss: 'C2', motm: 'C3', totw: 'TW1', milestones: 'MS1', review: 'RV1',
-  result: 'C4', results: 'RR1', scorecard: 'SC1', events: 'EV1', blank: 'BL1',
+  result: 'C4', results: 'RR1', scorecard: 'SC1', events: 'EV1', blank: 'BL1', standings: 'DL21',
 }
 // Icon per post type (from the app's own kit) for the post-type bar and the
 // Start-screen cards.
 const TAB_ICON = {
   lineup: 'teams', fixtures: 'fixtures', result: 'ladders', results: 'list',
   motm: 'player', totw: 'teams', milestones: 'selection', announcement: 'share', toss: 'bolt', scorecard: 'sheet',
-  events: 'availability', blank: 'plus', review: 'list',
+  events: 'availability', blank: 'plus', review: 'list', standings: 'ladders',
 }
 // Post types that pull from external data (BetterSelect / a match link / a round
 // import). These open on the "Get your data" step so the source is collected first.
@@ -303,8 +313,9 @@ const IMPORT_NEXT_STEP = {
   announcement: 'Now choose the player and the words in Content.',
   toss: 'Now choose who won the toss and what they chose in Content.',
   events: 'Now fill in the event in Content.',
+  standings: 'Now pick the team, the opponent and the leaderboard in Data.',
 }
-const DATA_TABS = ['lineup', 'fixtures', 'results', 'result', 'scorecard', 'motm', 'totw', 'milestones', 'review']
+const DATA_TABS = ['lineup', 'fixtures', 'results', 'result', 'scorecard', 'motm', 'totw', 'milestones', 'review', 'standings']
 // The Data step's help line in an association workspace, where every pull is a
 // whole grade from a link and nothing is one club's own.
 const ASSOC_SOURCE_HELP = {
@@ -318,6 +329,7 @@ const ASSOC_SOURCE_HELP = {
   review: 'Pick a round you pulled in the Performance Tracker. Every competition in it feeds the four layouts: the round wrap, top performers, player of the round and next week\'s match of the round.',
 }
 const SOURCE_HELP = {
+  standings: 'Pick a team to pull its grade\'s live ladder from Cricket Australia, then the opponent for Head to Head. Stat Leaders read your club\'s own leaderboards for the season and grade you choose.',
   lineup: 'Pick a saved BetterSelect XI or a Play.Cricket published team list below to pull the players, captain, keeper and match details — or add players yourself in Content.',
   result: 'Pick a game from your Games page, or paste the match link, and we\'ll pull the scores, the top batters and bowlers for both sides, the result and the player of the match.',
   scorecard: 'Paste the match link and we\'ll pull the full scorecard for both teams.',
@@ -1943,6 +1955,13 @@ export default function AdminSocialPost() {
   // ids as the club arranged them; a picked player not in it follows in lineup
   // order. `off` are left out. Nothing set means the first players with photos.
   const [collage, setCollage] = useState({ order: [], off: [] })
+  // Ladder & Leaders: the club's team ladders (null, 'loading', 'error' or the
+  // /ladders/teams payload), what is picked, and the leaderboard read for it.
+  const [ladders, setLadders] = useState(null)
+  const [standingsPick, setStandingsPick] = useState({ teamKey: '', viewIdx: 0, opp: '', leaderKind: 'batting', leaderSeason: null, leaderGrade: '' })
+  const [leaderRows, setLeaderRows] = useState({ key: '', status: 'idle', rows: [] })
+  const [clubSeasons, setClubSeasons] = useState(null)
+  const patchStandings = (p) => setStandingsPick((cur) => ({ ...cur, ...p }))
   // A photo look for the pictures a built-in layout draws (its cut-outs, the
   // Hero Image upload, the player of the match). Set in Effects with nothing
   // selected; saved with a template. null means the photos are left alone.
@@ -3642,6 +3661,46 @@ export default function AdminSocialPost() {
   // ─── Derived values ─────────────────────────────────────────────────────────
 
   const activeTab = TAB_MAP[templateId] || 'lineup'
+  // Ladder & Leaders data: read when the post type is first opened.
+  const loadLadders = () => {
+    setLadders('loading')
+    api.bsTeamLadders()
+      .then((d) => {
+        setLadders(d && Array.isArray(d.teams) ? d : { teams: [] })
+        const first = (d?.teams || []).find((t) => t.available) || (d?.teams || [])[0]
+        if (first) setStandingsPick((cur) => (cur.teamKey ? cur : { ...cur, teamKey: first.team_id }))
+      })
+      .catch(() => setLadders('error'))
+  }
+  useEffect(() => {
+    if (activeTab !== 'standings' || !settings || IS_AFL || settings.workspace_kind === 'association') return
+    if (ladders === null) loadLadders()
+    if (clubSeasons === null) {
+      setClubSeasons([])
+      api.adminListSeasons().then((list) => {
+        const ss = Array.isArray(list) ? list : []
+        setClubSeasons(ss)
+        const newest = [...ss].sort((a, b) => (Number(b.year) || 0) - (Number(a.year) || 0))[0]
+        setStandingsPick((cur) => (cur.leaderSeason === null ? { ...cur, leaderSeason: newest ? newest.id : '' } : cur))
+      }).catch(() => setStandingsPick((cur) => (cur.leaderSeason === null ? { ...cur, leaderSeason: '' } : cur)))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, settings])
+  const leaderKey = activeTab === 'standings' && settings?.id && standingsPick.leaderSeason !== null
+    ? `${standingsPick.leaderKind}|${standingsPick.leaderSeason}|${standingsPick.leaderGrade}` : ''
+  useEffect(() => {
+    if (!leaderKey || leaderRows.key === leaderKey) return
+    let live = true
+    setLeaderRows({ key: leaderKey, status: 'loading', rows: [] })
+    const opts = { seasonId: standingsPick.leaderSeason || undefined, gradeId: standingsPick.leaderGrade || undefined, limit: 10 }
+    const call = standingsPick.leaderKind === 'bowling' ? api.bowlingLeaderboard(settings.id, { ...opts, minWickets: 1, minOvers: 0 })
+      : standingsPick.leaderKind === 'fielding' ? api.fieldingLeaderboard(settings.id, opts)
+        : api.battingLeaderboard(settings.id, { ...opts, minRuns: 1 })
+    call.then((rows) => { if (live) setLeaderRows({ key: leaderKey, status: 'ok', rows: Array.isArray(rows) ? rows : [] }) })
+      .catch(() => { if (live) setLeaderRows({ key: leaderKey, status: 'error', rows: [] }) })
+    return () => { live = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leaderKey])
   const switchTab = (tabKey) => {
     setTemplateId(TAB_FIRST[tabKey] || LINEUP_DEFAULT); setCustomEdit(false)
     // Open the data step the first time you land on a data-driven type; leave it
@@ -4109,6 +4168,38 @@ export default function AdminSocialPost() {
     const ordered = [...collage.order.map((id) => byId.get(String(id))).filter(Boolean), ...withPhoto.filter((p) => !collage.order.includes(String(p._id)))]
     return ordered
   })()
+  if (tmpl.kind === 'standings') {
+    const teamsList = ladders && Array.isArray(ladders.teams) ? ladders.teams : []
+    const entry = teamsList.find((t) => t.team_id === standingsPick.teamKey) || null
+    const view = entry ? (entry.views || [])[standingsPick.viewIdx] || (entry.views || [])[0] : null
+    const rows = view ? view.rows || [] : []
+    const kind = standingsPick.leaderKind
+    const num = (v) => (v === null || v === undefined || v === '' ? '' : String(v))
+    const photoFor = (id) => { const p = allPlayers.find((x) => String(x.id) === String(id)); return p?.photo_url ? `${BASE_URL}/images/players/${p.id}/photo` : null }
+    const seasonName = standingsPick.leaderSeason ? (clubSeasons || []).find((x) => x.id === standingsPick.leaderSeason)?.name : 'All time'
+    const gradeName = standingsPick.leaderGrade ? (entry?.grade_name || entry?.team_name) : 'All grades'
+    extraProps.standings = {
+      status: ladders === 'loading' ? 'loading' : 'ok',
+      grade: entry ? (entry.grade_name || entry.team_name) : '', view: view?.name || '',
+      columns: view?.columns || [], rows,
+      us: rows.find((r) => r.is_club) || null,
+      them: standingsPick.opp ? rows.find((r) => r.team_name === standingsPick.opp) || null : null,
+      leaders: {
+        status: leaderRows.status,
+        title: { batting: 'RUN SCORERS', bowling: 'WICKET TAKERS', fielding: 'IN THE FIELD' }[kind],
+        unit: { batting: 'RUNS', bowling: 'WICKETS', fielding: 'DISMISSALS' }[kind],
+        scope: [seasonName, gradeName].filter(Boolean).join(' · '),
+        rows: leaderRows.key === leaderKey ? leaderRows.rows.map((r) => ({
+          name: r.name || r.player_name || '',
+          value: num(kind === 'bowling' ? r.total_wickets : kind === 'fielding' ? r.total_dismissals : r.total_runs),
+          sub: kind === 'bowling'
+            ? [r.best_figures_wickets != null ? `BEST ${r.best_figures_wickets}/${r.best_figures_runs ?? ''}` : '', r.economy != null && r.economy !== '' ? `ECON ${r.economy}` : ''].filter(Boolean).join(' · ')
+            : kind === 'fielding' ? '' : [r.innings != null ? `${r.innings} INN` : '', r.average != null && r.average !== '' ? `AVG ${r.average}` : '', r.high_score != null && r.high_score !== '' ? `HS ${r.high_score}` : ''].filter(Boolean).join(' · '),
+          photo: photoFor(r.player_id),
+        })).filter((r) => r.name && r.value !== '' && r.value !== '0') : [],
+      },
+    }
+  }
   if (templateId === 'DL9') extraProps.heroes = collagePlayers.filter((p) => !collage.off.includes(String(p._id))).slice(0, COLLAGE_MAX)
   const matchData = {
     competition: match.competition || 'COMPETITION',
@@ -5575,6 +5666,14 @@ export default function AdminSocialPost() {
                   <div className="pb-card p-4">
                     <RoundReviewControls layout={templateId} season={review.season} rounds={review.rounds} round={review.round} status={review.status} opts={review.opts}
                       onPickRound={openReviewRound} onOpts={patchReviewOpts} />
+                  </div>
+                )}
+
+                {activeTab === 'standings' && (
+                  <div className="pb-card p-4">
+                    <StandingsControls s={standingsPick} ladders={ladders} seasons={clubSeasons || []}
+                      teamEntry={ladders && Array.isArray(ladders.teams) ? ladders.teams.find((t) => t.team_id === standingsPick.teamKey) || null : null}
+                      onPatch={patchStandings} onRetry={loadLadders} />
                   </div>
                 )}
 
