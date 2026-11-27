@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
+import { SORTS } from '../../lib/trialSummarySort'
 
 // Better HQ > Reporting > Trial Summary. One row per club that signed up or went on a trial
 // (services/trial_summary.py): when it signed up, what it is trialling, how much its own people
@@ -36,16 +37,6 @@ const CHIPS = [
   { key: 'paying', label: 'Paying', test: (c) => c.status === 'paying' },
   { key: 'all', label: 'All, including paused and archived', test: () => true },
 ]
-
-const SORTS = {
-  signed_up: { label: 'Newest sign-up', fn: (a, b) => (b.signed_up_at || '').localeCompare(a.signed_up_at || '') },
-  trial_end: {
-    label: 'Trial ends soonest',
-    // Running trials by end date first, then everything without a running trial.
-    fn: (a, b) => (a.status === 'on_trial' && a.trial_ends_at ? a.trial_ends_at : '9') .localeCompare(b.status === 'on_trial' && b.trial_ends_at ? b.trial_ends_at : '9'),
-  },
-  activity: { label: 'Least active first', fn: (a, b) => (a.activity?.active_days || 0) - (b.activity?.active_days || 0) },
-}
 
 const fmtDate = (iso) => (iso ? new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : null)
 const fmtShort = (iso) => (iso ? new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : null)

@@ -53,7 +53,7 @@ const CLUBS = [
 
 const browser = await chromium.launch({ executablePath: EXECUTABLE })
 
-async function open(path, { width = 1500, fail: failLoad = false } = {}) {
+async function open(path, { width = 1500, fail: failLoad = false, clubs = CLUBS } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: 1400 } })
   const page = await ctx.newPage()
   const errors = [], wire = []
@@ -66,7 +66,7 @@ async function open(path, { width = 1500, fail: failLoad = false } = {}) {
     if (/\/auth\/me/.test(p)) return json({ id: 'boss', username: 'boss', display_name: 'Boss', role: 'super_admin', entitlements: { modules: [], status: 'active' } })
     if (/super\/trial-summary/.test(p)) {
       return failLoad ? json({ detail: 'boom' }, 500)
-        : json({ clubs: CLUBS, generated_at: NOW, recent_days: 7, ending_soon_days: 3 })
+        : json({ clubs, generated_at: NOW, recent_days: 7, ending_soon_days: 3 })
     }
     return json([])
   })
@@ -123,6 +123,60 @@ async function open(path, { width = 1500, fail: failLoad = false } = {}) {
     await page.locator('[data-testid="trial-search"]').fill('')
     await page.screenshot({ path: `${SHOTS}/trial-summary-1500.png`, fullPage: false })
   }
+  await ctx.close()
+}
+
+// Sorting. The Trial ends column shows the end date of a running trial, the date an ended trial
+// ended, and a dash for the rest; "Trial ends soonest" must order by THAT date. It once ordered
+// running trials only and left every ended trial in sign-up order, so a trial that ended 3 days ago
+// sat below one that ended 27 days ago. Server order is newest sign-up first, as the real API sends.
+{
+  const act = (active_days, views) => ({ views, views_recent: 0, active_days, active_days_recent: 0, active_people: 1, last_active_at: null, top_areas: [] })
+  const SORT_CLUBS = [
+    base({ org_id: 's1', name: 'Ballajura CC', status: 'on_trial', trial_ends_at: day(11), days_left: 11, signed_up_at: day(-1) }),
+    base({ org_id: 's2', name: 'Terrigal CC', status: 'on_trial', trial_ends_at: day(10), days_left: 10, signed_up_at: day(-2) }),
+    base({ org_id: 's3', name: 'Bannockburn CC', status: 'paying', trial_ends_at: day(2), days_left: 2, ending_soon: true, signed_up_at: day(-3) }),
+    base({ org_id: 's4', name: 'Open CC', status: 'on_trial', trial_ends_at: null, trial_open_ended: true, signed_up_at: day(-4) }),
+    base({ org_id: 's5', name: 'Harman CC', status: 'trial_ended', trial_ended_at: day(-27), signed_up_at: '2026-10-08T09:00:00Z', activity: act(1, 9) }),
+    base({ org_id: 's6', name: 'Brisbane CC', status: 'trial_ended', trial_ended_at: day(-3), signed_up_at: '2026-10-08T08:00:00Z', activity: act(1, 4) }),
+    base({ org_id: 's7', name: 'Quairading CC', status: 'trial_ended', trial_ended_at: day(0), signed_up_at: '2026-10-07T08:00:00Z' }),
+    base({ org_id: 's8', name: 'Steady CC', status: 'paying', trial_ends_at: null, signed_up_at: '2026-09-01T08:00:00Z' }),
+  ]
+  const { page, ctx } = await open('/admin/super/trial-summary', { clubs: SORT_CLUBS })
+  const rows = page.locator('[data-testid="trial-row"]')
+  const names = ['Ballajura', 'Terrigal', 'Bannockburn', 'Open', 'Harman', 'Brisbane', 'Quairading', 'Steady']
+  const order = async () => {
+    const texts = await rows.allInnerTexts()
+    return texts.map((t) => names.find((n) => t.includes(n)) || '?')
+  }
+  const pick = async (key) => { if (await page.locator('[data-testid="trial-sort"]').count()) await page.locator('[data-testid="trial-sort"]').selectOption(key, { timeout: 2000 }).catch(() => {}) }
+  const labels = await page.locator('[data-testid="trial-sort"] option').allInnerTexts().catch(() => [])
+
+  ck('server order is newest sign-up first (the default sort)', (await order()).join() === 'Ballajura,Terrigal,Bannockburn,Open,Harman,Brisbane,Quairading,Steady', (await order()).join())
+
+  await pick('trial_end')
+  const soonest = (await order()).join()
+  ck('Trial ends soonest: running trials by end date, an add-on trial included', soonest.startsWith('Bannockburn,Terrigal,Ballajura,'), soonest)
+  ck('...then ended trials, the most recently ended first (Brisbane ended 3 days ago, Harman 27)',
+     soonest.includes('Quairading,Brisbane,Harman'), soonest)
+  ck('...then clubs with no trial date, open-ended included, last', /Harman,(Open,Steady|Steady,Open)$/.test(soonest) || soonest.endsWith('Open,Steady'), soonest)
+  ck('Brisbane comes BEFORE Harman, whatever order they signed up in',
+     soonest.indexOf('Brisbane') > -1 && soonest.indexOf('Brisbane') < soonest.indexOf('Harman'), soonest)
+
+  ck('there is a strict latest-first option for the Trial ends column', labels.some((l) => /latest first/i.test(l)), labels.join(' | '))
+  await pick('trial_end_latest')
+  const latest = (await order()).join()
+  ck('Trial end date, latest first: one descending run across running and ended trials',
+     latest.startsWith('Ballajura,Terrigal,Bannockburn,Quairading,Brisbane,Harman'), latest)
+  ck('...with clubs that show no date last', /,(Open,Steady|Steady,Open)$/.test(latest), latest)
+
+  await pick('activity')
+  const quiet = (await order()).join()
+  ck('Least active first: fewest active days first', quiet.indexOf('Quairading') < quiet.indexOf('Brisbane') && quiet.indexOf('Brisbane') < quiet.indexOf('Harman'), quiet)
+  ck('...and where days are level, fewer page views first (Brisbane 4, Harman 9)', quiet.indexOf('Brisbane') < quiet.indexOf('Harman'), quiet)
+
+  await pick('signed_up')
+  ck('Newest sign-up returns to server order', (await order()).join() === 'Ballajura,Terrigal,Bannockburn,Open,Harman,Brisbane,Quairading,Steady', (await order()).join())
   await ctx.close()
 }
 {
