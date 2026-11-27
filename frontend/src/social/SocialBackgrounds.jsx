@@ -35,24 +35,40 @@ export const DEFAULT_COLORS = {
 }
 
 // Picker metadata — key, human label, and a rough grouping for a variant menu.
+// `retired`: still drawn for posts and templates that use it, but not offered in
+// the picker (the noisy textures clubs found too busy, November 2026).
 export const SOCIAL_BACKGROUNDS = [
-  { key: 'ink-splatter',     label: 'Ink Splatter',      group: 'Splatter & Spray' },
-  { key: 'spray-stencil',    label: 'Spray Stencil',     group: 'Splatter & Spray' },
-  { key: 'paint-sweep',      label: 'Paint Sweep',       group: 'Splatter & Spray' },
-  { key: 'drip-curtain',     label: 'Drip Curtain',      group: 'Splatter & Spray' },
-  { key: 'graffiti',         label: 'Graffiti Chaos',    group: 'Splatter & Spray' },
+  // Club Colour — flat, clean grounds in the club's own colour that let the
+  // photo and one big word carry the post (after the minimal college and
+  // Premier League posts clubs pointed to, November 2026). No noise textures.
+  { key: 'flat-club',        label: 'Flat Colour',       group: 'Club Colour' },
+  { key: 'swoosh',           label: 'Swoosh',            group: 'Club Colour' },
+  { key: 'curve-split',      label: 'Curve Split',       group: 'Club Colour' },
+  { key: 'paint-wash',       label: 'Paint Wash',        group: 'Club Colour' },
+  { key: 'studio-light',     label: 'Studio Light',      group: 'Club Colour' },
+  { key: 'side-panel',       label: 'Side Panel',        group: 'Club Colour' },
+  { key: 'colour-card',      label: 'Colour Card',       group: 'Club Colour' },
+  // White grounds with an airbrushed glow of the club colour (the NFL player
+  // posts clubs pointed to): behind the player, or in from the edges.
+  { key: 'halo-glow',        label: 'Halo Glow',         group: 'Club Colour' },
+  { key: 'edge-glow',        label: 'Edge Glow',         group: 'Club Colour' },
+  { key: 'ink-splatter',     label: 'Ink Splatter',      group: 'Splatter & Spray', retired: true },
+  { key: 'spray-stencil',    label: 'Spray Stencil',     group: 'Splatter & Spray', retired: true },
+  { key: 'paint-sweep',      label: 'Paint Sweep',       group: 'Splatter & Spray', retired: true },
+  { key: 'drip-curtain',     label: 'Drip Curtain',      group: 'Splatter & Spray', retired: true },
+  { key: 'graffiti',         label: 'Graffiti Chaos',    group: 'Splatter & Spray', retired: true },
   { key: 'concrete-grit',    label: 'Concrete Grit',     group: 'Grit & Grunge' },
   { key: 'chevron-grit',     label: 'Chevron Grit',      group: 'Grit & Grunge' },
-  { key: 'airbrush-glow',    label: 'Airbrush Glow',     group: 'Grit & Grunge' },
-  { key: 'spotlight',        label: 'Photo Spotlight',   group: 'Grit & Grunge' },
-  { key: 'torn-halftone',    label: 'Torn Halftone',     group: 'Print' },
+  { key: 'airbrush-glow',    label: 'Airbrush Glow',     group: 'Grit & Grunge', retired: true },
+  { key: 'spotlight',        label: 'Photo Spotlight',   group: 'Grit & Grunge', retired: true },
+  { key: 'torn-halftone',    label: 'Torn Halftone',     group: 'Print', retired: true },
   { key: 'halftone-ramp',    label: 'Halftone Ramp',     group: 'Print' },
   { key: 'poster-solid',     label: 'Poster Solid',      group: 'Print' },
   { key: 'led',              label: 'LED Scoreboard',    group: 'Print' },
-  { key: 'riso-geometric',   label: 'Riso Geometric',    group: 'Geometric' },
+  { key: 'riso-geometric',   label: 'Riso Geometric',    group: 'Geometric', retired: true },
   { key: 'gradient-linework',label: 'Gradient Linework', group: 'Geometric' },
-  { key: 'bolt',             label: 'Bolt Energy',       group: 'Geometric' },
-  { key: 'shard',            label: 'Shard Cut',         group: 'Geometric' },
+  { key: 'bolt',             label: 'Bolt Energy',       group: 'Geometric', retired: true },
+  { key: 'shard',            label: 'Shard Cut',         group: 'Geometric', retired: true },
   { key: 'contour-rings',    label: 'Contour Rings',     group: 'Geometric' },
   // Clean & Minimal — a solid club-colour panel with a faint diagonal-line
   // texture and one bold accent shard, styled after a plain team-branding
@@ -385,6 +401,137 @@ const VARIANTS = {
     </React.Fragment>
   ),
 }
+
+// The Club Colour family: no veil over them by default, and the light ones
+// turn the post to light mode when picked so its text reads dark.
+export const CLEAN_BACKGROUNDS = new Set(['flat-club', 'swoosh', 'curve-split', 'paint-wash', 'studio-light', 'side-panel', 'colour-card', 'halo-glow', 'edge-glow'])
+export const LIGHT_BACKGROUNDS = new Set(['studio-light', 'side-panel', 'halo-glow', 'edge-glow'])
+
+// ── Club Colour family helpers ──────────────────────────────────────────────
+const _hx = (c) => (/^#[0-9a-f]{6}$/i.test(c || '') ? c : null)
+function shade(hex, toward, t) {
+  const h = _hx(hex)
+  if (!h) return hex
+  const a = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16))
+  const b = toward === 'white' ? [255, 255, 255] : [0, 0, 0]
+  return '#' + a.map((v, i) => Math.round(v + (b[i] - v) * t).toString(16).padStart(2, '0')).join('')
+}
+// The club colour: `secondary` is the club accent in the editor's mapping.
+const clubOf = (p) => _hx(p.secondary) || _hx(p.tertiary) || '#c8102e'
+// A soft studio floor: the dark ellipse a cut-out stands on.
+const Floor = ({ y = 930, w = 640, opacity = 0.35 }) => (
+  <div style={abs({ left: 540 - w / 2, top: y - 40, width: w, height: 80, borderRadius: '50%', background: 'radial-gradient(ellipse at center, #000 0%, rgba(0,0,0,0) 70%)', opacity })} />
+)
+
+Object.assign(VARIANTS, {
+  // Michigan: one flat colour, a soft light from above, a shadow to stand on.
+  'flat-club': (p) => {
+    const c = clubOf(p)
+    return (
+      <React.Fragment>
+        <div style={{ ...full, background: c }} />
+        <div style={{ ...full, background: `radial-gradient(ellipse 70% 55% at 50% 28%, ${shade(c, 'white', 0.22)} 0%, rgba(255,255,255,0) 70%)` }} />
+        <div style={{ ...full, background: `linear-gradient(180deg, rgba(0,0,0,0) 55%, ${shade(c, 'black', 0.25)} 100%)`, opacity: 0.6 }} />
+        <Floor />
+      </React.Fragment>
+    )
+  },
+  // UNC: the club colour with a white curve sweeping across the foot.
+  'swoosh': (p) => {
+    const c = clubOf(p)
+    return (
+      <React.Fragment>
+        <div style={{ ...full, background: `linear-gradient(180deg, ${shade(c, 'white', 0.1)} 0%, ${c} 70%)` }} />
+        <div style={abs({ left: -300, top: 700, width: 1680, height: 900, borderRadius: '50%', background: '#ffffff' })} />
+        <div style={abs({ left: -300, top: 668, width: 1680, height: 900, borderRadius: '50%', border: `10px solid ${shade(c, 'white', 0.55)}`, opacity: 0.7 })} />
+      </React.Fragment>
+    )
+  },
+  // Michigan Player of the Week: a deep tone above a big curve, the club colour below.
+  'curve-split': (p) => {
+    const c = clubOf(p)
+    const deep = _hx(p.primary) && p.primary !== c ? p.primary : shade(c, 'black', 0.7)
+    return (
+      <React.Fragment>
+        <div style={{ ...full, background: c }} />
+        <div style={abs({ left: -420, top: -880, width: 1920, height: 1400, borderRadius: '50%', background: deep })} />
+        <div style={{ ...full, background: `radial-gradient(ellipse 60% 40% at 50% 85%, ${shade(c, 'white', 0.18)} 0%, rgba(255,255,255,0) 70%)` }} />
+        <Floor y={960} opacity={0.28} />
+      </React.Fragment>
+    )
+  },
+  // Man City: a watercolour wash in the club's shades, a torn white edge at the foot.
+  'paint-wash': (p) => {
+    const c = clubOf(p)
+    const blots = [[180, 160, 520, 'black', 0.35], [880, 240, 600, 'white', 0.3], [300, 780, 700, 'white', 0.22], [920, 860, 520, 'black', 0.3], [560, 480, 820, 'white', 0.12]]
+    return (
+      <React.Fragment>
+        <div style={{ ...full, background: c }} />
+        {blots.map(([x, y, r, to, t], i) => (
+          <div key={i} style={abs({ left: x - r / 2, top: y - r / 2, width: r, height: r, borderRadius: '50%', background: `radial-gradient(circle, ${shade(c, to, t)} 0%, rgba(0,0,0,0) 68%)` })} />
+        ))}
+        <Grain fill="#fff" opacity={0.12} />
+        <svg width="1080" height="1080" viewBox="0 0 1080 1080" style={abs({ left: 0, top: 0 })}>
+          <path d="M0 1010 L60 1000 L120 1014 L190 996 L260 1012 L330 998 L410 1016 L480 1000 L560 1012 L640 994 L720 1010 L800 998 L880 1014 L960 1000 L1030 1012 L1080 1002 L1080 1080 L0 1080 Z" fill="#ffffff" />
+        </svg>
+      </React.Fragment>
+    )
+  },
+  // Spartans: a soft grey studio, light from above, a floor shadow.
+  'studio-light': (p) => (
+    <React.Fragment>
+      <div style={{ ...full, background: 'linear-gradient(180deg, #f4f5f7 0%, #e2e5ea 70%, #cfd3da 100%)' }} />
+      <div style={{ ...full, background: 'radial-gradient(ellipse 60% 50% at 50% 30%, #ffffff 0%, rgba(255,255,255,0) 70%)' }} />
+      <Floor opacity={0.22} />
+    </React.Fragment>
+  ),
+  // Spartans WIN: a club-colour panel down the left of a light studio.
+  'side-panel': (p) => {
+    const c = clubOf(p)
+    return (
+      <React.Fragment>
+        <div style={{ ...full, background: 'linear-gradient(180deg, #f4f5f7 0%, #dfe2e7 100%)' }} />
+        <div style={abs({ left: 0, top: 0, width: 400, height: 1080, background: `linear-gradient(180deg, ${c} 0%, ${shade(c, 'black', 0.2)} 100%)` })} />
+        <Floor y={940} opacity={0.2} />
+      </React.Fragment>
+    )
+  },
+  // An airbrushed glow of the club colour behind the player, fading to white.
+  'halo-glow': (p) => {
+    const c = clubOf(p)
+    return (
+      <React.Fragment>
+        <div style={{ ...full, background: '#f7f7f8' }} />
+        <div style={abs({ left: 90, top: 160, width: 900, height: 860, borderRadius: '50%', background: `radial-gradient(ellipse at center, ${c} 0%, ${shade(c, 'white', 0.35)} 32%, rgba(255,255,255,0) 68%)`, filter: 'blur(30px)' })} />
+        <div style={abs({ left: 300, top: 120, width: 520, height: 520, borderRadius: '50%', background: `radial-gradient(circle, ${shade(c, 'black', 0.25)} 0%, rgba(0,0,0,0) 70%)`, opacity: 0.45, filter: 'blur(40px)' })} />
+        <Grain fill="#000" opacity={0.06} />
+        <Floor y={950} opacity={0.18} />
+      </React.Fragment>
+    )
+  },
+  // White in the middle, the club colour airbrushed in from the edges.
+  'edge-glow': (p) => {
+    const c = clubOf(p)
+    return (
+      <React.Fragment>
+        <div style={{ ...full, background: `radial-gradient(ellipse 62% 58% at 50% 50%, #ffffff 30%, ${shade(c, 'white', 0.45)} 62%, ${c} 100%)` }} />
+        <Grain fill="#000" opacity={0.05} />
+        <Floor y={940} opacity={0.16} />
+      </React.Fragment>
+    )
+  },
+  // Tennessee and UNC Player of the Week: the club colour with a lighter card set into it.
+  'colour-card': (p) => {
+    const c = clubOf(p)
+    return (
+      <React.Fragment>
+        <div style={{ ...full, background: c }} />
+        <div style={abs({ left: 70, top: 90, width: 940, height: 900, background: shade(c, 'white', 0.18), boxShadow: '0 30px 60px rgba(0,0,0,0.25)' })} />
+        <div style={abs({ left: 70, top: 90, width: 940, height: 900, background: `radial-gradient(ellipse 70% 60% at 50% 30%, ${shade(c, 'white', 0.3)} 0%, rgba(255,255,255,0) 70%)` })} />
+      </React.Fragment>
+    )
+  },
+})
 
 export function SocialBackground({
   variant = 'ink-splatter', colors, size = 1080, height, radius = 0, className, style, children,

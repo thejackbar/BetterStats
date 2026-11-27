@@ -28,6 +28,7 @@ import { niceName } from './card-kit'
 import { pc, pt, inkOn, registerParts, colorPart, textPart } from './layoutParts'
 import { usePostLook } from './postLook'
 import FramedImage from './FramedImage'
+import { mixHex } from './crestColour'
 import { PastStrip, hasPast, RowForm } from './pastMeetings'
 import { FRAMES, framePoints, frameClip, burstPaths, speedPaths, brushPaths, tornPaperPaths, grungePaths, splatterPaths } from './designFx'
 
@@ -129,16 +130,23 @@ export const keptLook = (keep, { edge = 0, glow = null, contrast = 18 } = {}) =>
 // dark type, our player in a V-based panel in the club colour with their head
 // out of the top, the opposition crest in the other, the club crest where the
 // panels meet, the date and the ground along the bottom.
-export function MatchDayV({ width = 1080, height = 1080, team = {}, opponent = {}, match = {}, players = [], palette = {}, featuredId, heroImage, parts, past }) {
+export function MatchDayV({ width = 1080, height = 1080, team = {}, opponent = {}, match = {}, players = [], palette = {}, featuredId, heroImage, parts, past, homeColour, awayColour }) {
   const g = geo(width, height)
   const { f, A } = g
-  const paper = pc(parts, 'dl1Paper', '#ebe8e1')
-  const ink = pc(parts, 'dl1Ink', '#16181d')
-  const usFill = pc(parts, 'dl1UsFill', palette.primary || '#0b1530')
-  const themFill = pc(parts, 'dl1ThemFill', '#1f3f8f')
+  // The two clubs' colours: ours from the club's settings, theirs read from
+  // their crest (the editor passes both; a crest it cannot read falls back).
+  const home = /^#[0-9a-f]{6}$/i.test(homeColour || '') ? homeColour : (palette.accent || '#c8102e')
+  const away = /^#[0-9a-f]{6}$/i.test(awayColour || '') ? awayColour : '#1f3f8f'
+  // The ground is the two colours, deepened, split down the middle; a club can
+  // still pick one flat colour for it in Brand.
+  const flat = pc(parts, 'dl1Paper', null)
+  const ground = flat || `linear-gradient(100deg, ${mixHex(home, '#000000', 0.55)} 0%, ${mixHex(home, '#000000', 0.72)} 49.8%, ${mixHex(away, '#000000', 0.72)} 50.2%, ${mixHex(away, '#000000', 0.55)} 100%)`
+  const ink = pc(parts, 'dl1Ink', flat ? inkOn(flat) : '#ffffff')
+  const usFill = pc(parts, 'dl1UsFill', home)
+  const themFill = pc(parts, 'dl1ThemFill', away)
   const hero = featuredOf(players, featuredId)
   const photo = heroImage || heroSrcOf(hero)
-  const keep = pc(parts, 'dlKeepColor', palette.primary || '#0b1530')
+  const discBg = flat || '#0d0f14'
   const resolve = resolver(palette)
   const kickH = Math.round(20 * f)
   const titleTop = g.top + kickH + 10
@@ -160,8 +168,8 @@ export function MatchDayV({ width = 1080, height = 1080, team = {}, opponent = {
   // The names sit clear of the crest, which stands where the V points meet.
   const nameBox = (fill, side) => ({ position: 'absolute', left: side === 'us' ? 18 : Math.round(crest * 0.2), right: side === 'us' ? Math.round(crest * 0.2) : 18, top: Math.round(panelH * 0.5), color: inkOn(fill), textAlign: 'center' })
   return (
-    <LayerRoot style={{ width, height, position: 'relative', overflow: 'hidden', background: paper, color: ink, fontFamily: FONT, fontWeight: WEIGHT }}>
-      <div data-layer="Paper stripes" style={{ position: 'absolute', inset: 0, background: `repeating-linear-gradient(90deg, ${ink}00 0, ${ink}00 ${Math.round(width / 9)}px, ${ink}0a ${Math.round(width / 9)}px, ${ink}0a ${Math.round(width / 9) * 2}px)`, pointerEvents: 'none' }} />
+    <LayerRoot style={{ width, height, position: 'relative', overflow: 'hidden', background: ground, color: ink, fontFamily: FONT, fontWeight: WEIGHT }}>
+      <div data-layer="Stripes" style={{ position: 'absolute', inset: 0, background: `repeating-linear-gradient(90deg, ${ink}00 0, ${ink}00 ${Math.round(width / 9)}px, ${ink}0a ${Math.round(width / 9)}px, ${ink}0a ${Math.round(width / 9) * 2}px)`, pointerEvents: 'none' }} />
       <div data-layer="Competition" style={{ position: 'absolute', left: 48, right: 48, top: g.top, textAlign: 'center', fontFamily: MONO, fontSize: kickH * 0.8, letterSpacing: 3, color: `${ink}b3` }}>
         {upper(joinDot(match.season, match.competition)) || upper(team.name)}
       </div>
@@ -178,7 +186,7 @@ export function MatchDayV({ width = 1080, height = 1080, team = {}, opponent = {
 
       <div data-layer="Our panel" style={{ position: 'absolute', left: 70, top: panelTop, width: pw, height: panelH }}>
         {photo ? (
-          <FramedImage item={{ w: pw, h: panelH, mask: 'vbottom', frameFill: usFill, popOut: pick(A, { square: 0.2, portrait: 0.26, story: 0.3 }), fit: 'contain', objPos: 'center top', fx: keptLook(keep) }} src={photo} resolve={resolve} />
+          <FramedImage item={{ w: pw, h: panelH, mask: 'vbottom', frameFill: usFill, popOut: pick(A, { square: 0.2, portrait: 0.26, story: 0.3 }), fit: 'contain', objPos: 'center top' }} src={photo} resolve={resolve} />
         ) : (
           <CrestFrame layer="Our crest" x={0} y={0} w={pw} h={panelH} fill={usFill} logo={team.logo} mono={team.monogram} ink={inkOn(usFill)} />
         )}
@@ -197,7 +205,7 @@ export function MatchDayV({ width = 1080, height = 1080, team = {}, opponent = {
           <div style={{ width: Math.round(pw * 0.2), height: 4, background: inkOn(themFill), margin: `${Math.round(12 * f)}px auto 0`, opacity: 0.8 }} />
         </div>
       </div>
-      <div data-layer="Club crest" style={{ position: 'absolute', left: width / 2 - crest / 2, top: panelTop + panelH - crest * 0.95, width: crest, height: crest, display: 'grid', placeItems: 'center', background: paper, borderRadius: '50%', boxShadow: `0 0 0 6px ${paper}` }}>
+      <div data-layer="Club crest" style={{ position: 'absolute', left: width / 2 - crest / 2, top: panelTop + panelH - crest * 0.95, width: crest, height: crest, display: 'grid', placeItems: 'center', background: discBg, borderRadius: '50%', boxShadow: `0 0 0 6px ${discBg}` }}>
         <ClubLogo src={team.logo} monogram={team.monogram} color={ink} size={Math.round(crest * 0.78)} shape="shield" />
       </div>
 
@@ -698,12 +706,9 @@ const stripPart = colorPart('dlStripColor', 'Torn paper strip', 'Strip', () => '
 registerParts({
   DL1: [
     textPart('dl1Title', 'Title', 'Title', () => 'MATCH DAY'),
-    colorPart('dl1Paper', 'Paper background', 'Background', () => '#ebe8e1'),
-    colorPart('dl1Ink', 'Type and icons', 'Background', () => '#16181d'),
-    colorPart('dl1TitleColor', 'Title colour', 'Title', () => '#16181d'),
-    colorPart('dl1UsFill', 'Our panel', 'Panels', (p) => p.primary || '#0b1530'),
-    colorPart('dl1ThemFill', 'Opposition panel', 'Panels', () => '#1f3f8f'),
-    keepPart,
+    colorPart('dl1UsFill', 'Our colour', 'Colours', (p) => p.accent || '#c8102e', { autoLabel: 'Club colour' }),
+    colorPart('dl1ThemFill', 'Their colour', 'Colours', () => '#1f3f8f', { autoLabel: 'From their crest' }),
+    colorPart('dl1Paper', 'One flat background instead', 'Colours', null, { autoLabel: 'Both clubs\' colours' }),
   ],
   DL2: [
     textPart('dl2Word', 'Big word', 'Big word', () => 'GAMEDAY'),

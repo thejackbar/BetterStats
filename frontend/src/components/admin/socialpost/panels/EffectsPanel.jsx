@@ -35,6 +35,18 @@ function Section({ title, children, open: open0 = true, testId }) {
   )
 }
 
+// Fewer controls on show: the finer settings fold away under one link.
+function More({ label = 'More options', children, open: open0 = false, testId }) {
+  const [open, setOpen] = useState(open0)
+  return (
+    <div className="flex flex-col gap-2.5">
+      <button onClick={() => setOpen((o) => !o)} data-testid={testId}
+        className="self-start font-mono text-[10px] tracking-wide2 uppercase text-pb-faint hover:text-pb-text">{open ? '– ' : '+ '}{label}</button>
+      {open && children}
+    </div>
+  )
+}
+
 function Slider({ label, value, min, max, step = 1, onChange, testId, suffix = '' }) {
   return (
     <label className="flex items-center gap-2">
@@ -114,7 +126,7 @@ function Eyedropper({ src, onPick }) {
   if (!src) return <p className="text-[11px] text-pb-faint">Add a picture first.</p>
   return (
     <div className="flex flex-col gap-1">
-      <canvas ref={ref} data-testid="fx-eyedropper" title="Click a colour to keep it"
+      <canvas ref={ref} data-testid="fx-eyedropper" data-src={src} title="Click a colour to keep it"
         className="rounded-md border pb-hairline2 cursor-crosshair self-start max-w-full"
         onClick={(e) => {
           const c = ref.current
@@ -147,8 +159,8 @@ function PhotoLook({ fx, setFx, palette, previewSrc }) {
         </div>
       </Section>
 
-      <Section title="Colour splash" testId="fx-splash">
-        <p className="text-[10px] text-pb-faint leading-snug -mt-1">Turns the photo black and white except the colours you keep. Range widens how much of each colour counts; Softness blends the edge.</p>
+      <Section title="Colour splash" testId="fx-splash" open={splash.length > 0}>
+        <p className="text-[10px] text-pb-faint leading-snug -mt-1">Black and white except the colours you keep.</p>
         <Eyedropper src={previewSrc} onPick={(c) => setSplash([...splash, { color: c, range: 30, soft: 30 }].slice(-4))} />
         <div className="flex items-center gap-1 flex-wrap">
           <Label>Or keep</Label>
@@ -174,7 +186,7 @@ function PhotoLook({ fx, setFx, palette, previewSrc }) {
         )}
       </Section>
 
-      <Section title="Tone and adjust" testId="fx-tone" open={false}>
+      <Section title="Adjust" testId="fx-tone" open={false}>
         <div className="flex gap-1 flex-wrap">
           {[['none', 'Colour'], ['mono', 'Black & white'], ['duotone', 'Duotone'], ['tint', 'Tint']].map(([k, n]) => (
             <Chip key={k} testId={`tone-${k}`} active={(fx.tone || 'none') === k} onClick={() => setFx({ tone: k, ...(k === 'duotone' && !fx.duoDark ? { duoDark: 'primary', duoLight: 'accent' } : null), ...(k === 'tint' && !fx.tint ? { tint: 'primary', tintAmount: 75 } : null) })}>{n}</Chip>
@@ -210,6 +222,8 @@ function PictureEffects({ item, patch, palette, previewSrc, onGhost }) {
   const curFrame = FRAMES.find((f) => f.key === (item.mask || 'none'))
   return (
     <>
+      <PhotoLook fx={fx} setFx={setFx} palette={palette} previewSrc={previewSrc} />
+
       <Section title="Frame" testId="fx-frame">
         <div className="grid grid-cols-4 gap-1.5">
           {FRAMES.map((f) => (
@@ -226,10 +240,13 @@ function PictureEffects({ item, patch, palette, previewSrc, onGhost }) {
           <>
             <Slider label="Pop out" value={Math.round((item.popOut || 0) * 100)} min={0} max={80} suffix="%" testId="fx-popout"
               onChange={(v) => patch({ popOut: v / 100 })} />
-            <p className="text-[10px] text-pb-faint leading-snug -mt-1">
-              Lets a cut-out's head and shoulders stand out of the top of the frame. It needs a picture with its background removed (Replace, then Edit, then Remove background).
-            </p>
+            <p className="text-[10px] text-pb-faint leading-snug -mt-1">Head out of the frame: needs a cut-out.</p>
             {(curFrame?.torn || curFrame?.brush) && <Chip onClick={() => patch({ maskSeed: newSeed() })} testId="fx-reshuffle-frame">Shuffle the edge</Chip>}
+          </>
+        )}
+        <More label="More frame options" testId="fx-frame-more">
+        {framed && (
+          <>
             <div className="flex items-center gap-2"><span className="w-[78px] shrink-0"><Label>Fill</Label></span>
               <ColourPick value={item.frameFill || null} allowNone palette={palette} onChange={(c) => patch({ frameFill: c })} testId="fx-frame-fill" /></div>
             {item.frameFill && (
@@ -248,17 +265,13 @@ function PictureEffects({ item, patch, palette, previewSrc, onGhost }) {
             )}
           </>
         )}
-        <div className="flex items-center gap-2 flex-wrap">
-          <Label>Photo in frame</Label>
-          <span className="text-[10px] text-pb-faint">Double-click the picture on the canvas to drag it, scroll to zoom.</span>
-        </div>
+        <span className="text-[10px] text-pb-faint">Double-click the photo on the canvas to drag it inside the frame; scroll to zoom.</span>
         <Slider label="Zoom" value={crop.z ?? 1} min={0.3} max={4} step={0.01} testId="fx-zoom" onChange={(v) => setCrop({ z: v })} />
         <Slider label="Left/right" value={crop.x || 0} min={-Math.round(item.w)} max={Math.round(item.w)} onChange={(v) => setCrop({ x: v })} />
         <Slider label="Up/down" value={crop.y || 0} min={-Math.round(item.h)} max={Math.round(item.h)} onChange={(v) => setCrop({ y: v })} />
         {item.crop && <Chip onClick={() => patch({ crop: null })}>Reset position</Chip>}
+        </More>
       </Section>
-
-      <PhotoLook fx={fx} setFx={setFx} palette={palette} previewSrc={previewSrc} />
 
       <Section title="Cut-out effects" testId="fx-cutout" open={false}>
         <Slider label="Outline" value={fx.outline?.width || 0} min={0} max={30} testId="fx-outline" onChange={(v) => setFx({ outline: { color: fx.outline?.color || 'white', width: v } })} />
@@ -313,6 +326,7 @@ function TextEffects({ item, patch, palette, onTextBehind, canBehind }) {
           <Chip testId="fx-preset-drop" onClick={() => patch({ shadow: { x: 8, y: 8, blur: 0, color: 'black', opacity: 100 }, extrude: null })}>Hard shadow</Chip>
           <Chip onClick={() => patch({ hollow: false, stroke: null, shadow: null, extrude: null, echo: null, skew: 0 })}>Plain</Chip>
         </div>
+        <More label="Fine-tune" testId="fx-text-more">
         <Slider label="Outline" value={item.stroke?.width || 0} min={0} max={20} testId="fx-text-stroke"
           onChange={(v) => patch({ stroke: { color: item.stroke?.color || 'black', width: v } })} />
         {(item.stroke?.width || 0) > 0 && <div className="flex items-center gap-2"><span className="w-[78px] shrink-0"><Label>Outline col</Label></span>
@@ -331,9 +345,9 @@ function TextEffects({ item, patch, palette, onTextBehind, canBehind }) {
         {item.shadow && <div className="flex items-center gap-2"><span className="w-[78px] shrink-0"><Label>Shadow col</Label></span>
           <ColourPick value={item.shadow.color} palette={palette} onChange={(c) => patch({ shadow: { ...item.shadow, color: c } })} /></div>}
         <Slider label="Slant" value={item.skew || 0} min={-30} max={30} suffix="°" testId="fx-skew" onChange={(v) => patch({ skew: v })} />
+        </More>
       </Section>
-      <Section title="Echo stack" testId="fx-echo">
-        <p className="text-[10px] text-pb-faint leading-snug -mt-1">Repeats the words down the post, one copy filled and the rest outlined.</p>
+      <Section title="Echo stack" testId="fx-echo" open={!!echo}>
         <Slider label="Copies" value={echo?.count || 1} min={1} max={10} testId="fx-echo-count"
           onChange={(v) => patch({ echo: v > 1 ? { step: echo?.step ?? 0.82, filled: echo?.filled || 'middle', fade: echo?.fade ?? true, count: v } : null })} />
         {echo && (
@@ -384,9 +398,7 @@ function LayoutPhotoEffects({ fx: fx0, onChange, palette, previewSrc }) {
   const setFx = (p) => onChange({ ...fx, ...p })
   return (
     <div data-testid="fx-layout-photos">
-      <p className="text-[11px] text-pb-dim leading-relaxed mb-3">
-        These change every photo this layout draws: the player cut-outs, your Hero Image upload and the player of the match. Crests and logos are left alone. To style one photo on its own, add it as a picture block from Photos.
-      </p>
+      <p className="text-[11px] text-pb-dim leading-snug mb-3">Applies to every photo in this layout. Crests and logos stay as they are.</p>
       <PhotoLook fx={fx} setFx={setFx} palette={palette} previewSrc={previewSrc} />
       <Section title="Cut-out edge" testId="fx-layout-edge" open={false}>
         <Slider label="Outline" value={fx.edgeOutline?.width || 0} min={0} max={30} testId="fx-edge-outline"

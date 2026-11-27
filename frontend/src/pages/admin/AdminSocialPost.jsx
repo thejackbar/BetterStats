@@ -84,7 +84,7 @@ import { exportNodeToPng } from '../../social/exportImage'
 import { shortClubName, stripGradeTail } from '../../social/clubNames'
 import { crestColour, paletteFromColour } from '../../social/crestColour'
 import { NO_WINNER_KINDS, noWinnerLine, noWinnerWord, detectNoWinner } from '../../social/resultOutcome'
-import { SocialBackground, SocialBackgroundDefs, SOCIAL_BACKGROUNDS, GRADIENT_ANGLES, LINED_BACKGROUNDS, DEFAULT_COLORS as BG_DEFAULT_COLORS } from '../../social/SocialBackgrounds'
+import { SocialBackground, SocialBackgroundDefs, SOCIAL_BACKGROUNDS, GRADIENT_ANGLES, LINED_BACKGROUNDS, CLEAN_BACKGROUNDS, LIGHT_BACKGROUNDS, DEFAULT_COLORS as BG_DEFAULT_COLORS } from '../../social/SocialBackgrounds'
 import { EVENT_TEMPLATES, EVENT_PRESETS, DEFAULT_EVENT, resolveMotif, eventPaletteFor, prepareEventList, defaultEventList } from '../../social/event-templates'
 import EventPostEditor from '../../components/admin/EventPostEditor'
 import { BlankCanvas, newBlankItem, defaultBlankItems, withDesign, itemBBox, headshotUrl, resolveBlankColor } from '../../social/blank-template'
@@ -372,7 +372,7 @@ if (IS_AFL) {
 // Grouping for the Background picker (Splatter & Spray / Grit & Grunge /
 // Print / Geometric), in first-seen order from SOCIAL_BACKGROUNDS itself so
 // the picker stays in sync if that list changes.
-const BG_GROUPS = [...new Set(SOCIAL_BACKGROUNDS.map(s => s.group))]
+const BG_GROUPS = [...new Set(SOCIAL_BACKGROUNDS.filter(s => !s.retired).map(s => s.group))]
 const BG_COLOR_KEYS = [
   { key: 'primary', label: 'Primary' },
   { key: 'secondary', label: 'Secondary' },
@@ -804,21 +804,38 @@ const ROLE_FIELDS = [
   { key: 'accent', label: 'Accent' },
   { key: 'ink', label: 'Text' },
 ]
+// Whether the Brand cards are open, remembered in this browser (folded until opened).
+const BRAND_OPEN_KEY = 'bs_brand_open'
+function useBrandOpen(which, fallback) {
+  const [open, setOpenState] = useState(() => {
+    try { const v = JSON.parse(localStorage.getItem(BRAND_OPEN_KEY) || '{}'); return typeof v[which] === 'boolean' ? v[which] || fallback : fallback } catch { return fallback }
+  })
+  const setOpen = (fn) => setOpenState((cur) => {
+    const next = typeof fn === 'function' ? fn(cur) : fn
+    try { const v = JSON.parse(localStorage.getItem(BRAND_OPEN_KEY) || '{}'); localStorage.setItem(BRAND_OPEN_KEY, JSON.stringify({ ...v, [which]: next })) } catch { /* private window */ }
+    return next
+  })
+  return [open, setOpen]
+}
 function ColourRoles({ base, tweaks, onChange, onClear, onReset }) {
   const any = ROLE_FIELDS.some((f) => tweaks[f.key])
+  // Folded until opened or until a colour is set: most posts never need it.
+  const [open, setOpen] = useBrandOpen('roles', any)
   return (
     <section className="pb-card p-4" data-testid="colour-roles">
       <div className="flex items-center justify-between mb-1">
-        <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">Colours</h2>
+        <button type="button" onClick={() => setOpen((o) => !o)} data-testid="colour-roles-toggle" className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase hover:text-pb-text">{open ? '– ' : '+ '}Colours</button>
         {any && <button type="button" onClick={onReset} className="text-[10px] font-mono text-pb-faintest hover:text-pb-text underline">Reset all</button>}
       </div>
-      <p className="text-pb-faintest text-[10px] mb-2">These four colours run every layout. Change one here and the whole post follows; use the elements below to colour one thing on its own.</p>
+      {open && <>
+      <p className="text-pb-faintest text-[10px] mb-2">The four colours every layout uses.</p>
       <div className="flex flex-col">
         {ROLE_FIELDS.map((f) => (
           <ColourField key={f.key} label={f.label} value={tweaks[f.key]} auto={base?.[f.key]}
             onChange={(v) => onChange(f.key, v)} onClear={() => onClear(f.key)} testId={`role-${f.key}`} />
         ))}
       </div>
+      </>}
     </section>
   )
 }
@@ -827,13 +844,15 @@ function ColourRoles({ base, tweaks, onChange, onClear, onReset }) {
 function LayoutElements({ name, spec, palette, parts, onChange, onClear, onReset }) {
   const groups = [...new Set(spec.map((p) => p.group))]
   const any = spec.some((p) => parts[p.key] !== undefined)
+  const [open, setOpen] = useBrandOpen('parts', any)
   return (
     <section className="pb-card p-4" data-testid="layout-elements">
       <div className="flex items-center justify-between mb-1">
-        <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">{name} elements</h2>
+        <button type="button" onClick={() => setOpen((o) => !o)} data-testid="layout-elements-toggle" className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase hover:text-pb-text text-left">{open ? '– ' : '+ '}{name}: colours and words <span className="normal-case tracking-normal text-pb-faintest">({spec.length})</span></button>
         {any && <button type="button" onClick={onReset} className="text-[10px] font-mono text-pb-faintest hover:text-pb-text underline">Reset all</button>}
       </div>
-      <p className="text-pb-faintest text-[10px] mb-2">Set any part on its own: the title words, the name text, the backdrop behind each photo. Anything you leave on Auto follows the colours above.</p>
+      {open && <>
+      <p className="text-pb-faintest text-[10px] mb-2">Anything left on Auto follows the colours above.</p>
       {groups.map((g) => (
         <div key={g} className="mb-2 last:mb-0">
           <div className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2 mt-1 mb-0.5">{g}</div>
@@ -853,6 +872,7 @@ function LayoutElements({ name, spec, palette, parts, onChange, onClear, onReset
           ))}
         </div>
       ))}
+      </>}
     </section>
   )
 }
@@ -1977,6 +1997,8 @@ export default function AdminSocialPost() {
   // ids as the club arranged them; a picked player not in it follows in lineup
   // order. `off` are left out. Nothing set means the first players with photos.
   const [collage, setCollage] = useState({ order: [], off: [] })
+  // The opposition's colour, read from their crest (Match Day V's away colour).
+  const [awayCrest, setAwayCrest] = useState({ logo: null, hex: null })
   // Ladder & Leaders: the club's team ladders (null, 'loading', 'error' or the
   // /ladders/teams payload), what is picked, and the leaderboard read for it.
   const [ladders, setLadders] = useState(null)
@@ -3982,6 +4004,15 @@ export default function AdminSocialPost() {
   // held by `tlayers`, and a block added this render is not in `stackIds` yet,
   // so the move waits for the next render (pendingMoves) and runs once it is.
   const pendingMoves = useRef([])
+  // Match Day V paints the opposition's half in their colour, read off their crest.
+  const awayLogo = templateId === 'DL1' ? (opponent.logo || null) : null
+  useEffect(() => {
+    if (!awayLogo || awayCrest.logo === awayLogo) return undefined
+    let live = true
+    crestColour(awayLogo).then((hex) => { if (live) setAwayCrest({ logo: awayLogo, hex }) })
+    return () => { live = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [awayLogo])
   // A strip placed by v9.160.0 on Toss or Result · Classic sat on the layout's
   // own content. One still exactly where that version put it (nobody has moved
   // it) goes to the layout's spot now; a strip the club dragged stays put.
@@ -4108,8 +4139,10 @@ export default function AdminSocialPost() {
   const templatePalette = bgActive ? { ...renderPalette, primary: withAlpha(renderPalette.primary, DEFAULT_VEIL) } : renderPalette
   // The veil and the layout's own texture over the background (postLook.js).
   const ownPhotoBg = bgStyle === 'custom-image'
-  const bgTintEff = bgTint ?? (ownPhotoBg ? 0 : 0.6)
-  const bgTextureEff = bgTexture ?? !ownPhotoBg
+  // The Club Colour grounds are the look: no veil and no layout texture over them unless asked.
+  const cleanBg = CLEAN_BACKGROUNDS.has(bgStyle)
+  const bgTintEff = bgTint ?? (ownPhotoBg || cleanBg ? 0 : 0.6)
+  const bgTextureEff = bgTexture ?? !(ownPhotoBg || cleanBg)
   // One strength per texture: the club's pick, else on or off with the switch above.
   const finishEff = {
     dots: bgFinish.dots ?? (bgTextureEff ? 1 : 0),
@@ -4315,6 +4348,10 @@ export default function AdminSocialPost() {
   if (PAST_TEMPLATES.includes(templateId) && pastData) {
     extraProps.past = pastData
     if (extraProps.standings) extraProps.standings = { ...extraProps.standings, past: pastData }
+  }
+  if (templateId === 'DL1') {
+    extraProps.homeColour = orgAccent(settings)
+    if (awayCrest.logo === oppData.logo && awayCrest.hex) extraProps.awayColour = awayCrest.hex
   }
   if (templateId === 'DL9') extraProps.heroes = collagePlayers.filter((p) => !collage.off.includes(String(p._id))).slice(0, COLLAGE_MAX)
   const matchData = {
@@ -5825,7 +5862,14 @@ export default function AdminSocialPost() {
                   canBehind={!!(fxItem && fxItem.type === 'text' && pictureUnder(fxItem.id))}
                   layoutName={!isBlankTab ? tmpl.name : null} photoFx={photoFx}
                   onPhotoFx={(v) => setPhotoFx(v && Object.keys(v).length ? v : null)}
-                  layoutPhotoSrc={!isBlankTab ? (collectPhotos({ players: templatePlayers, ...extraProps })[0] || null) : null} />
+                  layoutPhotoSrc={!isBlankTab ? (
+                    // The photo the layout actually draws: an uploaded hero image, the
+                    // announcement or spotlight player, the featured lineup player, the
+                    // player of the match; only then the first photo it carries.
+                    extraProps.heroImage || heroSrcOf(extraProps.announcement?.player) || heroSrcOf(extraProps.motm?.player)
+                    || (templatePlayers.length ? heroSrcOf(featuredOf(templatePlayers, extraProps.featuredId)) : null)
+                    || extraProps.result?.potm?.photo || collectPhotos({ players: templatePlayers, ...extraProps })[0] || null
+                  ) : null} />
               )
             })()}
             {tool === 'data' && <ClubDataPanel onAdd={addBlock} />}
@@ -5998,10 +6042,14 @@ export default function AdminSocialPost() {
                 <span className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2">Background</span>
                 <div className="flex gap-2 flex-wrap items-center mt-1.5 mb-1">
                   <BgStyleSwatch entry={{ key: 'none', label: 'Clean' }} colors={paletteToBgColors(renderPalette)} selected={bgStyle === 'none'} onClick={() => setBgStyle('none')} />
+                  {SOCIAL_BACKGROUNDS.filter(s => s.retired && bgStyle === s.key && !BG_GROUPS.includes(s.group)).map(s => (
+                    <BgStyleSwatch key={s.key} entry={s} colors={paletteToBgColors(renderPalette)} selected onClick={() => setBgStyle(s.key)} />
+                  ))}
                   {BG_GROUPS.map(group => (
                     <div key={group} className="flex gap-2 flex-wrap items-center">
-                      {SOCIAL_BACKGROUNDS.filter(s => s.group === group).map(s => (
-                        <BgStyleSwatch key={s.key} entry={s} colors={paletteToBgColors(renderPalette)} selected={bgStyle === s.key} onClick={() => setBgStyle(s.key)} />
+                      {SOCIAL_BACKGROUNDS.filter(s => s.group === group && (!s.retired || bgStyle === s.key)).map(s => (
+                        <BgStyleSwatch key={s.key} entry={s} colors={paletteToBgColors(renderPalette)} selected={bgStyle === s.key}
+                          onClick={() => { setBgStyle(s.key); if (CLEAN_BACKGROUNDS.has(s.key)) setDarkMode(!LIGHT_BACKGROUNDS.has(s.key)) }} />
                       ))}
                     </div>
                   ))}

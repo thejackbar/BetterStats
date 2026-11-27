@@ -57,6 +57,8 @@ const browser = await chromium.launch(existsSync(EXECUTABLE) ? { executablePath:
 
 async function openEditor(query, viewport = { width: 1600, height: 1000 }, mobile = false) {
   const ctx = await browser.newContext({ viewport })
+  // The Brand cards fold by default (v9.164.0); these checks read inside them.
+  await ctx.addInitScript(() => { try { localStorage.setItem('bs_brand_open', JSON.stringify({ roles: true, parts: true })) } catch { /* */ } })
   const page = await ctx.newPage()
   const errors = []
   const totwCalls = []

@@ -26,6 +26,17 @@ const ck = (name, cond, extra = '') => {
 }
 const textOf = async (loc) => { try { return (await loc.count()) ? await loc.first().innerText() : '' } catch { return '' } }
 const seen = async (loc) => { try { return (await loc.count()) > 0 && await loc.first().isVisible() } catch { return false } }
+// Effects folds its finer sections: open the one holding a control before using it.
+const reveal = async (page, testId, heading) => {
+  if (await page.getByTestId(testId).count()) return
+  const h = page.getByRole('button', { name: new RegExp(`^${heading}`) })
+  if (await h.count()) { await h.first().click().catch(() => {}); await page.waitForTimeout(150) }
+}
+const revealMore = async (page, testId, moreId) => {
+  if (await page.getByTestId(testId).count()) return
+  const m = page.getByTestId(moreId)
+  if (await m.count()) { await m.first().click().catch(() => {}); await page.waitForTimeout(150) }
+}
 const press = async (loc) => { try { if (await loc.count()) { await loc.first().click(); return true } } catch { /* reported by the check */ } return false }
 
 const CLUB = { id: 'org-1', name: 'Test Cricket Club', short_name: 'TCC', slug: 'tcc', logo_url: null, primary_color: '#0b1530', accent_color: '#ffc233', theme_config: null }
@@ -160,6 +171,7 @@ const openEffects = async (page) => { await tool(page, 'Effects'); await page.wa
     isRed(before.px[0]) && isBlue(before.px[1]) && isRed(before.px[2]), JSON.stringify(before.px) + (before.error || ''))
 
   // Eyedropper: click the left (red) side of the thumbnail.
+  await reveal(page, 'fx-eyedropper', 'Colour splash')
   const eye = page.getByTestId('fx-eyedropper')
   await eye.waitFor({ timeout: 5000 }).catch(() => {})
   const box = await eye.boundingBox().catch(() => null)
@@ -185,6 +197,7 @@ const openEffects = async (page) => { await tool(page, 'Effects'); await page.wa
   const popHtml = await exportBlocks(page)
   ck('pop out adds the layer that lets a cut-out rise out of the frame', /data-pop-out/.test(popHtml))
   // Frame fill + outline
+  await revealMore(page, 'fx-frame-fill', 'fx-frame-more')
   await press(page.locator('[data-testid="fx-frame-fill"] button[title="accent"]'))
   const st = page.getByTestId('fx-frame-stroke')
   if (await st.count()) await st.fill('12')
@@ -252,6 +265,7 @@ const openEffects = async (page) => { await tool(page, 'Effects'); await page.wa
   await page.waitForTimeout(200)
   await openEffects(page)
   ck('the Effects panel shows the text styles for a text block', await seen(page.getByTestId('fx-text')))
+  await reveal(page, 'fx-echo-count', 'Echo stack')
   const ec = page.getByTestId('fx-echo-count')
   if (await ec.count()) await ec.fill('4')
   await page.waitForTimeout(200)
@@ -337,10 +351,11 @@ for (const [id, name, layer] of LAYOUTS) {
   // Match Day V on a square post with no players: the V frames are cut, so the
   // bottom corner of our frame is the background and its top is the accent.
   const { ctx, page } = await openLayout('DL1')
-  // Square: our panel runs from x 70 and from y ~330; the club is navy #0b1530.
+  // Square: our panel runs from x 70 and from y ~330, in the club colour (the
+  // test club's accent #ffc233); outside its V corner the deepened ground shows.
   const px = await exportPixels(page, [[90, 380], [74, 700]])
-  ck('PNG: Match Day V paints our panel in the club colour', near(px.px[0], [11, 21, 48], 30), JSON.stringify(px.px[0]))
-  ck('PNG: and cuts its bottom corner into a V (the paper shows)', near(px.px[1], [235, 232, 225], 30), JSON.stringify(px.px[1]))
+  ck('PNG: Match Day V paints our panel in the club colour', near(px.px[0], [255, 194, 51], 35), JSON.stringify(px.px[0]))
+  ck('PNG: and cuts its bottom corner into a V (the darker ground shows)', !near(px.px[1], [255, 194, 51], 60) && px.px[1][0] < 150, JSON.stringify(px.px[1]))
   await ctx.close()
 }
 {
@@ -824,6 +839,92 @@ const tilesOf = async (page) => page.evaluate(() => [...document.querySelectorAl
   }
 }
 
+// ── 4l. Club Colour backgrounds, Match Day V colours, the Effects photo ─────
+{
+  const json = (b) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(b) })
+  const open = async (settings, query, roster = []) => {
+    const ctx = await browser.newContext({ viewport: { width: 1600, height: 1000 } })
+    const page = await ctx.newPage()
+    const errors = []
+    const writes = []
+    page.on('pageerror', (e) => errors.push(String(e)))
+    await page.route('**/api/**', (route) => {
+      const url = route.request().url()
+      if (route.request().method() !== 'GET') writes.push({ url, body: route.request().postData() })
+      if (/\/images\/players\//.test(url)) return route.fulfill({ status: 200, contentType: 'image/png', body: CUTOUT })
+      if (/\/auth\/me/.test(url)) return route.fulfill(json({ id: 'u1', role: 'club_admin', club_slug: 'tcc', entitlements: { modules: ['socials'], status: 'active' } }))
+      if (/\/club-admin\/settings/.test(url)) return route.fulfill(json(settings))
+      if (/\/club-admin\/players/.test(url)) return route.fulfill(json(roster))
+      if (/social\/media|templates|sponsors|ladders|head-to-head/.test(url)) return route.fulfill(json([]))
+      return route.fulfill(json({}))
+    })
+    await page.goto(`${BASE}/admin/social-post${query}`, { waitUntil: 'domcontentloaded' })
+    await page.getByRole('button', { name: /DOWNLOAD PNG|SLIDES/ }).first().waitFor({ timeout: 25000 }).catch(() => {})
+    await page.waitForTimeout(400)
+    return { ctx, page, errors, writes }
+  }
+  const findSwatch = async (page, label) => {
+    for (const t of ['Design', 'Brand']) {
+      await press(page.getByRole('button', { name: t, exact: true }))
+      await page.waitForTimeout(150)
+      if (await page.locator(`button[title="${label}"]`).count()) return true
+    }
+    return false
+  }
+  {
+    const { ctx, page, errors, writes } = await open({ ...CLUB, socials_style: { palette: 'club', bg: 'none' } }, '?template=C5')
+    ck('the picker offers the new Club Colour backgrounds', await findSwatch(page, 'Halo Glow') && await page.locator('button[title="Flat Colour"]').count() === 1 && await page.locator('button[title="Edge Glow"]').count() === 1)
+    const retired = ['Ink Splatter', 'Spray Stencil', 'Paint Sweep', 'Drip Curtain', 'Graffiti Chaos', 'Airbrush Glow', 'Photo Spotlight', 'Torn Halftone', 'Riso Geometric', 'Bolt Energy', 'Shard Cut']
+    let shown = 0
+    for (const r of retired) shown += await page.locator(`button[title="${r}"]`).count()
+    ck('the eleven noisy backgrounds are no longer offered', shown === 0, String(shown))
+    await press(page.locator('button[title="Studio Light"]'))
+    await page.waitForTimeout(1600)
+    const st = writes.filter((w) => /club-admin\/settings/.test(w.url) && /socials_style/.test(w.body || '')).map((w) => JSON.parse(w.body).socials_style).pop()
+    ck('picking a light ground saves it and turns the post to light mode', st && st.bg === 'studio-light' && st.dark === false, JSON.stringify(st && { bg: st.bg, dark: st.dark }))
+    ck('no page errors on the background picker', errors.length === 0, errors.slice(0, 2).join(' | '))
+    await ctx.close()
+  }
+  {
+    const { ctx, page } = await open({ ...CLUB, socials_style: { palette: 'club', bg: 'ink-splatter' } }, '?template=C5')
+    ck('a post already on a retired background still shows it, selected', await findSwatch(page, 'Ink Splatter'))
+    await ctx.close()
+  }
+  {
+    const ROSTER2 = [{ id: 'p1', name: 'Harrison Kucan', display_name: 'Harrison Kucan', status: 'active', photo_url: '/api/images/players/p1/photo' },
+      { id: 'p2', name: 'Angus Castley', display_name: 'Angus Castley', status: 'active', photo_url: '/api/images/players/p2/photo' }]
+    const { ctx, page, errors } = await open({ ...CLUB, primary_color: '#c8102e', accent_color: '#c8102e' }, '?template=DL1', ROSTER2)
+    await press(page.getByRole('button', { name: 'Content', exact: true }))
+    await page.waitForTimeout(200)
+    await press(page.getByRole('button', { name: /^Harrison Kucan\b/ }))
+    await press(page.getByRole('button', { name: /^Angus Castley\b/ }))
+    // Long enough for a photo look to finish processing (the old black and
+    // white look swaps the photo for a processed image once it is ready).
+    await page.waitForTimeout(2500)
+    const html = await exportBlocks(page)
+    ck('Match Day V: the ground is the two clubs\' colours, not pale paper', /linear-gradient\(100deg/.test(html) && !/rgb\(235, 232, 225\)|#ebe8e1/i.test(html))
+    ck('Match Day V: the player photo is shown as it is (no black and white)', /<img[^>]+src="[^"]*images\/players\/p1\/photo/.test(html) && !/<img[^>]+src="(blob:|data:image\/png)/.test(html), (html.match(/<img[^>]+src="(blob:|data:image\/png)[^"]{0,20}/) || [''])[0])
+    // Make the second player the hero: the post and the Effects photo must agree.
+    for (const t of ['Photos', 'Content', 'Design']) {
+      const sel = page.locator('label:has-text("Hero Player") + select')
+      if (await sel.count()) { await sel.first().selectOption('p2').catch(() => {}); break }
+      await press(page.locator(`nav button[title="${t}"]`))
+      await press(page.getByRole('button', { name: t, exact: true }))
+      await page.waitForTimeout(150)
+    }
+    await page.waitForTimeout(400)
+    const drawn = await exportBlocks(page)
+    ck('control: the post now draws the second player', /images\/players\/p2\/photo/.test(drawn))
+    await press(page.locator('nav button[title="Effects"]'))
+    await page.waitForTimeout(200)
+    await reveal(page, 'fx-eyedropper', 'Colour splash')
+    const src = await page.getByTestId('fx-eyedropper').getAttribute('data-src').catch(() => null)
+    ck('Effects picks colours from the photo the post shows', /p2\/photo/.test(src || ''), String(src))
+    ck('no page errors on Match Day V', errors.length === 0, errors.slice(0, 2).join(' | '))
+    await ctx.close()
+  }
+}
+
 // ── 5. Association Socials workspace has the same tools ────────────────────
 {
   const { ctx, page, errors } = await openEditor({ settings: WORKSPACE, assoc: true })
@@ -833,6 +934,7 @@ const tilesOf = async (page) => page.evaluate(() => [...document.querySelectorAl
   await openEffects(page)
   ck('workspace: the Effects panel opens on a picture', await seen(page.getByTestId('fx-frame')))
   // Keep the accent (a yellow): the photo's red and blue are both outside it.
+  await reveal(page, 'splash-add-accent', 'Colour splash')
   await press(page.getByTestId('splash-add-accent'))
   await press(page.getByTestId('frame-hexagon'))
   await page.waitForTimeout(400)

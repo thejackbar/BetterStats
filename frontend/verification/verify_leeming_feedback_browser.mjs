@@ -66,6 +66,8 @@ const browser = await chromium.launch(EXECUTABLE && existsSync(EXECUTABLE) ? { e
 
 async function openEditor(init = {}) {
   const ctx = await browser.newContext({ viewport: { width: 1700, height: 2300 } })
+  // The Brand cards fold by default (v9.164.0); these checks read inside them.
+  await ctx.addInitScript(() => { try { localStorage.setItem('bs_brand_open', JSON.stringify({ roles: true, parts: true })) } catch { /* */ } })
   const page = await ctx.newPage()
   const errors = []
   page.on('pageerror', (e) => errors.push(String(e)))
@@ -249,6 +251,8 @@ console.log('\n# Dots, stripes, grain and background lines')
 console.log('\n# Phone width')
 {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } })
+  // The Brand cards fold by default (v9.164.0); these checks read inside them.
+  await ctx.addInitScript(() => { try { localStorage.setItem('bs_brand_open', JSON.stringify({ roles: true, parts: true })) } catch { /* */ } })
   const page = await ctx.newPage()
   await page.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort())
   await page.route('**/api/**', (route) => {

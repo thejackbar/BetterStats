@@ -62,6 +62,8 @@ const browser = await chromium.launch(existsSync(EXECUTABLE) ? { executablePath:
 
 async function openEditor(query, viewport = { width: 1600, height: 1000 }, mobile = false) {
   const ctx = await browser.newContext({ viewport })
+  // The Brand cards fold by default (v9.164.0); these checks read inside them.
+  await ctx.addInitScript(() => { try { localStorage.setItem('bs_brand_open', JSON.stringify({ roles: true, parts: true })) } catch { /* */ } })
   const page = await ctx.newPage()
   const errors = []
   const totwCalls = []
@@ -140,10 +142,9 @@ ck('before any background: the layout draws its own dots, stripes and grain', ba
 ck('before any background: no finish controls are offered', !(await seen(page.getByTestId('bg-finish'))))
 
 const picked = await page.evaluate(() => {
-  const clean = document.querySelector('button[title="Clean"]')
-  const row = clean && clean.parentElement
-  const btns = row ? [...row.querySelectorAll('button')] : []
-  const next = btns.find((b) => b !== clean)
+  // A textured ground (v9.164.0: the Club Colour row next to Clean is drawn
+  // without the veil or pattern on purpose, so pick from the textured groups).
+  const next = document.querySelector('button[title="Concrete Grit"]')
   if (!next) return false
   next.click(); return true
 })

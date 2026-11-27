@@ -1517,3 +1517,11 @@ Asked for (November 2026, a club's own results graphic as the reference): a Resu
 ## Existing strips moved on Toss and Result · Classic (v9.160.2)
 - Asked for: move strips already placed to the new spot. Done on open, in the editor, for a strip still exactly at v9.160.0's default (square: Toss y 884, Result · Classic y 782); a dragged one is the club's choice and stays. Saved templates are not rewritten on the server; re-saving keeps the new spot.
 - Proof: browser check 260/260 with saved templates at the old spots and one dragged; v9.160.1 control fails the two move checks (884, 782) and passes the dragged guard.
+
+## Club Colour backgrounds, Match Day V colours, tidier panels (v9.164.0)
+- Asked for: DL1 was pale, ignored home and away colours, and the Effects preview showed a different photo; Effects and Brand panels too busy; the noisy backgrounds unpopular; backgrounds after five reference posts (flat colour, paint wash, studio floor, colour glow) and an NFL airbrushed glow grid.
+- Backgrounds: `SOCIAL_BACKGROUNDS` entries can carry `retired: true` (hidden from the picker unless the post is on it; still render). New group 'Club Colour' (9 keys) exported as `CLEAN_BACKGROUNDS`; `LIGHT_BACKGROUNDS` (4) switch dark mode off when picked. For a clean ground the editor's default veil is 0 and the layout pattern off (`bgTintEff`, `bgTextureEff`).
+- DL1: `homeColour` = `orgAccent(settings)`, `awayColour` = `crestColour(opponent.logo)`; ground is a 100deg split of both darkened; parts dl1UsFill, dl1ThemFill, dl1Paper (one flat ground). Hero no longer runs `keptLook`.
+- Effects photo: `layoutPhotoSrc` follows the same order the layouts draw (heroImage, announcement, MOTM, featured template player, POTM, first collected photo). Eyedropper canvas carries `data-src`.
+- Panels: Brand sections fold (`bs_brand_open` localStorage), Effects frame and text extras behind `More`. Suites that open those panels set `bs_brand_open` open in an init script.
+- Proof: verify_design_effects 270/270; control on v9.163.0 fails the 9 new checks. post_designer same 8 pre-existing fails; association 63/63; leeming 29/29; parts_all 372/372; post_look 28/30, the 2 fails read the `bg-texture` switch removed in v9.150.1 (pre-existing).
