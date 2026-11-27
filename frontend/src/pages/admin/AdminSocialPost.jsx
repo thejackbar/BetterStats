@@ -42,7 +42,7 @@ import { ResultsCards } from '../../social/results-cards-template'
 import { RoundCover } from '../../social/round-cover-template'
 import { ResultHighlights, HIGHLIGHTS_FOCUS } from '../../social/highlights-cover-template'
 import { GiantType } from '../../social/giant-type-template'
-import { MatchDayV, GamedayEcho, FinalScoreV, FixturesEcho, ResultsEcho, ColourPopSpotlight, ColourPopAnnounce, DESIGN_PANEL_ALIAS } from '../../social/design-templates'
+import { MatchDayV, GamedayEcho, GameDayCard, SquadCollage, COLLAGE_MAX, FinalScoreV, FixturesEcho, ResultsEcho, ColourPopSpotlight, ColourPopAnnounce, DESIGN_PANEL_ALIAS } from '../../social/design-templates'
 import { MilestoneCards, MilestoneBoard, MILESTONE_MAX } from '../../social/milestone-templates'
 import { ReviewWrap, ReviewPerformers, ReviewPlayer, ReviewMatch, ReviewResults, ReviewLeaders, ReviewMilestones, ReviewLadder, ReviewFixtures } from '../../social/round-review-templates'
 import { reviewPost } from '../../social/roundReviewPost'
@@ -60,8 +60,9 @@ import { NO_WINNER_KINDS, noWinnerLine, noWinnerWord, detectNoWinner } from '../
 import { SocialBackground, SocialBackgroundDefs, SOCIAL_BACKGROUNDS, GRADIENT_ANGLES, LINED_BACKGROUNDS, DEFAULT_COLORS as BG_DEFAULT_COLORS } from '../../social/SocialBackgrounds'
 import { EVENT_TEMPLATES, EVENT_PRESETS, DEFAULT_EVENT, resolveMotif, eventPaletteFor, prepareEventList, defaultEventList } from '../../social/event-templates'
 import EventPostEditor from '../../components/admin/EventPostEditor'
-import { BlankCanvas, newBlankItem, defaultBlankItems, withDesign, itemBBox, headshotUrl } from '../../social/blank-template'
+import { BlankCanvas, newBlankItem, defaultBlankItems, withDesign, itemBBox, headshotUrl, resolveBlankColor } from '../../social/blank-template'
 import { resolveBind } from '../../social/boundResolve'
+import { useFxUrls, collectPhotos, mapPhotos, resolveFx, needsPixels } from '../../social/designFx'
 import { parseTemplateFile, itemsFromTemplate, templateWarnings, boundSlotCount } from '../../social/boundFields'
 import { CustomLayout, CUSTOM_LAYOUT_ID, CUSTOM_LAYOUTS, CUSTOM_LAYOUT_IDS, CUSTOM_PANEL_ALIAS, isCustomLayout } from '../../social/custom-layout'
 import { fixtureRows, resultRows, finalBundle, motmBundle, announceBundle, tossBundle, totwBundle, milestoneBundle, eventBundle } from '../../social/postBundle'
@@ -110,8 +111,10 @@ const ALL_TEMPLATES = [
   { id: 'T9', name: 'Flyer',           component: T9_Flyer,           desc: 'Festival poster style',           maxPlayers: LINEUP_MAX },
   { id: 'T10', name: 'Team Sheet',     component: T10_TeamSheet,      desc: 'Full-bleed photo + torn strip',   maxPlayers: LINEUP_MAX },
   // Design layouts (design-templates.jsx): frames, echo type and colour splash.
-  { id: 'DL1', name: 'Match Day V',    component: MatchDayV,          desc: 'Cut-out and opposition crest in V frames, XI below', maxPlayers: LINEUP_MAX },
-  { id: 'DL2', name: 'Gameday Echo',   component: GamedayEcho,        desc: 'Stacked GAMEDAY behind an outlined cut-out', maxPlayers: LINEUP_MAX },
+  { id: 'DL1', name: 'Match Day V',    component: MatchDayV,          desc: 'Pale poster, our player and their crest in V panels', maxPlayers: LINEUP_MAX },
+  { id: 'DL2', name: 'Gameday Echo',   component: GamedayEcho,        desc: 'Stacked GAMEDAY, player in black and white, kit colour kept', maxPlayers: LINEUP_MAX },
+  { id: 'DL8', name: 'Game Day Card',  component: GameDayCard,        desc: 'Duotone photo, GAME DAY with the player breaking out', maxPlayers: LINEUP_MAX },
+  { id: 'DL9', name: 'Squad Collage',  component: SquadCollage,       desc: 'Up to seven players stacked on a torn poster', maxPlayers: LINEUP_MAX },
   { id: 'C1', name: 'Announcement',    component: C1_CaptainAnnounce, desc: 'Captain / debut / award',         maxPlayers: 1 },
   { id: 'C5', name: 'Giant Type',      component: GiantType,          desc: 'FIRST XI / 100 / 5FA behind the player', maxPlayers: 1 },
   { id: 'C2', name: 'Toss',            component: C2_TossWon,         desc: 'Toss result post',                maxPlayers: 0 },
@@ -196,12 +199,12 @@ const HERO_CROP_ASPECT = { T1: 480 / 845, T3: 380 / 1080, T10: 720 / 1080, T13: 
 const HERO_FOCUS_TEMPLATES = Object.keys(HERO_CROP_ASPECT)
 // The layouts drawn around a hero photo. Derived from the same id list the Hero
 // Image panel is gated on, so the two can't drift apart.
-const HERO_SLOT_TEMPLATES = ['T1', 'T3', 'T6', 'T7', 'T10', 'T11', 'T13', 'C1', 'C3', 'C5', 'DL1', 'DL2', 'DL6', 'DL7', CUSTOM_LAYOUTS.lineup, CUSTOM_LAYOUTS.result, CUSTOM_LAYOUTS.motm, CUSTOM_LAYOUTS.announcement]
+const HERO_SLOT_TEMPLATES = ['T1', 'T3', 'T6', 'T7', 'T10', 'T11', 'T13', 'C1', 'C3', 'C5', 'DL1', 'DL2', 'DL8', 'DL6', 'DL7', CUSTOM_LAYOUTS.lineup, CUSTOM_LAYOUTS.result, CUSTOM_LAYOUTS.motm, CUSTOM_LAYOUTS.announcement]
 // The lineups that can mark which listed player is the one in the photo, and
 // the ones whose Hero Player picker names that player. T7 and the announcement
 // layouts have a single player, so there is no list to mark.
 const HERO_MARK_TEMPLATES = ['T1', 'T3', 'T10', 'T11']
-const HERO_PLAYER_TEMPLATES = ['T1', 'T3', 'T6', 'T10', 'T11', 'DL1', 'DL2', CUSTOM_LAYOUT_ID]
+const HERO_PLAYER_TEMPLATES = ['T1', 'T3', 'T6', 'T10', 'T11', 'DL1', 'DL2', 'DL8', CUSTOM_LAYOUT_ID]
 // The lineups that draw a DEBUT tag beside a flagged player. The flag is kept
 // on the player either way, so switching layout never loses it.
 const DEBUT_TEMPLATES = ['T1', 'T3', 'T10', 'T11', 'T12']
@@ -217,7 +220,7 @@ const matchDayIso = (v) => (/^\d{4}-\d{2}-\d{2}/.test(String(v || '')) ? String(
 const TAB_MAP = {
   T1: 'lineup', T2: 'lineup', T3: 'lineup', T4: 'lineup', T5: 'lineup',
   T6: 'lineup', T7: 'lineup', T8: 'lineup', T9: 'lineup', T10: 'lineup', T11: 'lineup', T12: 'lineup', T13: 'lineup',
-  DL1: 'lineup', DL2: 'lineup', DL3: 'result', DL4: 'fixtures', DL5: 'results', DL6: 'motm', DL7: 'announcement',
+  DL1: 'lineup', DL2: 'lineup', DL8: 'lineup', DL9: 'lineup', DL3: 'result', DL4: 'fixtures', DL5: 'results', DL6: 'motm', DL7: 'announcement',
   ...Object.fromEntries(Object.entries(CUSTOM_LAYOUTS).map(([type, id]) => [id, type])),
   FX1: 'fixtures', FX2: 'fixtures', FX3: 'fixtures', FX4: 'fixtures', FX5: 'fixtures', FX6: 'fixtures',
   C1: 'announcement', C5: 'announcement', C2: 'toss', C3: 'motm',
@@ -1915,6 +1918,17 @@ export default function AdminSocialPost() {
   })
   // Per-element colours and words for the open layout, keyed by post type
   // (layoutParts.js `partsKey`). A part that is absent is what the layout always drew.
+  // Squad Collage (DL9): who is in it and in what order. `order` holds player
+  // ids as the club arranged them; a picked player not in it follows in lineup
+  // order. `off` are left out. Nothing set means the first players with photos.
+  const [collage, setCollage] = useState({ order: [], off: [] })
+  // A photo look for the pictures a built-in layout draws (its cut-outs, the
+  // Hero Image upload, the player of the match). Set in Effects with nothing
+  // selected; saved with a template. null means the photos are left alone.
+  const [photoFx, setPhotoFx] = useState(() => {
+    try { const v = JSON.parse(localStorage.getItem('bs_social_photo_fx') || 'null'); return v && typeof v === 'object' ? v : null } catch { return null }
+  })
+  useEffect(() => { try { localStorage.setItem('bs_social_photo_fx', JSON.stringify(photoFx)) } catch { /* private window */ } }, [photoFx])
   const [layoutParts, setLayoutParts] = useState(() => {
     try { return JSON.parse(localStorage.getItem('bs_social_parts') || '{}') || {} } catch { return {} }
   })
@@ -2316,7 +2330,7 @@ export default function AdminSocialPost() {
       }
       const tpl = {
         key, name: finalName, templateId, custom: usingOverlay,
-        style: { palette: paletteKey, dark: darkMode, font: fontKey, bg: bgStyle, bgColors, customBg, customAccent, bgTint, bgTexture, bgFinish, roles: roleTweaks, parts: layoutParts[partsKey(templateId)] || null, bgUrl: bgStyle === 'custom-image' ? bgCustomUrl : null },
+        style: { palette: paletteKey, dark: darkMode, font: fontKey, bg: bgStyle, bgColors, customBg, customAccent, bgTint, bgTexture, bgFinish, roles: roleTweaks, parts: layoutParts[partsKey(templateId)] || null, bgUrl: bgStyle === 'custom-image' ? bgCustomUrl : null, ...(photoFx ? { photoFx } : null) },
         blank: items,
         event: eventContent,
         // The stacking order goes with the design. Without it a template saved
@@ -2394,6 +2408,8 @@ export default function AdminSocialPost() {
     setBgTexture(typeof st.bgTexture === 'boolean' ? st.bgTexture : null)
     setBgFinish(cleanFinish(st.bgFinish))
     setRoleTweaks(st.roles && typeof st.roles === 'object' ? st.roles : {})
+    // Absent on a template saved before photo looks: its photos stay untouched.
+    setPhotoFx(st.photoFx && typeof st.photoFx === 'object' ? st.photoFx : null)
     setLayoutParts((all) => ({ ...all, [partsKey(tpl.templateId)]: cleanParts(tpl.templateId, st.parts) }))
     if (st.bg === 'custom-image' && typeof st.bgUrl === 'string' && st.bgUrl) setBgCustomUrl(st.bgUrl)
     if (tpl.event && typeof tpl.event === 'object') {
@@ -3953,7 +3969,7 @@ export default function AdminSocialPost() {
       summary: motm.summary,
     }
   }
-  if (['T1', 'T3', 'T6', 'T7', 'T10', 'T11', 'T13', 'DL1', 'DL2'].includes(templateId) && heroImage.blobUrl) {
+  if (['T1', 'T3', 'T6', 'T7', 'T10', 'T11', 'T13', 'DL1', 'DL2', 'DL8'].includes(templateId) && heroImage.blobUrl) {
     extraProps.heroImage = heroImage.blobUrl
   }
   // Only the templates that crop a photo into a box can act on a focal point;
@@ -4050,6 +4066,14 @@ export default function AdminSocialPost() {
     extraProps.markHero = markHeroOn
   }
 
+  // The collage's players: those with a photo, the club's order first.
+  const collagePlayers = (() => {
+    const withPhoto = templatePlayers.filter((p) => heroSrcOf(p))
+    const byId = new Map(withPhoto.map((p) => [String(p._id), p]))
+    const ordered = [...collage.order.map((id) => byId.get(String(id))).filter(Boolean), ...withPhoto.filter((p) => !collage.order.includes(String(p._id)))]
+    return ordered
+  })()
+  if (templateId === 'DL9') extraProps.heroes = collagePlayers.filter((p) => !collage.off.includes(String(p._id))).slice(0, COLLAGE_MAX)
   const matchData = {
     competition: match.competition || 'COMPETITION',
     round: match.round || 'ROUND 1',
@@ -4435,6 +4459,11 @@ export default function AdminSocialPost() {
   // Measure the Match Day Card's logo so the layout can give a 6:1 wordmark and
   // a square crest each the box that suits them. An image that will not load
   // keeps the last ratio; the layout then draws nothing for it anyway.
+  // The layout's photos under the photo look. Blocks carry their own effects,
+  // so the Blank tab has nothing here.
+  const photoFxResolved = photoFx && !isBlankTab ? resolveFx(photoFx, (c) => resolveBlankColor(c, templatePalette)) : null
+  const layoutPhotoUrls = photoFxResolved && needsPixels(photoFxResolved) ? collectPhotos({ players: templatePlayers, ...extraProps }) : []
+  const layoutPhoto = useFxUrls(layoutPhotoUrls, photoFxResolved)
   const lineupLogoSrc = lineupCard.logoUrl || team.logo || ''
   useEffect(() => {
     if (!lineupLogoSrc) return undefined
@@ -4536,10 +4565,11 @@ export default function AdminSocialPost() {
     ),
   })
   const templateNode = ({ interactive = false, scale = 1, ...props } = {}) => {
-    const node = frameTemplate(
-      <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers}
-        palette={templatePalette} headline={headline} width={W} height={H} {...extraProps} {...props} />
-    )
+    const layoutProps = { team, opponent: oppData, match: matchData, players: templatePlayers, palette: templatePalette, headline, width: W, height: H, ...extraProps, ...props }
+    // The photo look swaps each photo for its processed copy; everything else
+    // (crests, logos, the palette) passes through untouched.
+    const shown = layoutPhotoUrls.length ? { ...layoutProps, ...mapPhotos({ players: layoutProps.players, ...extraProps }, layoutPhoto) } : layoutProps
+    const node = frameTemplate(<TemplateComponent {...shown} {...(layoutPhotoUrls.length ? mapPhotos(props, layoutPhoto) : null)} />)
     return <PostLookContext.Provider value={postLook}><PostLayerProvider value={templateLayerValue(interactive, scale)}>{node}</PostLayerProvider></PostLookContext.Provider>
   }
   const postPages = (() => {
@@ -5539,7 +5569,10 @@ export default function AdminSocialPost() {
                   onPatch={(p) => fxItem && hUpdate(fxItem.id, p)} previewSrc={previewSrc}
                   onGhost={() => fxItem && hGhost(fxItem.id)}
                   onTextBehind={() => fxItem && hTextBehind(fxItem.id)}
-                  canBehind={!!(fxItem && fxItem.type === 'text' && pictureUnder(fxItem.id))} />
+                  canBehind={!!(fxItem && fxItem.type === 'text' && pictureUnder(fxItem.id))}
+                  layoutName={!isBlankTab ? tmpl.name : null} photoFx={photoFx}
+                  onPhotoFx={(v) => setPhotoFx(v && Object.keys(v).length ? v : null)}
+                  layoutPhotoSrc={!isBlankTab ? (collectPhotos({ players: templatePlayers, ...extraProps })[0] || null) : null} />
               )
             })()}
             {tool === 'data' && <ClubDataPanel onAdd={addBlock} />}
@@ -6873,6 +6906,40 @@ export default function AdminSocialPost() {
                   )}
                   {!heroImage.blobUrl && <p className="text-[11px] text-pb-faintest">Without a photo the cover sits on a dark ground. Add the match photo the whole carousel opens with.</p>}
                   <HeroFocusControl src={heroImage.blobUrl || null} value={highlightsFocus} onChange={setHighlightsFocus} defaults={HIGHLIGHTS_FOCUS} aspect={W / H} />
+                </div>
+              </section>
+            )}
+
+            {/* Squad Collage (DL9): which players stack on the poster, and their order */}
+            {activeTab === 'lineup' && templateId === 'DL9' && (
+              <section className="pb-card p-4" data-testid="collage-players">
+                <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Squad Collage</h2>
+                <p className="text-[11px] text-pb-faint mb-3">The first player takes the middle of the back row and the rest stack around them. Up to {COLLAGE_MAX} show; the layout rearranges itself for however many are ticked. Only players with a photo can go in (cut-outs look best).</p>
+                {collagePlayers.length === 0 && <p className="text-[11px] text-pb-dim">Pick players in Players first. None of the picked players has a photo yet.</p>}
+                <div className="flex flex-col gap-1.5">
+                  {collagePlayers.map((p, i) => {
+                    const id = String(p._id)
+                    const on = !collage.off.includes(id)
+                    const ids = collagePlayers.map((x) => String(x._id))
+                    const move = (dir) => {
+                      const j = i + dir
+                      if (j < 0 || j >= ids.length) return
+                      const next = ids.slice(); [next[i], next[j]] = [next[j], next[i]]
+                      setCollage((c) => ({ ...c, order: next }))
+                    }
+                    const shownIdx = collagePlayers.filter((x) => !collage.off.includes(String(x._id))).findIndex((x) => String(x._id) === id)
+                    return (
+                      <div key={id} data-testid="collage-row" className="flex items-center gap-2 rounded border pb-hairline px-2 py-1.5">
+                        <input type="checkbox" checked={on} data-testid="collage-on"
+                          onChange={() => setCollage((c) => ({ ...c, off: on ? [...c.off, id] : c.off.filter((x) => x !== id) }))} />
+                        <img src={heroSrcOf(p)} alt="" className="w-7 h-7 object-contain rounded bg-pb-surface2" />
+                        <span className="flex-1 min-w-0 truncate text-[12px] text-pb-text">{[p.first, p.last].filter(Boolean).join(' ')}</span>
+                        <span className="font-mono text-[9px] text-pb-faint w-14 text-right">{on && shownIdx >= 0 && shownIdx < COLLAGE_MAX ? (shownIdx === 0 ? 'FEATURED' : `#${shownIdx + 1}`) : on ? 'NOT SHOWN' : 'OFF'}</span>
+                        <button title="Earlier" data-testid="collage-up" onClick={() => move(-1)} className="px-1.5 text-pb-faint hover:text-pb-text">↑</button>
+                        <button title="Later" data-testid="collage-down" onClick={() => move(1)} className="px-1.5 text-pb-faint hover:text-pb-text">↓</button>
+                      </div>
+                    )
+                  })}
                 </div>
               </section>
             )}

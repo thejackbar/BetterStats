@@ -35,9 +35,28 @@ const MEDIA = [
   { id: 'm2', name: 'cutout-player.png', url: '/api/admin/social/media/m2/file' },
 ]
 
+// ── 0. Colour splash sliders respond across their whole range ──────────────
+// STRUCTURAL: the pixel pass itself, on a red kit's highlight and shadow and an
+// orange neighbour. Range must keep widening past 10, and Softness must matter.
+{
+  const { applyPixels } = await import(new URL('../src/social/designFx.js', import.meta.url))
+  const kept = (rgb, range, soft) => {
+    const d = new Uint8ClampedArray([...rgb, 255])
+    applyPixels(d, { tone: 'mono', splash: [{ color: '#c8141e', range, soft }] })
+    const ch = (x) => Math.max(x[0], x[1], x[2]) - Math.min(x[0], x[1], x[2])
+    return ch(d) / Math.max(1, ch(rgb))
+  }
+  const hi = [240, 112, 112], shadow = [90, 10, 10], orange = [232, 112, 26], blue = [26, 79, 214]
+  ck('splash: Range 10 keeps less of the kit highlight than Range 30', kept(hi, 10, 0) < 0.5 && kept(hi, 30, 0) > 0.5)
+  ck('splash: Range 45 brings in the kit shadow that Range 30 left out', kept(shadow, 30, 0) < 0.5 && kept(shadow, 45, 0) > 0.5)
+  ck('splash: Range keeps growing to the top (orange by 60, never blue below 90)', kept(orange, 60, 0) > 0.9 && kept(blue, 80, 0) < 0.1)
+  ck('splash: Softness fades in what is just outside the range', kept(shadow, 20, 0) < 0.1 && kept(shadow, 20, 100) > 0.5)
+}
+
 const browser = await chromium.launch(existsSync(EXE) ? { executablePath: EXE } : {})
 
-async function openEditor({ settings = CLUB, assoc = false, viewport = { width: 1600, height: 1000 }, query = '?type=blank' } = {}) {
+const ROSTER = Array.from({ length: 6 }, (_, i) => ({ id: `p${i + 1}`, name: `Sam Player${i + 1}`, display_name: `Sam Player${i + 1}`, status: 'active', photo_url: `/api/images/players/p${i + 1}/photo` }))
+async function openEditor({ settings = CLUB, assoc = false, viewport = { width: 1600, height: 1000 }, query = '?type=blank', roster = [] } = {}) {
   const ctx = await browser.newContext({ viewport, acceptDownloads: true })
   const page = await ctx.newPage()
   const errors = []
@@ -55,6 +74,8 @@ async function openEditor({ settings = CLUB, assoc = false, viewport = { width: 
     if (/\/admin\/social\/media/.test(url)) return route.fulfill(json(MEDIA))
     if (/\/club-admin\/settings/.test(url)) return route.fulfill(json(settings))
     if (/\/admin\/social\/crests/.test(url)) return route.fulfill(json({ crests: [] }))
+    if (/\/images\/players\/[^/]+\/photo/.test(url)) return route.fulfill({ status: 200, contentType: 'image/png', body: CUTOUT })
+    if (/\/club-admin\/players/.test(url)) return route.fulfill(json(roster))
     if (/templates|players|sponsors/.test(url)) return route.fulfill(json([]))
     return route.fulfill(json({}))
   })
@@ -243,7 +264,7 @@ const openEffects = async (page) => { await tool(page, 'Effects'); await page.wa
   ck('3D block writes a stacked text shadow (14 layered offsets)', (shadowCss.match(/px 0px/g) || []).length >= 14, shadowCss.slice(0, 80))
   const pos = async () => page.evaluate(() => {
     const holder = [...document.querySelectorAll('div')].find((d) => d.style.left === '-9999px')
-    const h = holder.innerHTML
+    const h = holder ? holder.innerHTML : ''
     return { img: h.indexOf('media/m1/file'), txt: h.indexOf('data-echo') }
   })
   const p0 = await pos()
@@ -279,8 +300,8 @@ const openEffects = async (page) => { await tool(page, 'Effects'); await page.wa
 
 // ── 4b. The design layouts, one per post type ──────────────────────────────
 const LAYOUTS = [
-  ['DL1', 'Match Day V', 'Our frame'], ['DL2', 'Gameday Echo', 'Echo word'], ['DL3', 'Final Score V', 'Opposition side'],
-  ['DL4', 'Fixtures Echo', 'Rows'], ['DL5', 'Results Echo', 'Rows'], ['DL6', 'Colour Pop', 'Torn strip'], ['DL7', 'Colour Pop', 'Torn strip'],
+  ['DL1', 'Match Day V', 'Our panel'], ['DL2', 'Gameday Echo', 'Echo word'], ['DL3', 'Final Score V', 'Opposition side'],
+  ['DL8', 'Game Day Card', 'Game day word'], ['DL9', 'Squad Collage', 'Players'], ['DL4', 'Fixtures Echo', 'Rows'], ['DL5', 'Results Echo', 'Rows'], ['DL6', 'Colour Pop', 'Name'], ['DL7', 'Colour Pop', 'Name'],
 ]
 async function openLayout(id, opts = {}) {
   const o = await openEditor({ ...opts, query: `?template=${id}` })
@@ -310,15 +331,81 @@ for (const [id, name, layer] of LAYOUTS) {
   // Match Day V on a square post with no players: the V frames are cut, so the
   // bottom corner of our frame is the background and its top is the accent.
   const { ctx, page } = await openLayout('DL1')
-  const px = await exportPixels(page, [[70, 262], [52, 872]])
-  ck('PNG: Match Day V paints our frame in the accent', near(px.px[0], [255, 194, 51], 40), JSON.stringify(px.px[0]))
-  ck('PNG: and cuts its bottom corner into a V', !near(px.px[1], [255, 194, 51], 60), JSON.stringify(px.px[1]))
+  // Square: our panel runs from x 70 and from y ~330; the club is navy #0b1530.
+  const px = await exportPixels(page, [[90, 380], [74, 700]])
+  ck('PNG: Match Day V paints our panel in the club colour', near(px.px[0], [11, 21, 48], 30), JSON.stringify(px.px[0]))
+  ck('PNG: and cuts its bottom corner into a V (the paper shows)', near(px.px[1], [235, 232, 225], 30), JSON.stringify(px.px[1]))
   await ctx.close()
 }
 {
   const { ctx, page, errors } = await openLayout('DL1', { settings: WORKSPACE, assoc: true })
-  ck('workspace: Match Day V opens in an Association workspace', (await exportBlocks(page)).includes('data-layer="Our frame"'))
+  ck('workspace: Match Day V opens in an Association workspace', (await exportBlocks(page)).includes('data-layer="Our panel"'))
   ck('workspace: no page errors on the design layout', errors.length === 0, errors.slice(0, 2).join(' | '))
+  await ctx.close()
+}
+
+// ── 4c. Squad Collage: players stack by count and can be reordered ─────────
+async function pickRoster(page, n) {
+  await press(page.getByRole('button', { name: 'Content', exact: true }))
+  await page.waitForTimeout(200)
+  for (let i = 1; i <= n; i++) await press(page.getByRole('button', { name: new RegExp(`^Sam Player${i}\\b`) }))
+  await page.waitForTimeout(300)
+}
+{
+  const { ctx, page, errors } = await openEditor({ query: '?template=DL9', roster: ROSTER })
+  await pickRoster(page, 5)
+  const slots = async () => (await exportBlocks(page)).match(/data-collage-slot="/g)?.length || 0
+  ck('collage: five picked players with photos give five places', await slots() === 5, String(await slots()))
+  ck('collage: its Content panel lists them to reorder', (await page.getByTestId('collage-row').count()) === 5)
+  const first0 = await textOf(page.getByTestId('collage-row').first())
+  await press(page.getByTestId('collage-down').first())
+  await page.waitForTimeout(150)
+  const first1 = await textOf(page.getByTestId('collage-row').first())
+  ck('collage: the down arrow moves the featured player down the order', first0 !== first1 && /FEATURED/.test(first1), `${first0} -> ${first1}`)
+  await press(page.getByTestId('collage-on').first())
+  await page.waitForTimeout(250)
+  ck('collage: unticking a player rearranges the poster for four', await slots() === 4, String(await slots()))
+  const rows = await page.evaluate(() => {
+    const h = [...document.querySelectorAll('div')].find((d) => d.style.left === '-9999px')
+    return h ? [...h.querySelectorAll('[data-collage-slot]')].map((e) => e.getAttribute('data-collage-slot')) : []
+  })
+  ck('collage: four players stand in two rows of two', JSON.stringify(rows.slice().sort()) === JSON.stringify(['0', '0', '1', '1']), JSON.stringify(rows))
+  ck('collage: no page errors', errors.length === 0, errors.slice(0, 2).join(' | '))
+  await ctx.close()
+}
+
+// ── 4d. A photo look on a built-in layout's own photos (Player Spotlight) ──
+{
+  const { ctx, page, errors } = await openEditor({ query: '?template=C3', roster: ROSTER })
+  await pickRoster(page, 1)
+  const imgs = async () => page.evaluate(() => {
+    const h = [...document.querySelectorAll('div')].find((d) => d.style.left === '-9999px')
+    return h ? [...h.querySelectorAll('img')].map((i) => i.getAttribute('src')) : []
+  })
+  const before = await imgs()
+  ck('control: the spotlight draws the player photo straight from the profile', before.some((s) => /images\/players\/p1\/photo/.test(s)) && !before.some((s) => /^blob:/.test(s)), JSON.stringify(before).slice(0, 160))
+  await tool(page, 'Effects')
+  ck('Effects with nothing selected offers the layout photo look', await seen(page.getByTestId('fx-layout-photos')))
+  await press(page.getByTestId('look-noir'))
+  await page.waitForTimeout(900)
+  const after = await imgs()
+  ck('a look swaps the layout photo for its processed copy', after.some((s) => /^blob:/.test(s)) && !after.some((s) => /images\/players\/p1\/photo/.test(s)), JSON.stringify(after).slice(0, 160))
+  await press(page.getByText('Cut-out edge'))
+  const eo = page.getByTestId('fx-edge-outline')
+  if (await eo.count()) await eo.fill('12')
+  await page.waitForTimeout(900)
+  const dims = await page.evaluate(async () => {
+    const h = [...document.querySelectorAll('div')].find((d) => d.style.left === '-9999px')
+    const src = h && [...h.querySelectorAll('img')].map((i) => i.getAttribute('src')).find((s) => /^blob:/.test(s))
+    if (!src) return null
+    const im = new Image(); im.src = src; await im.decode()
+    return [im.naturalWidth, im.naturalHeight]
+  })
+  ck('the baked outline grows the cut-out by its width on each side', !!dims && dims[0] === 400 + 24 && dims[1] === 600 + 24, JSON.stringify(dims))
+  await press(page.getByTestId('fx-layout-reset'))
+  await page.waitForTimeout(300)
+  ck('taking the look off restores the original photo', (await imgs()).some((s) => /images\/players\/p1\/photo/.test(s)))
+  ck('no page errors through the layout photo look', errors.length === 0, errors.slice(0, 2).join(' | '))
   await ctx.close()
 }
 

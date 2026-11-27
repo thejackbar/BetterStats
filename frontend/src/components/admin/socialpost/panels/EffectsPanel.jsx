@@ -132,13 +132,80 @@ function Eyedropper({ src, onPick }) {
   )
 }
 
+// Looks, colour splash and tone: the same controls for a picture block and for
+// the photos inside a built-in layout.
+function PhotoLook({ fx, setFx, palette, previewSrc }) {
+  const splash = Array.isArray(fx.splash) ? fx.splash : []
+  const setSplash = (list) => setFx({ splash: list })
+  return (
+    <>
+      <Section title="Looks" testId="fx-looks">
+        <div className="grid grid-cols-2 gap-1.5">
+          {LOOKS.map((l) => (
+            <Chip key={l.key} testId={`look-${l.key}`} onClick={() => setFx(l.fx)}>{l.name}</Chip>
+          ))}
+        </div>
+      </Section>
+
+      <Section title="Colour splash" testId="fx-splash">
+        <p className="text-[10px] text-pb-faint leading-snug -mt-1">Turns the photo black and white except the colours you keep. Range widens how much of each colour counts; Softness blends the edge.</p>
+        <Eyedropper src={previewSrc} onPick={(c) => setSplash([...splash, { color: c, range: 30, soft: 30 }].slice(-4))} />
+        <div className="flex items-center gap-1 flex-wrap">
+          <Label>Or keep</Label>
+          {['primary', 'secondary', 'accent'].map((t) => (
+            <Chip key={t} testId={`splash-add-${t}`} onClick={() => setSplash([...splash, { color: t, range: 30, soft: 30 }].slice(-4))}>
+              <span className="inline-block w-2.5 h-2.5 rounded-sm mr-1 align-middle" style={{ background: resolveBlankColor(t, palette) }} />{t}
+            </Chip>
+          ))}
+        </div>
+        {splash.map((s, i) => (
+          <div key={i} className="rounded-md border pb-hairline2 p-2 flex flex-col gap-1.5" data-testid="splash-pick">
+            <div className="flex items-center gap-2">
+              <span className="w-5 h-5 rounded border pb-hairline2" style={{ background: resolveBlankColor(s.color, palette) }} />
+              <span className="font-mono text-[10px] text-pb-dim flex-1">{s.color}</span>
+              <button className="text-[11px] text-pb-faint hover:text-pb-text" onClick={() => setSplash(splash.filter((_, j) => j !== i))}>Remove</button>
+            </div>
+            <Slider label="Range" value={s.range ?? 30} min={0} max={100} testId="splash-range" onChange={(v) => setSplash(splash.map((x, j) => (j === i ? { ...x, range: v } : x)))} />
+            <Slider label="Softness" value={s.soft ?? 30} min={0} max={100} testId="splash-soft" onChange={(v) => setSplash(splash.map((x, j) => (j === i ? { ...x, soft: v } : x)))} />
+          </div>
+        ))}
+        {splash.length > 0 && (
+          <Slider label="Strength" value={fx.splashStrength ?? 100} min={0} max={100} suffix="%" onChange={(v) => setFx({ splashStrength: v })} />
+        )}
+      </Section>
+
+      <Section title="Tone and adjust" testId="fx-tone" open={false}>
+        <div className="flex gap-1 flex-wrap">
+          {[['none', 'Colour'], ['mono', 'Black & white'], ['duotone', 'Duotone'], ['tint', 'Tint']].map(([k, n]) => (
+            <Chip key={k} testId={`tone-${k}`} active={(fx.tone || 'none') === k} onClick={() => setFx({ tone: k, ...(k === 'duotone' && !fx.duoDark ? { duoDark: 'primary', duoLight: 'accent' } : null), ...(k === 'tint' && !fx.tint ? { tint: 'primary', tintAmount: 75 } : null) })}>{n}</Chip>
+          ))}
+        </div>
+        {fx.tone === 'duotone' && (
+          <>
+            <div className="flex items-center gap-2"><span className="w-[78px] shrink-0"><Label>Shadows</Label></span><ColourPick value={fx.duoDark} palette={palette} onChange={(c) => setFx({ duoDark: c })} /></div>
+            <div className="flex items-center gap-2"><span className="w-[78px] shrink-0"><Label>Highlights</Label></span><ColourPick value={fx.duoLight} palette={palette} onChange={(c) => setFx({ duoLight: c })} /></div>
+          </>
+        )}
+        {fx.tone === 'tint' && (
+          <>
+            <div className="flex items-center gap-2"><span className="w-[78px] shrink-0"><Label>Tint</Label></span><ColourPick value={fx.tint} palette={palette} onChange={(c) => setFx({ tint: c })} /></div>
+            <Slider label="Amount" value={fx.tintAmount ?? 75} min={0} max={100} suffix="%" onChange={(v) => setFx({ tintAmount: v })} />
+          </>
+        )}
+        <Slider label="Brightness" value={fx.brightness || 0} min={-100} max={100} onChange={(v) => setFx({ brightness: v })} />
+        <Slider label="Contrast" value={fx.contrast || 0} min={-100} max={100} testId="fx-contrast" onChange={(v) => setFx({ contrast: v })} />
+        <Slider label="Saturation" value={fx.saturation || 0} min={-100} max={100} onChange={(v) => setFx({ saturation: v })} />
+        <Slider label="Grain" value={fx.grain || 0} min={0} max={100} onChange={(v) => setFx({ grain: v })} />
+      </Section>
+    </>
+  )
+}
+
 function PictureEffects({ item, patch, palette, previewSrc, onGhost }) {
   const fx = item.fx || {}
   const setFx = (p) => patch({ fx: { ...fx, ...p } })
   const crop = item.crop || {}
   const setCrop = (p) => patch({ crop: { x: crop.x || 0, y: crop.y || 0, z: crop.z ?? 1, ...p } })
-  const splash = Array.isArray(fx.splash) ? fx.splash : []
-  const setSplash = (list) => setFx({ splash: list })
   const framed = item.mask && item.mask !== 'none'
   const curFrame = FRAMES.find((f) => f.key === (item.mask || 'none'))
   return (
@@ -191,64 +258,7 @@ function PictureEffects({ item, patch, palette, previewSrc, onGhost }) {
         {item.crop && <Chip onClick={() => patch({ crop: null })}>Reset position</Chip>}
       </Section>
 
-      <Section title="Looks" testId="fx-looks">
-        <div className="grid grid-cols-2 gap-1.5">
-          {LOOKS.map((l) => (
-            <Chip key={l.key} testId={`look-${l.key}`} onClick={() => setFx(l.fx)}>{l.name}</Chip>
-          ))}
-        </div>
-      </Section>
-
-      <Section title="Colour splash" testId="fx-splash">
-        <p className="text-[10px] text-pb-faint leading-snug -mt-1">Turns the photo black and white except the colours you keep. Range widens how much of each colour counts; Softness blends the edge.</p>
-        <Eyedropper src={previewSrc} onPick={(c) => setSplash([...splash, { color: c, range: 24, soft: 16 }].slice(-4))} />
-        <div className="flex items-center gap-1 flex-wrap">
-          <Label>Or keep</Label>
-          {['primary', 'secondary', 'accent'].map((t) => (
-            <Chip key={t} testId={`splash-add-${t}`} onClick={() => setSplash([...splash, { color: t, range: 24, soft: 16 }].slice(-4))}>
-              <span className="inline-block w-2.5 h-2.5 rounded-sm mr-1 align-middle" style={{ background: resolveBlankColor(t, palette) }} />{t}
-            </Chip>
-          ))}
-        </div>
-        {splash.map((s, i) => (
-          <div key={i} className="rounded-md border pb-hairline2 p-2 flex flex-col gap-1.5" data-testid="splash-pick">
-            <div className="flex items-center gap-2">
-              <span className="w-5 h-5 rounded border pb-hairline2" style={{ background: resolveBlankColor(s.color, palette) }} />
-              <span className="font-mono text-[10px] text-pb-dim flex-1">{s.color}</span>
-              <button className="text-[11px] text-pb-faint hover:text-pb-text" onClick={() => setSplash(splash.filter((_, j) => j !== i))}>Remove</button>
-            </div>
-            <Slider label="Range" value={s.range ?? 24} min={2} max={90} testId="splash-range" onChange={(v) => setSplash(splash.map((x, j) => (j === i ? { ...x, range: v } : x)))} />
-            <Slider label="Softness" value={s.soft ?? 16} min={0} max={60} testId="splash-soft" onChange={(v) => setSplash(splash.map((x, j) => (j === i ? { ...x, soft: v } : x)))} />
-          </div>
-        ))}
-        {splash.length > 0 && (
-          <Slider label="Strength" value={fx.splashStrength ?? 100} min={0} max={100} suffix="%" onChange={(v) => setFx({ splashStrength: v })} />
-        )}
-      </Section>
-
-      <Section title="Tone and adjust" testId="fx-tone" open={false}>
-        <div className="flex gap-1 flex-wrap">
-          {[['none', 'Colour'], ['mono', 'Black & white'], ['duotone', 'Duotone'], ['tint', 'Tint']].map(([k, n]) => (
-            <Chip key={k} testId={`tone-${k}`} active={(fx.tone || 'none') === k} onClick={() => setFx({ tone: k, ...(k === 'duotone' && !fx.duoDark ? { duoDark: 'primary', duoLight: 'accent' } : null), ...(k === 'tint' && !fx.tint ? { tint: 'primary', tintAmount: 75 } : null) })}>{n}</Chip>
-          ))}
-        </div>
-        {fx.tone === 'duotone' && (
-          <>
-            <div className="flex items-center gap-2"><span className="w-[78px] shrink-0"><Label>Shadows</Label></span><ColourPick value={fx.duoDark} palette={palette} onChange={(c) => setFx({ duoDark: c })} /></div>
-            <div className="flex items-center gap-2"><span className="w-[78px] shrink-0"><Label>Highlights</Label></span><ColourPick value={fx.duoLight} palette={palette} onChange={(c) => setFx({ duoLight: c })} /></div>
-          </>
-        )}
-        {fx.tone === 'tint' && (
-          <>
-            <div className="flex items-center gap-2"><span className="w-[78px] shrink-0"><Label>Tint</Label></span><ColourPick value={fx.tint} palette={palette} onChange={(c) => setFx({ tint: c })} /></div>
-            <Slider label="Amount" value={fx.tintAmount ?? 75} min={0} max={100} suffix="%" onChange={(v) => setFx({ tintAmount: v })} />
-          </>
-        )}
-        <Slider label="Brightness" value={fx.brightness || 0} min={-100} max={100} onChange={(v) => setFx({ brightness: v })} />
-        <Slider label="Contrast" value={fx.contrast || 0} min={-100} max={100} testId="fx-contrast" onChange={(v) => setFx({ contrast: v })} />
-        <Slider label="Saturation" value={fx.saturation || 0} min={-100} max={100} onChange={(v) => setFx({ saturation: v })} />
-        <Slider label="Grain" value={fx.grain || 0} min={0} max={100} onChange={(v) => setFx({ grain: v })} />
-      </Section>
+      <PhotoLook fx={fx} setFx={setFx} palette={palette} previewSrc={previewSrc} />
 
       <Section title="Cut-out effects" testId="fx-cutout" open={false}>
         <Slider label="Outline" value={fx.outline?.width || 0} min={0} max={30} testId="fx-outline" onChange={(v) => setFx({ outline: { color: fx.outline?.color || 'white', width: v } })} />
@@ -367,11 +377,44 @@ function TextureEffects({ item, patch }) {
   )
 }
 
-export default function EffectsPanel({ item, selCount = 0, palette, onPatch, previewSrc, onGhost, onTextBehind, canBehind }) {
+// The photos a built-in layout draws (its cut-outs, the Hero Image upload, the
+// player of the match), all under one look. Saved with a template.
+function LayoutPhotoEffects({ fx: fx0, onChange, palette, previewSrc }) {
+  const fx = fx0 || {}
+  const setFx = (p) => onChange({ ...fx, ...p })
+  return (
+    <div data-testid="fx-layout-photos">
+      <p className="text-[11px] text-pb-dim leading-relaxed mb-3">
+        These change every photo this layout draws: the player cut-outs, your Hero Image upload and the player of the match. Crests and logos are left alone. To style one photo on its own, add it as a picture block from Photos.
+      </p>
+      <PhotoLook fx={fx} setFx={setFx} palette={palette} previewSrc={previewSrc} />
+      <Section title="Cut-out edge" testId="fx-layout-edge" open={false}>
+        <Slider label="Outline" value={fx.edgeOutline?.width || 0} min={0} max={30} testId="fx-edge-outline"
+          onChange={(v) => setFx({ edgeOutline: { color: fx.edgeOutline?.color || 'white', width: v } })} />
+        {(fx.edgeOutline?.width || 0) > 0 && <div className="flex items-center gap-2"><span className="w-[78px] shrink-0"><Label>Outline col</Label></span>
+          <ColourPick value={fx.edgeOutline.color} palette={palette} onChange={(c) => setFx({ edgeOutline: { ...fx.edgeOutline, color: c } })} /></div>}
+        <Slider label="Glow" value={fx.edgeGlow?.size || 0} min={0} max={80}
+          onChange={(v) => setFx({ edgeGlow: { color: fx.edgeGlow?.color || 'accent', size: v } })} />
+        {(fx.edgeGlow?.size || 0) > 0 && <div className="flex items-center gap-2"><span className="w-[78px] shrink-0"><Label>Glow col</Label></span>
+          <ColourPick value={fx.edgeGlow.color} palette={palette} onChange={(c) => setFx({ edgeGlow: { ...fx.edgeGlow, color: c } })} /></div>}
+        <p className="text-[10px] text-pb-faint leading-snug">Outline and glow need a cut-out, a photo with its background removed.</p>
+      </Section>
+      {fx0 && <Chip testId="fx-layout-reset" onClick={() => onChange(null)}>Take the photo look off</Chip>}
+    </div>
+  )
+}
+
+export default function EffectsPanel({ item, selCount = 0, palette, onPatch, previewSrc, onGhost, onTextBehind, canBehind, layoutName = null, photoFx = null, onPhotoFx, layoutPhotoSrc = null }) {
   const isPicture = item && (item.type === 'image' || (item.type === 'data' && item.kind === 'playerphoto')) && !item.design
   return (
     <div data-testid="effects-panel" className="flex flex-col">
-      {!item && (
+      {!item && layoutName && selCount <= 1 && (
+        <>
+          <div className="font-mono text-[10px] tracking-wide2 uppercase text-pb-dim mb-2">Photos in {layoutName}</div>
+          <LayoutPhotoEffects fx={photoFx} onChange={onPhotoFx} palette={palette} previewSrc={layoutPhotoSrc} />
+        </>
+      )}
+      {!item && !layoutName && (
         <p className="text-[11px] text-pb-dim leading-relaxed mb-3" data-testid="effects-empty">
           {selCount > 1 ? 'Select one thing at a time to give it effects.' : 'Select a photo, some text or a texture on the canvas to style it. The ready-made design layouts (Match Day V, Gameday Echo, Final Score V, Fixtures Echo, Results Echo, Colour Pop) are in each post type\'s layout list.'}
         </p>

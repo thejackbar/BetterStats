@@ -303,6 +303,33 @@ export function parseColor(c) {
 
 export const toHex = ([r, g, b]) => `#${[r, g, b].map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('')}`
 
+// sRGB (0-255) to CIE Lab (D65). The table makes the gamma step a lookup.
+const LIN = new Float32Array(256)
+for (let i = 0; i < 256; i++) { const c = i / 255; LIN[i] = c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4) }
+const labF = (t) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116)
+export function rgbToLab(r, g, b) {
+  const R = LIN[Math.max(0, Math.min(255, Math.round(r)))]
+  const G = LIN[Math.max(0, Math.min(255, Math.round(g)))]
+  const B = LIN[Math.max(0, Math.min(255, Math.round(b)))]
+  const x = labF((R * 0.4124 + G * 0.3576 + B * 0.1805) / 0.95047)
+  const y = labF(R * 0.2126 + G * 0.7152 + B * 0.0722)
+  const z = labF((R * 0.0193 + G * 0.1192 + B * 0.9505) / 1.08883)
+  return [116 * y - 16, 500 * (x - y), 200 * (y - z)]
+}
+
+// Colour splash sliders, both 0 to 100. Range is how far (in Lab distance) a
+// colour may sit from the kept one and still stay in colour; it is eased so
+// the low end gives fine control and 100 reaches almost every colour. Softness
+// is the width of the fade from kept to black and white. Lightness counts for
+// less than hue and saturation, so a kit in shadow is still the kit.
+export const SPLASH_DEFAULT = { range: 30, soft: 30 }
+const SPLASH_L_WEIGHT = 0.28
+export function splashReach(range, soft) {
+  const r = Math.max(0, Math.min(100, Number(range) || 0)) / 100
+  const k = Math.max(0, Math.min(100, Number(soft) || 0)) / 100
+  return { tol: 2 + 128 * Math.pow(r, 1.35), feather: 1 + 90 * Math.pow(k, 1.1) }
+}
+
 export function rgbToHsl(r, g, b) {
   r /= 255; g /= 255; b /= 255
   const max = Math.max(r, g, b)
@@ -328,11 +355,14 @@ export function rgbToHsl(r, g, b) {
 //   splashStrength                     0..100 (how fully the rest is toned)
 //   grain                              0..100
 //   silhouette                         a colour: the picture's shape filled flat
-export const PIXEL_KEYS = ['brightness', 'contrast', 'saturation', 'tone', 'duoDark', 'duoLight', 'tint', 'tintAmount', 'splash', 'splashStrength', 'grain', 'silhouette']
+//   edgeOutline { width, color }, edgeGlow { size, color }   baked into the
+//                 picture (for built-in layouts, which draw a plain <img>)
+export const PIXEL_KEYS = ['brightness', 'contrast', 'saturation', 'tone', 'duoDark', 'duoLight', 'tint', 'tintAmount', 'splash', 'splashStrength', 'grain', 'silhouette', 'edgeOutline', 'edgeGlow']
 
 export function needsPixels(fx) {
   if (!fx) return false
   if (fx.silhouette) return true
+  if ((fx.edgeOutline && fx.edgeOutline.width > 0) || (fx.edgeGlow && fx.edgeGlow.size > 0)) return true
   if (fx.tone && fx.tone !== 'none') return true
   if (Array.isArray(fx.splash) && fx.splash.length) return true
   return !!(fx.brightness || fx.contrast || fx.saturation || fx.grain)
@@ -360,8 +390,9 @@ export function applyPixels(data, fx, seed = 1) {
   const splash = Array.isArray(fx.splash) ? fx.splash.map((s) => {
     const c = parseColor(s.color)
     if (!c) return null
-    const [hh] = rgbToHsl(c[0], c[1], c[2])
-    return { h: hh, range: Math.max(1, s.range ?? 24), soft: Math.max(0, s.soft ?? 16) }
+    const [L, A, B] = rgbToLab(c[0], c[1], c[2])
+    const { tol, feather } = splashReach(s.range ?? SPLASH_DEFAULT.range, s.soft ?? SPLASH_DEFAULT.soft)
+    return { L, A, B, tol, feather }
   }).filter(Boolean) : []
   const tone = fx.tone && fx.tone !== 'none' ? fx.tone : (splash.length ? 'mono' : 'none')
   const strength = splash.length ? (fx.splashStrength ?? 100) / 100 : 1
@@ -410,17 +441,15 @@ export function applyPixels(data, fx, seed = 1) {
     }
     let keep = 0
     if (splash.length) {
-      const [hh, ss, ll] = rgbToHsl(r, g, b)
-      // Hue means nothing on greys, near-black or near-white.
-      const chroma = smooth(0.08, 0.22, ss) * smooth(0.04, 0.14, ll) * (1 - smooth(0.9, 0.98, ll))
-      if (chroma > 0) {
-        for (const s of splash) {
-          let dh = Math.abs(hh - s.h)
-          if (dh > 180) dh = 360 - dh
-          const w = 1 - smooth(s.range, s.range + s.soft + 0.001, dh)
-          if (w > keep) keep = w
-        }
-        keep *= chroma
+      // Distance in Lab, the way people judge colour: a jersey's shadows and
+      // highlights stay close to its colour, a different colour does not.
+      const [L, A, B] = rgbToLab(r, g, b)
+      for (const s of splash) {
+        const dl = (L - s.L) * SPLASH_L_WEIGHT
+        const d = Math.sqrt(dl * dl + (A - s.A) * (A - s.A) + (B - s.B) * (B - s.B))
+        const w = 1 - smooth(s.tol, s.tol + s.feather, d)
+        if (w > keep) keep = w
+        if (keep >= 1) break
       }
     }
     const mix = (1 - keep) * strength
@@ -470,9 +499,49 @@ export async function processImage(src, fx) {
   const id = ctx.getImageData(0, 0, w, h) // throws on a tainted (cross-origin) picture
   applyPixels(id.data, fx, 1)
   ctx.putImageData(id, 0, 0)
-  const blob = await new Promise((res) => c.toBlob(res, 'image/png'))
+  const out = bakeEdges(c, fx, k)
+  const blob = await new Promise((res) => out.toBlob(res, 'image/png'))
   if (!blob) throw new Error('Could not process the picture')
   return URL.createObjectURL(blob)
+}
+
+// An outline or glow round a cut-out, painted into the picture itself. The
+// canvas grows by the edge width so nothing is clipped; widths are in the
+// original picture's pixels (scaled by k when it was shrunk).
+function bakeEdges(src, fx, k = 1) {
+  const ow = fx.edgeOutline && fx.edgeOutline.width > 0 ? Math.max(1, Math.round(fx.edgeOutline.width * k)) : 0
+  const gs = fx.edgeGlow && fx.edgeGlow.size > 0 ? Math.max(1, Math.round(fx.edgeGlow.size * k)) : 0
+  if (!ow && !gs) return src
+  const pad = ow + gs * 2
+  const c = document.createElement('canvas')
+  c.width = src.width + pad * 2
+  c.height = src.height + pad * 2
+  const ctx = c.getContext('2d')
+  if (gs) {
+    ctx.save()
+    ctx.shadowColor = fx.edgeGlow.color || '#ffc233'
+    ctx.shadowBlur = gs
+    for (let i = 0; i < 3; i++) ctx.drawImage(src, pad, pad)
+    ctx.restore()
+  }
+  if (ow) {
+    // A flat copy in the outline colour, stamped round a circle of radius ow.
+    const sil = document.createElement('canvas')
+    sil.width = src.width
+    sil.height = src.height
+    const sx = sil.getContext('2d')
+    sx.drawImage(src, 0, 0)
+    sx.globalCompositeOperation = 'source-in'
+    sx.fillStyle = fx.edgeOutline.color || '#ffffff'
+    sx.fillRect(0, 0, sil.width, sil.height)
+    const steps = Math.max(12, Math.round(ow * 2))
+    for (let i = 0; i < steps; i++) {
+      const a = (i / steps) * Math.PI * 2
+      ctx.drawImage(sil, pad + Math.cos(a) * ow, pad + Math.sin(a) * ow)
+    }
+  }
+  ctx.drawImage(src, pad, pad)
+  return c
 }
 
 function touch(key, entry) {
@@ -545,6 +614,63 @@ export function useFxSrc(src, fx) {
   return { url: state.url || null, ready: false, failed: false }
 }
 
+// Many pictures under one look (every photo a built-in layout draws). Returns a
+// lookup from original URL to the processed one; a URL still being made maps
+// to itself. Re-renders once each picture is ready.
+export function useFxUrls(urls, fx) {
+  const on = needsPixels(fx)
+  const list = on ? [...new Set((urls || []).filter(Boolean))] : []
+  const pk = on ? pixelKey(fx) : ''
+  const [, bump] = useState(0)
+  const sig = list.join('\n') + '|' + pk
+  useEffect(() => {
+    if (!on || !list.length) return undefined
+    let live = true
+    scheduled++
+    let fired = false
+    const t = setTimeout(() => {
+      fired = true
+      scheduled--
+      Promise.all(list.map((u) => startProcess(`${u}|${pk}`, u, fx))).then(() => { if (live) bump((n) => n + 1) })
+    }, 110)
+    return () => { live = false; if (!fired) { clearTimeout(t); scheduled = Math.max(0, scheduled - 1) } }
+    // sig covers list and fx
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sig])
+  return (u) => {
+    if (!on || !u) return u
+    const e = cache.get(`${u}|${pk}`)
+    return e && e.url ? e.url : u
+  }
+}
+
+// The photo fields a built-in layout's props carry (player cut-outs, the Hero
+// Image upload, the player of the match). Logos and crests are never touched.
+export const PHOTO_KEYS = new Set(['headshot', 'hero', 'action', 'photo', 'heroImage', 'cutout'])
+export function collectPhotos(value, out = [], depth = 0) {
+  if (!value || depth > 6) return out
+  if (Array.isArray(value)) { value.forEach((v) => collectPhotos(v, out, depth + 1)); return out }
+  if (typeof value === 'object') {
+    for (const [k, v] of Object.entries(value)) {
+      if (PHOTO_KEYS.has(k) && typeof v === 'string' && v) out.push(v)
+      else if (v && typeof v === 'object' && !(v.$$typeof)) collectPhotos(v, out, depth + 1)
+    }
+  }
+  return out
+}
+export function mapPhotos(value, get, depth = 0) {
+  if (!value || depth > 6) return value
+  if (Array.isArray(value)) return value.map((v) => mapPhotos(v, get, depth + 1))
+  if (typeof value === 'object' && !(value.$$typeof)) {
+    const out = {}
+    for (const [k, v] of Object.entries(value)) {
+      out[k] = PHOTO_KEYS.has(k) && typeof v === 'string' ? get(v) : (v && typeof v === 'object' ? mapPhotos(v, get, depth + 1) : v)
+    }
+    return out
+  }
+  return value
+}
+
 // Called by the PNG export before it paints, so a look still being made is
 // waited for rather than exported half-done.
 export async function waitForFx(timeoutMs = 8000) {
@@ -586,7 +712,7 @@ export function cutoutFilter(fx, resolve) {
 // a palette switch re-tints them).
 export const LOOKS = [
   { key: 'original', name: 'Original', fx: { tone: 'none', splash: [], brightness: 0, contrast: 0, saturation: 0, grain: 0 } },
-  { key: 'pop', name: 'Colour pop', fx: { tone: 'mono', splash: [{ color: 'primary', range: 26, soft: 16 }], splashStrength: 100, contrast: 12, grain: 0 } },
+  { key: 'pop', name: 'Colour pop', fx: { tone: 'mono', splash: [{ color: 'primary', range: 30, soft: 30 }], splashStrength: 100, contrast: 12, grain: 0 } },
   { key: 'noir', name: 'Noir', fx: { tone: 'mono', splash: [], contrast: 32, brightness: -4, saturation: 0, grain: 8 } },
   { key: 'duo', name: 'Club duotone', fx: { tone: 'duotone', duoDark: 'primary', duoLight: 'accent', splash: [], contrast: 10, grain: 0 } },
   { key: 'tint', name: 'Club tint', fx: { tone: 'tint', tint: 'primary', tintAmount: 80, splash: [], contrast: 18, grain: 0 } },
@@ -604,5 +730,7 @@ export function resolveFx(fx, resolve) {
   if (fx.duoLight) out.duoLight = resolve(fx.duoLight)
   if (fx.tint) out.tint = resolve(fx.tint)
   if (Array.isArray(fx.splash)) out.splash = fx.splash.map((s) => ({ ...s, color: resolve(s.color) }))
+  if (fx.edgeOutline) out.edgeOutline = { ...fx.edgeOutline, color: resolve(fx.edgeOutline.color || 'white') }
+  if (fx.edgeGlow) out.edgeGlow = { ...fx.edgeGlow, color: resolve(fx.edgeGlow.color || 'accent') }
   return out
 }
