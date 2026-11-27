@@ -1109,6 +1109,97 @@ export const api = {
   merchUpdateOrder: (id, status) =>
     request(`/club-admin/merch/orders/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
 
+  // Teamwear ordering (BetterAdmin > Stock > Teamwear). See routers/teamwear.py.
+  twSettings: () => request('/club-admin/teamwear/settings'),
+  twSaveSettings: (patch) => request('/club-admin/teamwear/settings', { method: 'PATCH', body: JSON.stringify(patch) }),
+  twRange: () => request('/club-admin/teamwear/range'),
+  twCreateProduct: (data) => request('/club-admin/teamwear/range', { method: 'POST', body: JSON.stringify(data) }),
+  twUpdateProduct: (id, patch) => request(`/club-admin/teamwear/range/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  twLinkProduct: (id) => request(`/club-admin/teamwear/range/${id}/link`, { method: 'POST' }),
+  twUnlinkProduct: (id) => request(`/club-admin/teamwear/range/${id}`, { method: 'DELETE' }),
+  twUploadImage: (id, file) => uploadFile(`/club-admin/teamwear/range/${id}/images`, file),
+  twDeleteImage: (imageId) => request(`/club-admin/teamwear/images/${imageId}`, { method: 'DELETE' }),
+  twCampaigns: () => request('/club-admin/teamwear/campaigns'),
+  twCreateCampaign: (data) => request('/club-admin/teamwear/campaigns', { method: 'POST', body: JSON.stringify(data) }),
+  twCampaign: (id) => request(`/club-admin/teamwear/campaigns/${id}`),
+  twUpdateCampaign: (id, patch) => request(`/club-admin/teamwear/campaigns/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  twSetItemPrice: (id, productId, price) =>
+    request(`/club-admin/teamwear/campaigns/${id}/items/${productId}/price`, { method: 'PUT', body: JSON.stringify({ price }) }),
+  twLaunchPreview: (id) => request(`/club-admin/teamwear/campaigns/${id}/launch-preview`),
+  twLaunch: (id, sendEmail) =>
+    request(`/club-admin/teamwear/campaigns/${id}/launch`, { method: 'POST', body: JSON.stringify({ send_email: !!sendEmail }) }),
+  // `to` '' sends a test to yourself; null emails the club's players.
+  twLaunchEmail: (id, to) =>
+    request(`/club-admin/teamwear/campaigns/${id}/launch-email`, { method: 'POST', body: JSON.stringify({ to }) }),
+  twClose: (id) => request(`/club-admin/teamwear/campaigns/${id}/close`, { method: 'POST' }),
+  twReopen: (id, closesAt) =>
+    request(`/club-admin/teamwear/campaigns/${id}/reopen`, { method: 'POST', body: JSON.stringify({ closes_at: closesAt }) }),
+  twCancel: (id) => request(`/club-admin/teamwear/campaigns/${id}/cancel`, { method: 'POST' }),
+  twComplete: (id) => request(`/club-admin/teamwear/campaigns/${id}/complete`, { method: 'POST' }),
+  twEmails: (id) => request(`/club-admin/teamwear/campaigns/${id}/emails`),
+  twAddOrder: (id, body) => request(`/club-admin/teamwear/campaigns/${id}/orders`, { method: 'POST', body: JSON.stringify(body) }),
+  twStockOrders: () => request('/club-admin/teamwear/stock-orders'),
+  twAddStockOrder: (body) => request('/club-admin/teamwear/stock-orders', { method: 'POST', body: JSON.stringify(body) }),
+  twOrder: (id) => request(`/club-admin/teamwear/orders/${id}`),
+  twUpdateOrder: (id, patch) => request(`/club-admin/teamwear/orders/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  twAddLines: (id, lines) => request(`/club-admin/teamwear/orders/${id}/lines`, { method: 'POST', body: JSON.stringify({ lines }) }),
+  twUpdateLine: (id, patch) => request(`/club-admin/teamwear/lines/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  twRemind: (id) => request(`/club-admin/teamwear/orders/${id}/remind`, { method: 'POST' }),
+  twResendPaymentRequest: (id) => request(`/club-admin/teamwear/orders/${id}/payment-request`, { method: 'POST' }),
+  twFindPlayers: (q) => request(`/club-admin/teamwear/players?q=${encodeURIComponent(q)}`),
+  twAnswerChange: (id, status, response) =>
+    request(`/club-admin/teamwear/changes/${id}`, { method: 'POST', body: JSON.stringify({ status, response }) }),
+  twTriage: (id) => request(`/club-admin/teamwear/campaigns/${id}/triage`),
+  twDecision: (id, productId, decision, note) =>
+    request(`/club-admin/teamwear/campaigns/${id}/triage/${productId}`, { method: 'PUT', body: JSON.stringify({ decision, note }) }),
+  twTopups: (id, productId, byVariant) =>
+    request(`/club-admin/teamwear/campaigns/${id}/triage/${productId}/topups`, { method: 'PUT', body: JSON.stringify({ by_variant: byVariant }) }),
+  twSuggestTopups: (id, productId) => request(`/club-admin/teamwear/campaigns/${id}/triage/${productId}/suggest`, { method: 'POST' }),
+  twApprove: (id, approvedOn, note) =>
+    request(`/club-admin/teamwear/campaigns/${id}/approval`, { method: 'POST', body: JSON.stringify({ approved_on: approvedOn, note }) }),
+  twUnapprove: (id) => request(`/club-admin/teamwear/campaigns/${id}/approval`, { method: 'DELETE' }),
+  twPaymentRequests: (id) => request(`/club-admin/teamwear/campaigns/${id}/payment-requests`, { method: 'POST' }),
+  twPayments: (id) => request(`/club-admin/teamwear/campaigns/${id}/payments`),
+  twAddPayment: (orderId, body) => request(`/club-admin/teamwear/orders/${orderId}/payments`, { method: 'POST', body: JSON.stringify(body) }),
+  twVoidPayment: (id, reason) => request(`/club-admin/teamwear/payments/${id}/void`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  twBankPreview: (file, campaignId) => {
+    const form = new FormData()
+    form.append('file', file)
+    if (campaignId) form.append('campaign_id', campaignId)
+    return postForm('/club-admin/teamwear/payments/bank/preview', form)
+  },
+  twBankCommit: (rows) => request('/club-admin/teamwear/payments/bank/commit', { method: 'POST', body: JSON.stringify({ rows }) }),
+  twExportStatus: (id) => request(`/club-admin/teamwear/campaigns/${id}/export`),
+  twExportLock: (id) => request(`/club-admin/teamwear/campaigns/${id}/export`, { method: 'POST' }),
+  twExportDownload: async (id) => {
+    const res = await fetch(`${BASE}/club-admin/teamwear/campaigns/${id}/export.xlsx`, { credentials: 'include' })
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || `Download failed (${res.status})`)
+    const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') || '')?.[1] || 'teamwear-order.xlsx'
+    const url = URL.createObjectURL(await res.blob())
+    const a = document.createElement('a'); a.href = url; a.download = name
+    document.body.appendChild(a); a.click(); a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 2000)
+  },
+  twReceived: (id) => request(`/club-admin/teamwear/campaigns/${id}/received`, { method: 'POST' }),
+  twArrivalEmail: (id, orderIds) =>
+    request(`/club-admin/teamwear/campaigns/${id}/arrival-email`, { method: 'POST', body: JSON.stringify({ order_ids: orderIds || null }) }),
+
+  // Teamwear on the Player Dashboard (the Kit page). See routers/public_teamwear.py.
+  kitGet: (token, query = '') => request(`/public/availability/${token}/kit${query}`),
+  kitPlace: (token, body) => request(`/public/availability/${token}/kit/orders`, { method: 'POST', body: JSON.stringify(body) }),
+  kitEdit: (token, orderId, body) =>
+    request(`/public/availability/${token}/kit/orders/${orderId}`, { method: 'PUT', body: JSON.stringify(body) }),
+  kitCancel: (token, orderId) => request(`/public/availability/${token}/kit/orders/${orderId}/cancel`, { method: 'POST' }),
+  kitChange: (token, orderId, message) =>
+    request(`/public/availability/${token}/kit/orders/${orderId}/change`, { method: 'POST', body: JSON.stringify({ message }) }),
+  kitPay: (token, orderId, provider) => request(`/public/availability/${token}/kit/orders/${orderId}/pay/${provider}`, { method: 'POST' }),
+  kitNumberCheck: (token, number, wearerId, campaignId) => {
+    const q = new URLSearchParams({ number })
+    if (wearerId) q.set('wearer_player_id', wearerId)
+    if (campaignId) q.set('campaign_id', campaignId)
+    return request(`/public/availability/${token}/kit/number-check?${q}`)
+  },
+
   // Merch storefront — public (unauthenticated). See routers/public_merch_store.py.
   shopStatus: (slug) => request(`/public/merch-store/${slug}/status`),
   shopCatalogue: (slug) => request(`/public/merch-store/${slug}/catalogue`),

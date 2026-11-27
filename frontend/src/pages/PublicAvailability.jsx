@@ -20,6 +20,8 @@ import DetailsModal from './playerhome/DetailsModal'
 import RegisterFlow from './playerhome/RegisterFlow'
 import CardsSummary from './playerhome/CardsSummary'
 import PlayerCardsApp from './playercards/PlayerCardsApp'
+import KitApp from './teamwear/KitApp'
+import TeamwearCard, { teamwearSummary } from './playerhome/TeamwearCard'
 import FantasyCard, { fmtLockShort, nextDeadline, ordinal } from './playerhome/FantasyCard'
 import PlayerHero from './playerhome/PlayerHero'
 import NetsToday, { netsSummary } from './playerhome/NetsToday'
@@ -414,6 +416,7 @@ const GROUPS = {
   fantasy: { title: 'Fantasy', keys: ['fantasy'], hideTitle: true },
   stats: { title: 'Stats', keys: ['season'] },
   voting: { title: 'Voting', keys: ['votes'], hideTitle: true },
+  kit: { title: 'Teamwear', keys: ['teamwear'], hideTitle: true },
   admin: { title: 'Club admin', keys: ['fees', 'fines'] },
 }
 
@@ -422,7 +425,7 @@ const GROUPS = {
 // the two games on top of the club (Player Cards, Fantasy); how you went (Stats) and what you
 // thought (Voting); then the housekeeping. A club without a section just has fewer cells, and
 // the rest fill in behind it, so four sections make a 2x2 and seven make three rows and one.
-const ORDER = ['availability', 'selection', 'cards', 'fantasy', 'stats', 'voting', 'admin']
+const ORDER = ['availability', 'selection', 'cards', 'fantasy', 'stats', 'voting', 'kit', 'admin']
 
 // Put the grid's cells in the club's order. Anything the order does not name goes after
 // it, in the order it came in (the standard sections, then the club's own cards).
@@ -472,6 +475,7 @@ function summaryFor(id, { me, data, ladder, cardsReady, nets }) {
     const owing = (fees || 0) + (fines || 0)
     return owing > 0 ? { text: `${money(owing)} owing`, tone: AMBER } : { text: 'All square', tone: GREEN }
   }
+  if (id === 'kit') return teamwearSummary(data.teamwear)
   if (id === 'voting') {
     const n = (data.votes || []).length
     if (n > 0) return { text: n === 1 ? '1 vote to cast' : `${n} votes to cast`, tone: AMBER }
@@ -558,6 +562,7 @@ function MyPage({ token, me, club, availability, onSwitch, prefetch }) {
       case 'fantasy': return <FantasyCard key={key} data={data} />
       case 'fees': return <FeesModule key={key} data={data} />
       case 'fines': return <FinesModule key={key} data={data} />
+      case 'teamwear': return <TeamwearCard key={key} token={token} data={data} />
       default: return null
     }
   }
@@ -633,6 +638,8 @@ export default function PublicAvailability() {
   const { token, '*': rest } = useParams()
   // /playerdash/:token is the dashboard; /playerdash/:token/cards and what is under it is the Player Cards page.
   const inCards = rest === 'cards' || (rest || '').startsWith('cards/')
+  // /playerdash/:token/kit is the Teamwear page (order kit, see and pay orders).
+  const inKit = rest === 'kit'
   // Arriving from the voting page: `?player=<id>` has them already picked, so it is
   // only the PIN left to type. (`?tab=mine` on older links is ignored: there is one page now.)
   const [searchParams, setSearchParams] = useSearchParams()
@@ -820,6 +827,14 @@ export default function PublicAvailability() {
       setTimeout(() => setSavedDate((cur) => (cur === pair.key ? null : cur)), 1600)
     }
     setSavingDate((cur) => (cur === pair.key ? null : cur))
+  }
+
+  if (step === 'weekend' && me && inKit) {
+    return (
+      <div className="min-h-screen bg-pb-bg text-pb-text" style={accent ? { '--pb-accent': accent } : undefined}>
+        <KitApp token={token} club={club} />
+      </div>
+    )
   }
 
   if (step === 'weekend' && me && inCards) {

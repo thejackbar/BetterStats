@@ -24,6 +24,7 @@ from app.routers import club_links as club_links_router
 from app.routers import privacy_requests as privacy_requests_router
 from app.routers import card_review, auth, organisations, players, games, game_fow, game_exclusions, stat_exclusions, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, cricketstatz, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, public_player_register, public_player_cards, player_cards_admin, player_dashboard_admin, public_net_checkin, net_manager, rotation, public_rotation, fines, website, comms, public_comms, public_ses, public_contact, public_trusted_clubs, public_teaser, public_webinar, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, trial_summary, meta_ads, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, public_billing, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
     stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store, \
+    teamwear, public_teamwear, \
     club_diary, social_media, votes, public_votes, roles_activities, club_room, roster, facility_requests, directory, \
     public_club_room, sales_workspace, sales_commissions, honours, role_programs
 # BetterScout — a separate tenant type (Scout Org) with its own login,
@@ -4622,6 +4623,11 @@ async def lifespan(app: FastAPI):
         from app.services.player_dashboard_custom_ddl import STATEMENTS as _PLAYER_DASHBOARD_CUSTOM_DDL
         for _stmt in _PLAYER_DASHBOARD_CUSTOM_DDL:
             await conn.execute(text(_stmt))
+        # Migration 402: teamwear ordering (campaigns, orders, triage, payments). Same one-copy rule:
+        # this list and alembic's 402 both run services/teamwear_ddl.STATEMENTS.
+        from app.services.teamwear_ddl import STATEMENTS as _TEAMWEAR_DDL
+        for _stmt in _TEAMWEAR_DDL:
+            await conn.execute(text(_stmt))
         # Migration 373: a hand-entered game can be marked as the grand final, which the automatic
         # premierships read. Same one-copy rule: this list and alembic's 373 both run
         # services/manual_grand_final_ddl.STATEMENTS.
@@ -6797,6 +6803,9 @@ app.include_router(scout_search_router.router)  # BetterScout — the one global
 app.include_router(fees.router, dependencies=[Depends(require_module("fees"))])           # BetterFees (BetterAdmin)
 app.include_router(comms.router, dependencies=[Depends(require_module("comms"))])         # BetterComms (BetterAdmin)
 app.include_router(merch.router, dependencies=[Depends(require_module("merch"))])         # BetterMerch (BetterAdmin)
+app.include_router(teamwear.router, dependencies=[Depends(require_module("merch"))])      # Teamwear ordering (BetterAdmin > Stock)
+app.include_router(public_teamwear.router)         # Teamwear Kit page on the Player Dashboard (PIN cookie, checks module itself)
+app.include_router(public_teamwear.images_router)  # Teamwear product pictures (public)
 app.include_router(public_merch_store.router)  # Merch storefront (public, unauthenticated) — checks module + flag itself per-org
 app.include_router(crm.router, dependencies=[Depends(require_module("crm"))])             # BetterCRM (BetterAdmin)
 app.include_router(fixtures.router, dependencies=[Depends(require_module("select"))])     # BetterSelect

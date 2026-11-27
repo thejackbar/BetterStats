@@ -1376,3 +1376,18 @@ Checked. `backend/verification/verify_merch_dashboard.py` (51 checks, real Postg
 The Stock page's edit product, edit line and rename category buttons used `<Icon name="settings">` from `pages/admin/betterselect/ui.jsx`. That glyph is a small circle with eight rays, nearly the same drawing as the set's own `sun` (the theme toggle), so a club read it as a sun, and no other screen used it for editing. Added an `edit` pencil to the shared set (the same paths BetterIQ's `edit` uses) and pointed the three merch buttons at it; nothing else in the app used `settings`.
 
 Checked on the production build in Chromium with the API stubbed: every `button[title^="Edit"]` on the Stock page now draws the two-path pencil and no circle.
+
+
+## Teamwear ordering (migration 402, v9.163.0)
+
+Built from the North Perth CC "Clothing Ordering: Concept of Operations" (v1.0, 26 Nov 2026): members order freely, the club triages against the supplier's minimums before anyone is asked to pay. Eight stages: shop setup, announce, order, triage, confirm, pay, export, receive.
+
+Decisions taken with the owner: members order from the Player Dashboard (anyone can register there now), one order covers the family plus typed names; card payment through Stripe Connect and Square payment links; the committee approval is recorded by the coordinator (date and where it was approved), not voted in-app; the supplier export is a generic layout until the club sends Masuri's template; markup and rounding are club settings (default 10%, whole dollar); number clashes warn and the coordinator decides, an approved number is written back to the player.
+
+Shape: the range reuses the stock register so top-ups land in club stock as `received` movements, and an in-stock shop order leaves stock as `sold` movements when handed over. Reference is `SURNAME TEAMWEAR`, made unique per campaign (`SMITH2 TEAMWEAR`). MOQ is per product code, sizes combined; Suggested cut when the top-ups needed are `cut_ratio` (9) or more per member unit, or nobody ordered it. Suggested top-ups go one at a time to the size with the most demand per unit already added.
+
+Bank CSV reuses the fees header aliases and adds the headerless CommBank layout (date, amount, description, balance). A reference anywhere in the description (letters and digits only) is a sure match; otherwise `fees.match_score` on the contact name, plus 0.25 when the amount equals the balance.
+
+Not built yet: mapping to Masuri's real template cells; multiple suppliers (out of scope in the CONOPS's first release); a Square webhook.
+
+Verification: `verify_teamwear.py` against real Postgres (pricing, wearers, references, number checks, closed ordering, triage and cut flag, approval cut and clear, payment requests and emptied orders, club-covered lines, number write-back, bank CSV twice, Stripe webhook twice, reminders, export refusal and decision, xlsx contents and formula-safe text, receive into stock once, stock reservation, cross-club scope, the member routes through the app with the PIN cookie and with the PIN off). Control run fails 6, all from the two switched-off rules. Browser suite 28 checks.

@@ -790,6 +790,18 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
             modules = [m for m in modules if m != "fines"]
         lap("fines")
 
+    teamwear = None
+    if "teamwear" in modules:
+        try:
+            from app.services import teamwear as teamwear_svc
+            teamwear = await teamwear_svc.dashboard_summary(db, club, player)
+        except Exception:
+            logger.exception("player page: teamwear failed for %s", player.id)
+            await rollback_keeping(db, club, player)
+        if teamwear is None:
+            modules = [m for m in modules if m != "teamwear"]
+        lap("teamwear")
+
     # The club's own cards (links, announcements, events, image banners) and the order of the grid.
     # Each fails on its own like the newer modules: the page still loads in the standard order.
     custom_modules: list[dict] = []
@@ -826,6 +838,7 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
         "votes": votes,
         "votes_cast": votes_cast,
         "cards": cards,
+        "teamwear": teamwear,
         "has_availability": player_dashboard.availability_live(club),
         "custom_modules": custom_modules,
         "layout": layout,

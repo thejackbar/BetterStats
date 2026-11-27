@@ -160,6 +160,33 @@ async def create_merch_checkout_session(*, connected_account_id: str, order_id: 
     )
 
 
+async def create_teamwear_checkout_session(*, connected_account_id: str, order_id: str, org_id: str,
+                                           description: str, amount_cents: int,
+                                           success_url: str, cancel_url: str):
+    """A one-off Checkout Session for what a teamwear order still owes, on the club's connected
+    account. ``metadata.purpose = teamwear_order`` routes the webhook to
+    services/teamwear_notify.stripe_completed, which records the payment once."""
+    _require_configured()
+    if amount_cents <= 0:
+        raise ValueError("amount must be positive")
+    return await stripe.checkout.Session.create_async(
+        mode="payment",
+        line_items=[{
+            "price_data": {
+                "currency": settings.stripe_currency,
+                "product_data": {"name": description[:250]},
+                "unit_amount": amount_cents,
+                "tax_behavior": "inclusive",
+            },
+            "quantity": 1,
+        }],
+        success_url=success_url,
+        cancel_url=cancel_url,
+        metadata={"purpose": "teamwear_order", "org_id": str(org_id), "order_id": str(order_id)},
+        stripe_account=connected_account_id,
+    )
+
+
 async def create_event_checkout_session(*, connected_account_id: str, registration_id: str, org_id: str,
                                         description: str, amount_cents: int,
                                         success_url: str, cancel_url: str):

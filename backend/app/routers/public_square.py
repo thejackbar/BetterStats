@@ -90,6 +90,8 @@ async def square_callback(
     conn.merchant_id = data.get("merchant_id")
     conn.environment = settings.square_environment
     conn.scopes = " ".join(square_client.SCOPES)
+    # Connected with the payment scopes too (migration 402), so teamwear can take card payments.
+    conn.can_take_payments = True
     conn.connected_by_user_id = user_id
     conn.connected_at = datetime.now(timezone.utc)
     conn.last_sync_status = None

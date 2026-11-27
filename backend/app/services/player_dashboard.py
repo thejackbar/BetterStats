@@ -25,7 +25,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.modules import MODULE_FANTASY, MODULE_FEES, MODULE_SELECT, org_has_module
+from app.auth.modules import MODULE_FANTASY, MODULE_FEES, MODULE_MERCH, MODULE_SELECT, org_has_module
 from app.models.db import FeeMember, FeeMemberSeason, FeePayment, Organisation, Player, Season
 from app.services import fees as fee_service
 from app.services import grade_scope, player_form, session_safety
@@ -56,16 +56,19 @@ CATALOGUE: list[dict] = [
      "blurb": "What they owe the club this season. Needs BetterAdmin fees and the PIN on."},
     {"key": "fines", "label": "Fines",
      "blurb": "Fines owed and how to pay into the pot. Shows only for squads that turn Fines on."},
+    {"key": "teamwear", "label": "Teamwear",
+     "blurb": "Order club kit when an order round is open, buy in-stock items, and see and pay their orders. Needs BetterAdmin merch and the PIN on."},
 ]
 KEYS = [m["key"] for m in CATALOGUE]
 
 # What every club had before the club could choose: the original page, plus
 # fines (which draws nothing unless a squad switches Fines on).
-DEFAULT_MODULES = ["cards", "votes", "fantasy", "squad", "selected", "training", "fines"]
+# Teamwear draws nothing unless an order round is open, kit is in stock or the person has an order.
+DEFAULT_MODULES = ["cards", "votes", "fantasy", "squad", "selected", "training", "fines", "teamwear"]
 
 # A club without BetterSelect has no squads, selection or nets to show, so its page opens on the
 # player's cards and their season instead.
-NO_SELECT_DEFAULT_MODULES = ["cards", "season", "votes", "fantasy"]
+NO_SELECT_DEFAULT_MODULES = ["cards", "season", "votes", "fantasy", "teamwear"]
 SELECT_ONLY = ("squad", "selected", "training", "ladder", "fines")
 # The availability side of a BetterSelect club's link: the modules that ride on its self-service switch.
 # Votes are BetterSelect's, so for a club WITH it they sit here; a club without it keeps them on the
@@ -125,7 +128,7 @@ def normalise(keys) -> list[str]:
 # was OFFERED, so one that arrived later is switched on for it rather than
 # silently missing: a club cannot have turned off what it never saw. Saving the
 # list records what was on offer.
-AUTO_ON_WHEN_NEW = ("cards", "votes", "fantasy")
+AUTO_ON_WHEN_NEW = ("cards", "votes", "fantasy", "teamwear")
 # What a list saved before `known` was recorded had been offered.
 LEGACY_KNOWN = [k for k in KEYS if k not in AUTO_ON_WHEN_NEW]
 
@@ -170,6 +173,11 @@ def blocked_reason(club: Organisation, key: str) -> Optional[str]:
             return "Needs the BetterAdmin fees module."
         if not club.availability_require_pin:
             return "Turn the PIN on first. With no PIN anyone with the link could open a player's fees."
+    if key == "teamwear":
+        if not org_has_module(club, MODULE_MERCH):
+            return "Needs the BetterAdmin merch module."
+        if not club.availability_require_pin:
+            return "Turn the PIN on first. Orders carry family names and money."
     if key == "ladder" and not club.availability_show_squad:
         return "Turn Show squad on first."
     if key == "fantasy":

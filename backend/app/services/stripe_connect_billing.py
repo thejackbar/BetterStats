@@ -54,6 +54,8 @@ async def handle_checkout_completed(db: AsyncSession, data_object, account_id: s
     purpose = metadata.get("purpose") or "fee_payment"
     if purpose == "merch_order":
         await _handle_merch_checkout_completed(db, data_object, account_id)
+    elif purpose == "teamwear_order":
+        await _handle_teamwear_checkout_completed(db, data_object, account_id)
     elif purpose == "event_registration":
         await _handle_event_checkout_completed(db, data_object, account_id)
     else:
@@ -87,6 +89,18 @@ async def _handle_event_checkout_completed(db: AsyncSession, data_object, accoun
     registration.stripe_checkout_session_id = data_object.get("id")
     registration.stripe_payment_intent_id = payment_intent_id
     await db.commit()
+
+
+async def _handle_teamwear_checkout_completed(db: AsyncSession, data_object, account_id: str) -> None:
+    """A member paid a teamwear order by card: record it against the order (once per session)."""
+    metadata = data_object.get("metadata") or {}
+    org_id = metadata.get("org_id")
+    org = await _load_org_by_account(db, account_id)
+    if org is None or str(org.id) != str(org_id):
+        logger.warning("stripe_connect teamwear checkout for account %s doesn't match org %s", account_id, org_id)
+        return
+    from app.services import teamwear_notify
+    await teamwear_notify.stripe_completed(db, org, data_object)
 
 
 async def _handle_merch_checkout_completed(db: AsyncSession, data_object, account_id: str) -> None:

@@ -977,6 +977,31 @@ def start_scheduler():
         id="daily_square_sync",
         replace_existing=True,
     )
+    # Teamwear: payment reminders on the schedule each campaign sets (days around the due date).
+    # Never cancels an unpaid order; that stays the coordinator's call.
+    from app.services.teamwear_notify import run_reminders as _teamwear_reminders, run_square_checks as _teamwear_square
+    scheduler.add_job(
+        _teamwear_reminders,
+        trigger="cron",
+        hour=9,
+        minute=17,
+        timezone=PERTH,
+        id="daily_teamwear_reminders",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    # Teamwear card payments taken on a Square payment link: read them back every 15 minutes
+    # (Square has no per-club webhook here). Only links opened in the last 7 days are read.
+    scheduler.add_job(
+        _teamwear_square,
+        trigger="interval",
+        minutes=15,
+        id="teamwear_square_checks",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
     # BetterFantasyCricket — settle due fantasy rounds daily (after the weekly
     # sync, and to pick up any mid-week scorecard corrections).
     scheduler.add_job(

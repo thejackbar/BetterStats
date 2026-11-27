@@ -17,9 +17,14 @@ from app.config.settings import settings
 logger = logging.getLogger(__name__)
 
 TIMEOUT = 30.0
-# Read-only scopes: merchant profile (name), catalog items, inventory counts,
-# completed orders (sales).
-SCOPES = ["MERCHANT_PROFILE_READ", "ITEMS_READ", "INVENTORY_READ", "ORDERS_READ"]
+# Read scopes: merchant profile (name), catalog items, inventory counts,
+# completed orders (sales). Plus, from migration 402, ORDERS_WRITE and
+# PAYMENTS_WRITE so teamwear can create a Square payment link for a member's
+# order. A connection made before then has only the read scopes and must be
+# reconnected before it can take a card payment (`can_take_payments`).
+READ_SCOPES = ["MERCHANT_PROFILE_READ", "ITEMS_READ", "INVENTORY_READ", "ORDERS_READ"]
+PAYMENT_SCOPES = ["ORDERS_WRITE", "PAYMENTS_WRITE"]
+SCOPES = READ_SCOPES + PAYMENT_SCOPES
 
 
 class SquareError(Exception):
@@ -177,3 +182,47 @@ async def search_completed_orders(token: str, location_id: str, start_at_iso: st
             if not cursor:
                 break
     return orders
+
+
+# ── Online payments (teamwear) ──────────────────────────────────────────────
+
+async def create_payment_link(token: str, *, location_id: str, name: str, amount_cents: int,
+                              currency: str, idempotency_key: str, redirect_url: str,
+                              reference: str | None = None) -> dict:
+    """A Square-hosted checkout for one amount (Checkout API, quick pay).
+    Returns the ``payment_link`` object: ``id``, ``url`` and ``order_id``. The
+    order id is what ``retrieve_order`` reads back to see whether it was paid."""
+    body = {
+        "idempotency_key": idempotency_key,
+        "quick_pay": {
+            "name": name[:255],
+            "price_money": {"amount": int(amount_cents), "currency": currency.upper()},
+            "location_id": location_id,
+        },
+        "checkout_options": {"redirect_url": redirect_url},
+    }
+    if reference:
+        body["payment_note"] = reference[:500]
+    async with httpx.AsyncClient(timeout=TIMEOUT) as c:
+        resp = await c.post(f"{settings.square_api_base}/v2/online-checkout/payment-links",
+                            json=body, headers=_headers(token))
+    return _raise_for(resp).get("payment_link") or {}
+
+
+async def retrieve_order(token: str, order_id: str) -> dict:
+    async with httpx.AsyncClient(timeout=TIMEOUT) as c:
+        resp = await c.get(f"{settings.square_api_base}/v2/orders/{order_id}", headers=_headers(token))
+    return _raise_for(resp).get("order") or {}
+
+
+def order_paid_cents(order: dict) -> int:
+    """What a Square order has collected: the sum of its card/cash tenders, or 0
+    while it is still open. A payment link's order is COMPLETED once paid."""
+    if (order or {}).get("state") not in ("COMPLETED",):
+        return 0
+    total = 0
+    for t in order.get("tenders") or []:
+        total += int(((t.get("amount_money") or {}).get("amount")) or 0)
+    if not total:
+        total = int(((order.get("total_money") or {}).get("amount")) or 0)
+    return total

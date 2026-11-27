@@ -47,6 +47,9 @@ function buildNav({ modules, counts, storefront }) {
     { heading: 'Stock' },
     { to: '/admin/merch/dashboard', label: 'Stock dashboard', icon: 'ladders', cap: CAP.MANAGE_MERCH, module: 'merch' },
     { to: '/admin/merch/stock', label: 'Inventory', icon: 'list', cap: CAP.MANAGE_MERCH, module: 'merch', badge: counts.reorder },
+    // Teamwear ordering: order rounds members order into from the Player Dashboard, triaged
+    // against the supplier's minimums before anyone pays. Same gate as the router (MANAGE_MERCH).
+    { to: '/admin/teamwear', label: 'Teamwear', icon: 'sheet', cap: CAP.MANAGE_MERCH, module: 'merch' },
     ...(storefront ? [{ to: '/admin/merch/orders', label: 'Online store', icon: 'sheet', cap: CAP.MANAGE_MERCH, module: 'merch' }] : []),
 
     { heading: 'Comms' },

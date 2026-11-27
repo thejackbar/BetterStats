@@ -56,6 +56,7 @@ SECTIONS: list[dict] = [
     {"id": "fantasy", "label": "Fantasy", "keys": ["fantasy"]},
     {"id": "stats", "label": "Stats", "keys": ["season"]},
     {"id": "voting", "label": "Voting", "keys": ["votes"]},
+    {"id": "kit", "label": "Teamwear", "keys": ["teamwear"]},
     {"id": "admin", "label": "Club admin", "keys": ["fees", "fines"]},
 ]
 SECTION_IDS = [s["id"] for s in SECTIONS]

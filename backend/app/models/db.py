@@ -4629,6 +4629,8 @@ class MerchSquareConnection(Base):
     location_name = Column(Text, nullable=True)
     sync_enabled = Column(Boolean, nullable=False, server_default="true")
     sync_sales = Column(Boolean, nullable=False, server_default="true")
+    # Migration 402: true once the club connected with the payment scopes teamwear card checkout needs.
+    can_take_payments = Column(Boolean, nullable=False, server_default="false", default=False)
     last_sync_at = Column(TIMESTAMP(timezone=True), nullable=True)
     last_sync_status = Column(Text, nullable=True)   # 'ok' | 'error'
     last_sync_error = Column(Text, nullable=True)
