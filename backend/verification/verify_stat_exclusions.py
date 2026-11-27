@@ -148,13 +148,18 @@ async def seed() -> None:
         await game(STRANGERS, G_OTHER, date(2026, 11, 1), "Other CC", "Elsewhere", OTHER, None)
 
         # Cricket Australia's season totals, which count the T20.
+        # Alex's CA total also counts a fourth Saturday game we hold NO scorecard for: 30 runs, 1 for 25 off 4.
+        # So CA reads 5 games, 145 runs, 7 wickets, best 3-25 and a high score of 55 (both in the T20).
         await ex("INSERT INTO player_season_stats (player_id, season_id, matches, batting_innings, runs, not_outs, fifties, "
-                 " wickets, catches, source) VALUES (:p, :s, 4, 4, 115, 0, 1, 6, 1, 'api')", p=P["ALEX"], s=S_KCC)
+                 " high_score, is_hs_not_out, balls_faced, wickets, overs, bowling_balls, runs_conceded, maidens, "
+                 " best_bowling_wickets, best_bowling_figures, bowling_innings, catches, source) "
+                 "VALUES (:p, :s, 5, 5, 145, 0, 1, 55, false, 180, 7, 20, 120, 125, 0, 3, '3-25', 5, 1, 'api')",
+                 p=P["ALEX"], s=S_KCC)
         await ex("INSERT INTO player_season_stats (player_id, season_id, matches, batting_innings, runs, not_outs, wickets, "
                  " catches, source) VALUES (:p, :s, 1, 0, 0, 0, 0, 0, 'api')", p=P["BEN"], s=S_KCC)
         await ex("INSERT INTO player_season_stats (player_id, season_id, matches, batting_innings, runs, not_outs, wickets, "
                  " catches, source) VALUES (:p, :s, 1, 1, 40, 0, 2, 0, 'api')", p=P["HANK"], s=S_HWCC)
-        for pid, sid, gid, m in ((P["ALEX"], S_KCC, G_SAT, 3), (P["ALEX"], S_KCC, G_T20_HWCC, 1),
+        for pid, sid, gid, m in ((P["ALEX"], S_KCC, G_SAT, 4), (P["ALEX"], S_KCC, G_T20_HWCC, 1),
                                  (P["BEN"], S_KCC, G_T20_HWCC, 1), (P["HANK"], S_HWCC, G_T20_HWCC, 1)):
             await ex("INSERT INTO player_season_grade_stats (player_id, season_id, grade_id, matches) VALUES (:p, :s, :g, :m)",
                      p=pid, s=sid, g=gid, m=m)
@@ -168,7 +173,8 @@ async def career(key) -> dict:
                                    grades=None)
     b, w, f = d.get("career_batting") or {}, d.get("career_bowling") or {}, d.get("career_fielding") or {}
     return {"games": b.get("games"), "runs": b.get("total_runs"), "fifties": b.get("fifties"),
-            "wickets": w.get("total_wickets"), "catches": f.get("total_catches")}
+            "wickets": w.get("total_wickets"), "catches": f.get("total_catches"), "hs": b.get("high_score"),
+            "best": w.get("best_bowling_figures")}
 
 
 async def filtered(key) -> dict:
@@ -291,12 +297,13 @@ async def main() -> None:
 
     print("\n-- 1. BEFORE: THE T20 COUNTS FOR BOTH CLUBS --")
     before = await snapshot()
-    check("Alex: 4 games, 115 runs, a fifty, 6 wickets, 1 catch",
-          before["alex"] == {"games": 4, "runs": 115, "fifties": 1, "wickets": 6, "catches": 1}, before["alex"])
+    check("Alex: CA's 5 games, 145 runs, a fifty, 7 wickets, 1 catch, HS 55, best 3-25",
+          before["alex"] == {"games": 5, "runs": 145, "fifties": 1, "wickets": 7, "catches": 1, "hs": 55, "best": "3-25"},
+          before["alex"])
     check("Ben: 1 game (named in the T20)", before["ben"]["games"] == 1, before["ben"])
     check("Hank (Hills): 1 game, 40 runs, 2 wickets", (before["hank"]["games"], before["hank"]["runs"],
                                                        before["hank"]["wickets"]) == (1, 40, 2), before["hank"])
-    check("Alex's batting board reads 4 games, 115 runs", before["alex_board"] == (4, 115), before["alex_board"])
+    check("Alex's batting board reads 5 games, 145 runs", before["alex_board"] == (5, 145), before["alex_board"])
     check("the scorecard holds a fall of wicket and a stand", await card(KCC) == (1, 1), await card(KCC))
     check("control: Records lists the 55 among Alex's top scores, and the 3-wicket haul",
           55 in before["records"]["top_scores"] and 3 in before["records"]["figures"], before["records"])
@@ -346,12 +353,18 @@ async def main() -> None:
     check("the reply carries the exclusion", out["match"]["exclusion"] and out["match"]["exclusion"]["note"] == "Social T20",
           out["match"]["exclusion"])
     after = await snapshot()
-    check("Alex: 3 games, 60 runs, no fifty, 3 wickets, no catch",
-          after["alex"] == {"games": 3, "runs": 60, "fifties": 0, "wickets": 3, "catches": 0}, after["alex"])
-    check("his season row agrees (3 games, 60 runs, 3 wickets)",
-          after["alex_seasons"].get("Summer 2026/27") == (3, 60, 3), after["alex_seasons"])
-    check("the by-grade grid reads 3", after["alex_grid"] == 3, after["alex_grid"])
-    check("the batting board reads 3 games, 60 runs", after["alex_board"] == (3, 60), after["alex_board"])
+    check("Alex: 4 games, 90 runs, no fifty, 4 wickets, no catch: the T20 comes off CA's total",
+          {k: after["alex"][k] for k in ("games", "runs", "fifties", "wickets", "catches")}
+          == {"games": 4, "runs": 90, "fifties": 0, "wickets": 4, "catches": 0}, after["alex"])
+    check("THE GAME WE HOLD NO SCORECARD FOR STILL COUNTS (90 runs, not the 60 on our cards)",
+          after["alex"]["runs"] == 90, after["alex"])
+    check("the high score set in the T20 falls to the best of his other cards (20)", after["alex"]["hs"] == 20,
+          after["alex"])
+    check("and best bowling to 1-25", after["alex"]["best"] == "1-25", after["alex"])
+    check("his season row agrees (4 games, 90 runs, 4 wickets)",
+          after["alex_seasons"].get("Summer 2026/27") == (4, 90, 4), after["alex_seasons"])
+    check("the by-grade grid reads 4", after["alex_grid"] == 4, after["alex_grid"])
+    check("the batting board reads 4 games, 90 runs", after["alex_board"] == (4, 90), after["alex_board"])
     check("Ben's only game is gone", not after["ben"]["games"], after["ben"])
     check("the team sheet no longer counts as a match played for Alex", not await appearances_counted(P["ALEX"], T20))
     check("but fees still count it as a match day", await appearances_counted(P["ALEX"], T20, for_stats=False))
@@ -360,28 +373,30 @@ async def main() -> None:
     check("and Hills' board is unchanged", after["hank_board"] == before["hank_board"],
           (before["hank_board"], after["hank_board"]))
     check("the scorecard still holds its fall of wicket and its stand", await card(KCC) == (1, 1), await card(KCC))
+    print("     alex before:", before["alex"], "after:", after["alex"], "\n     seasons after:", after["alex_seasons"],
+          "grid", after["alex_grid"], "board", after["alex_board"])
     print("     filtered before:", before["filtered"], "after:", after["filtered"])
-    check("control: every filtered path counts the T20 before (4 games, 115 runs; 1 game against Hills)",
-          before["filtered"]["last10"] == (4, 115) and before["filtered"]["senior"] == (4, 115)
+    check("control: every filtered path counts the T20 before (last 10 cards 4 / 115, category 5 / 145, 1 v Hills)",
+          before["filtered"]["last10"] == (4, 115) and before["filtered"]["senior"] == (5, 145)
           and before["filtered"]["opposition_games"] == 1, before["filtered"])
     check("filtered: the last 10 games read 3 games, 60 runs", after["filtered"]["last10"] == (3, 60), after["filtered"])
-    check("filtered: a category filter reads 3 games, 60 runs", after["filtered"]["senior"] == (3, 60), after["filtered"])
-    check("filtered: the season table under it reads 3 games, 60 runs",
-          after["filtered"]["senior_seasons"] == [(3, 60)], after["filtered"])
+    check("filtered: a category filter reads 4 games, 90 runs", after["filtered"]["senior"] == (4, 90), after["filtered"])
+    check("filtered: the season table under it reads 4 games, 90 runs",
+          after["filtered"]["senior_seasons"] == [(4, 90)], after["filtered"])
     check("filtered: by opposition, the Hills row is gone", after["filtered"]["opposition_games"] == 0, after["filtered"])
     print("     records:", after["records"], "\n     statlab:", after["statlab"], "\n     milestones:", after["milestones"])
-    check("Records: career runs 60 over 3 matches, and the 55 is off the top scores",
-          (after["records"]["career_runs"] or {}).get("matches") == 3
-          and 60 in (after["records"]["career_runs"] or {}).values() and 55 not in after["records"]["top_scores"],
+    check("Records: career runs 90 over 4 matches, and the 55 is off the top scores",
+          (after["records"]["career_runs"] or {}).get("matches") == 4
+          and 90 in (after["records"]["career_runs"] or {}).values() and 55 not in after["records"]["top_scores"],
           after["records"])
     check("Records: the 3-wicket haul is off best figures", 3 not in after["records"]["figures"]
           and 1 in after["records"]["figures"], after["records"])
-    check("Records: career wickets 3", 3 in (after["records"]["career_wkts"] or {}).values(), after["records"])
-    check("Records: most matches 3", (after["records"]["most_matches"] or {}).get("matches") == 3, after["records"])
-    check("StatLab: 3 matches, 60 runs, 3 wickets", after["statlab"] == {"matches": 3, "runs": 60, "wickets": 3},
+    check("Records: career wickets 4", 4 in (after["records"]["career_wkts"] or {}).values(), after["records"])
+    check("Records: most matches 4", (after["records"]["most_matches"] or {}).get("matches") == 4, after["records"])
+    check("StatLab: 4 matches, 90 runs, 4 wickets", after["statlab"] == {"matches": 4, "runs": 90, "wickets": 4},
           after["statlab"])
-    check("Milestones: 3 matches, 60 runs, 3 wickets, no catch",
-          after["milestones"] == {"matches": 3, "runs": 60, "wickets": 3, "catches": 0}, after["milestones"])
+    check("Milestones: 4 matches, 90 runs, 4 wickets, no catch",
+          after["milestones"] == {"matches": 4, "runs": 90, "wickets": 4, "catches": 0}, after["milestones"])
     async with Session() as s:
         pub_k = await sx.is_excluded(s, KCC, T20)
         pub_h = await sx.is_excluded(s, HWCC, T20)
@@ -419,7 +434,7 @@ async def main() -> None:
                                      "ORDER BY id"))).all()
     check("both changes are on the audit trail", [a for _, a in logs] == ["create", "delete"], logs)
     await as_admin(undo_edit, log_id=logs[1][0])
-    check("undoing 'counted again' leaves the match out again", (await career("ALEX"))["runs"] == 60, await career("ALEX"))
+    check("undoing 'counted again' leaves the match out again", (await career("ALEX"))["runs"] == 90, await career("ALEX"))
     async with Session() as s:
         n_live = (await s.execute(text("SELECT COUNT(*) FROM game_stat_exclusions WHERE restored_at IS NULL"))).scalar()
     check("as a new row in force, the old one kept", n_live == 1)
@@ -440,9 +455,12 @@ async def main() -> None:
     async with Session() as s:
         for v in ("v_effective_batting_innings", "v_effective_bowling_spells", "v_effective_fielding_stats",
                   "v_effective_partnerships", "v_effective_bowler_wickets", "v_effective_fall_of_wickets",
-                  "v_club_sourced_seasons", "v_effective_player_season_stats"):
+                  "v_stat_excluded_seasons", "v_effective_player_season_stats"):
             body = (await s.execute(text("SELECT pg_get_viewdef(to_regclass(:v))"), {"v": v})).scalar() or ""
             check(f"{v} reads game_stat_exclusions", "game_stat_exclusions" in body)
+        body = (await s.execute(text("SELECT pg_get_viewdef(to_regclass('v_club_sourced_seasons'))"))).scalar() or ""
+        check("v_club_sourced_seasons does not: an exclusion never moves a season off CA's total",
+              bool(body) and "game_stat_exclusions" not in body and "v_stat_excluded" not in body)
         body = (await s.execute(text("SELECT pg_get_viewdef(to_regclass('v_card_partnerships'))"))).scalar() or ""
         check("v_card_partnerships does not (the scorecard shows the match whole)",
               bool(body) and "game_stat_exclusions" not in body)

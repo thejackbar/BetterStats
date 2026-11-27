@@ -15,10 +15,13 @@ match. While it is in force, for that club's players only:
   * the six per-innings effective views leave the match's rows out (``superseded_ddl``,
     ``kept_sql``), so every per-match figure follows: records, milestones, StatLab, boards, the
     by-grade grid, best figures, partnerships;
-  * the club's season holding the match is counted from its scorecards instead of CA's season total
-    (it joins ``v_club_sourced_seasons``, the path Card review already uses), and the scorecard
-    branch of ``v_effective_player_season_stats`` leaves the match out, so career and season totals
-    follow. CA's total has no per-match granularity, so it cannot step aside for one match;
+  * Cricket Australia's season total stays, LESS the match: ``v_effective_player_season_stats`` reads
+    the match's own scorecard for the player (the ``sx`` lateral, through ``v_stat_excluded_seasons``,
+    which names the club's own season for it) and takes its runs, wickets, catches and the match off.
+    Every other match in CA's total keeps counting, including one we hold no scorecard for. A season
+    best (high score, best bowling) set in the excluded match falls to the best of the season's other
+    scorecards, the one figure subtraction cannot answer exactly. In a season Card review counts from
+    scorecards, the ``api_scorecard`` branch leaves the match out instead;
   * ``game_status.appearance_counts_as_match`` stops counting the team sheet as a match played.
 
 The match itself stays on Fixtures, Results and its scorecard, which reads the ``v_card_*`` copies

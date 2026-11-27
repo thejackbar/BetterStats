@@ -150,31 +150,27 @@ STATEMENTS: tuple[str, ...] = (
     SELECT mg.season_id FROM manual_games mg
      WHERE mg.superseded_by_game_id IS NOT NULL
        AND mg.pair_prefers_import
-       AND mg.review_choice IS NOT NULL
-    -- A THIRD WAY IN: the club left a synced match out of its players' figures
-    -- (`game_stat_exclusions`, migration 401). Cricket Australia's season total
-    -- carries that match and cannot step aside for it, so the season is counted
-    -- from its scorecards, where the 'api_scorecard' branch leaves the match out.
-    -- The season is the CLUB'S OWN for that real season: the game's own season
-    -- when the club holds it, else the club's season for the same CA season, else
-    -- the same year, and exactly one of them, the rule the shared-fixture arm of
-    -- that branch already keeps.
-    UNION
-    SELECT season_id FROM (
-        SELECT DISTINCT ON (x.id) s.id AS season_id
-        FROM game_stat_exclusions x
-        JOIN games g ON g.id = x.game_id
-        JOIN grades gr ON gr.id = g.grade_id
-        JOIN seasons gs ON gs.id = gr.season_id
-        JOIN seasons s ON s.organisation_id = x.organisation_id
-                      AND (s.id = gs.id
-                           OR (s.grassroots_id IS NOT NULL AND s.grassroots_id = gs.grassroots_id)
-                           OR (s.year IS NOT NULL AND s.year = gs.year))
-        WHERE x.restored_at IS NULL
-        ORDER BY x.id, (s.id = gs.id) DESC,
-                 (s.grassroots_id IS NOT NULL AND s.grassroots_id = gs.grassroots_id) DESC,
-                 s.id
-    ) sx""",
+       AND mg.review_choice IS NOT NULL""",
+    # THE CLUB'S OWN SEASON FOR EACH MATCH IT LEFT OUT OF ITS STATS (migration 401,
+    # services/stat_exclusions.py). The season view takes the match off Cricket Australia's season
+    # total for that season. The game's own season when the club holds it, else the club's season for
+    # the same CA season, else the same year, and exactly one of them: a shared fixture can hang off
+    # the other club's season row, the rule the 'api_scorecard' branch's shared arm already keeps.
+    """CREATE OR REPLACE VIEW v_stat_excluded_seasons AS
+    SELECT DISTINCT ON (x.id)
+           x.id AS exclusion_id, x.game_id, x.organisation_id, s.id AS season_id
+    FROM game_stat_exclusions x
+    JOIN games g ON g.id = x.game_id
+    JOIN grades gr ON gr.id = g.grade_id
+    JOIN seasons gs ON gs.id = gr.season_id
+    JOIN seasons s ON s.organisation_id = x.organisation_id
+                  AND (s.id = gs.id
+                       OR (s.grassroots_id IS NOT NULL AND s.grassroots_id = gs.grassroots_id)
+                       OR (s.year IS NOT NULL AND s.year = gs.year))
+    WHERE x.restored_at IS NULL
+    ORDER BY x.id, (s.id = gs.id) DESC,
+             (s.grassroots_id IS NOT NULL AND s.grassroots_id = gs.grassroots_id) DESC,
+             s.id""",
     # Migration 266's column, guarded for the same reason: this module owns
     # v_effective_games and v_effective_player_season_stats, both of which read
     # `games.status`, and it runs BEFORE the 266 mirror further down the boot.
@@ -244,17 +240,69 @@ STATEMENTS: tuple[str, ...] = (
         GREATEST(matches - COALESCE(unplayed.unplayed_matches, 0)
                  - COALESCE(LEAST(rsv.reserve_games,
                                   GREATEST(matches - COALESCE(unplayed.unplayed_matches, 0)
-                                           - rsv.held_games, 0)), 0), 0) AS matches,
-        batting_innings, runs, not_outs, balls_faced,
-        fifties, hundreds, ducks,
-        high_score, is_hs_not_out, batting_average, batting_strike_rate,
-        fours, sixes, batting_minutes,
-        bowling_innings, wickets, overs, bowling_balls, runs_conceded, maidens,
-        bowling_economy, bowling_average, bowling_strike_rate,
-        best_bowling_wickets, best_bowling_figures, five_wicket_innings,
-        wides, no_balls,
-        catches, catches_wk, catches_non_wk, run_outs,
-        assisted_run_outs, unassisted_run_outs, stumpings,
+                                           - rsv.held_games, 0)), 0)
+                 -- A match the club left out of its stats (migration 401), see `sx` below.
+                 - COALESCE(sx.x_matches, 0), 0) AS matches,
+        -- EVERY FIGURE BELOW IS CA'S OWN, LESS THE MATCHES THE CLUB LEFT OUT (`sx`, all zero and
+        -- NULL for a season with none, so the figure is CA's untouched). Counts subtract; a rate is
+        -- worked again from what is left; a season best that came in an excluded match is replaced
+        -- by the best of the season's other scorecards.
+        GREATEST(pss.batting_innings - COALESCE(sx.x_inn, 0), 0) AS batting_innings,
+        GREATEST(pss.runs - COALESCE(sx.x_runs, 0), 0) AS runs,
+        GREATEST(pss.not_outs - COALESCE(sx.x_no, 0), 0) AS not_outs,
+        GREATEST(pss.balls_faced - COALESCE(sx.x_bf, 0), 0) AS balls_faced,
+        GREATEST(pss.fifties - COALESCE(sx.x_50, 0), 0) AS fifties,
+        GREATEST(pss.hundreds - COALESCE(sx.x_100, 0), 0) AS hundreds,
+        GREATEST(pss.ducks - COALESCE(sx.x_ducks, 0), 0) AS ducks,
+        CASE WHEN sx.x_hs IS NOT NULL AND sx.x_hs >= COALESCE(pss.high_score, -1)
+             THEN sx.r_hs ELSE pss.high_score END AS high_score,
+        CASE WHEN sx.x_hs IS NOT NULL AND sx.x_hs >= COALESCE(pss.high_score, -1)
+             THEN COALESCE(sx.r_hs_no, FALSE) ELSE pss.is_hs_not_out END AS is_hs_not_out,
+        CASE WHEN sx.x_any IS NULL THEN pss.batting_average
+             WHEN (pss.batting_innings - COALESCE(sx.x_inn, 0)) - (pss.not_outs - COALESCE(sx.x_no, 0)) > 0
+             THEN ROUND((pss.runs - COALESCE(sx.x_runs, 0))::numeric
+                        / ((pss.batting_innings - COALESCE(sx.x_inn, 0)) - (pss.not_outs - COALESCE(sx.x_no, 0))), 2)
+        END AS batting_average,
+        CASE WHEN sx.x_any IS NULL THEN pss.batting_strike_rate
+             WHEN pss.balls_faced - COALESCE(sx.x_bf, 0) > 0
+             THEN ROUND((pss.runs - COALESCE(sx.x_runs, 0)) * 100.0 / (pss.balls_faced - COALESCE(sx.x_bf, 0)), 2)
+        END AS batting_strike_rate,
+        GREATEST(pss.fours - COALESCE(sx.x_4, 0), 0) AS fours,
+        GREATEST(pss.sixes - COALESCE(sx.x_6, 0), 0) AS sixes,
+        pss.batting_minutes,
+        GREATEST(pss.bowling_innings - COALESCE(sx.x_binn, 0), 0) AS bowling_innings,
+        GREATEST(pss.wickets - COALESCE(sx.x_wk, 0), 0) AS wickets,
+        CASE WHEN sx.x_any IS NULL THEN pss.overs
+             ELSE (FLOOR(sx.balls_left / 6) + MOD(sx.balls_left, 6) / 10.0)::numeric END AS overs,
+        CASE WHEN sx.x_any IS NULL THEN pss.bowling_balls ELSE sx.balls_left END AS bowling_balls,
+        GREATEST(pss.runs_conceded - COALESCE(sx.x_rc, 0), 0) AS runs_conceded,
+        GREATEST(pss.maidens - COALESCE(sx.x_md, 0), 0) AS maidens,
+        CASE WHEN sx.x_any IS NULL THEN pss.bowling_economy
+             WHEN sx.balls_left > 0
+             THEN ROUND((pss.runs_conceded - COALESCE(sx.x_rc, 0)) * 6.0 / sx.balls_left, 2)
+        END AS bowling_economy,
+        CASE WHEN sx.x_any IS NULL THEN pss.bowling_average
+             WHEN pss.wickets - COALESCE(sx.x_wk, 0) > 0
+             THEN ROUND((pss.runs_conceded - COALESCE(sx.x_rc, 0))::numeric / (pss.wickets - COALESCE(sx.x_wk, 0)), 2)
+        END AS bowling_average,
+        CASE WHEN sx.x_any IS NULL THEN pss.bowling_strike_rate
+             WHEN pss.wickets - COALESCE(sx.x_wk, 0) > 0
+             THEN ROUND(sx.balls_left::numeric / (pss.wickets - COALESCE(sx.x_wk, 0)), 2)
+        END AS bowling_strike_rate,
+        CASE WHEN sx.x_bbw > 0 AND sx.x_bbw >= COALESCE(pss.best_bowling_wickets, 0)
+             THEN sx.r_bbw ELSE pss.best_bowling_wickets END AS best_bowling_wickets,
+        CASE WHEN sx.x_bbw > 0 AND sx.x_bbw >= COALESCE(pss.best_bowling_wickets, 0)
+             THEN sx.r_bbf ELSE pss.best_bowling_figures END AS best_bowling_figures,
+        GREATEST(pss.five_wicket_innings - COALESCE(sx.x_5w, 0), 0) AS five_wicket_innings,
+        GREATEST(pss.wides - COALESCE(sx.x_wd, 0), 0) AS wides,
+        GREATEST(pss.no_balls - COALESCE(sx.x_nb, 0), 0) AS no_balls,
+        GREATEST(pss.catches - COALESCE(sx.x_ct, 0), 0) AS catches,
+        GREATEST(pss.catches_wk - COALESCE(sx.x_ctwk, 0), 0) AS catches_wk,
+        GREATEST(pss.catches_non_wk - COALESCE(sx.x_ct - sx.x_ctwk, 0), 0) AS catches_non_wk,
+        GREATEST(pss.run_outs - COALESCE(sx.x_ro, 0), 0) AS run_outs,
+        pss.assisted_run_outs,
+        GREATEST(pss.unassisted_run_outs - COALESCE(sx.x_ro, 0), 0) AS unassisted_run_outs,
+        GREATEST(pss.stumpings - COALESCE(sx.x_st, 0), 0) AS stumpings,
         NULL::text AS grade_label
     FROM player_season_stats pss
     LEFT JOIN (
@@ -367,6 +415,121 @@ STATEMENTS: tuple[str, ...] = (
         JOIN seasons rs ON rs.id = pss.season_id
         WHERE r.reserve_games > 0
     ) rsv ON TRUE
+    LEFT JOIN LATERAL (
+        -- WHAT THE MATCHES THE CLUB LEFT OUT OF ITS STATS PUT INTO THIS TOTAL (migration 401,
+        -- `game_stat_exclusions` through `v_stat_excluded_seasons`), read off their own scorecards,
+        -- which the club always holds: only a match we hold can be excluded. No row at all for a
+        -- season with nothing excluded, the WHERE at the foot, so every figure above is CA's.
+        -- Subtracting keeps every other match in CA's total, including the ones we hold no card for.
+        SELECT TRUE AS x_any,
+               xm.x_matches,
+               xb.x_inn, xb.x_runs, xb.x_no, xb.x_bf, xb.x_50, xb.x_100, xb.x_ducks, xb.x_4, xb.x_6,
+               xb.x_hs, hs.r_hs, hs.r_hs_no,
+               xw.x_binn, xw.x_wk, xw.x_rc, xw.x_md, xw.x_5w, xw.x_wd, xw.x_nb, xw.x_bbw, bb.r_bbw, bb.r_bbf,
+               GREATEST(COALESCE(pss.bowling_balls,
+                                 (FLOOR(pss.overs) * 6 + ROUND((pss.overs - FLOOR(pss.overs)) * 10))::integer, 0)
+                        - COALESCE(xw.x_balls, 0), 0) AS balls_left,
+               xf.x_ct, xf.x_ctwk, xf.x_ro, xf.x_st
+        FROM (
+            -- A match counts for the player as it would anywhere: a line of their own, or named in the
+            -- side for a fixture that went ahead and not as a reserve.
+            SELECT COUNT(*)::integer AS x_matches
+            FROM v_stat_excluded_seasons xs
+            WHERE xs.season_id = pss.season_id
+              AND (EXISTS (SELECT 1 FROM batting_innings bi
+                            WHERE bi.game_id = xs.game_id AND bi.player_id = pss.player_id)
+                   OR EXISTS (SELECT 1 FROM bowling_spells bs
+                               WHERE bs.game_id = xs.game_id AND bs.player_id = pss.player_id)
+                   OR EXISTS (SELECT 1 FROM fielding_stats fs
+                               WHERE fs.game_id = xs.game_id AND fs.player_id = pss.player_id
+                                 AND """ + _NOT_A_SUB.format(t="fs") + """)
+                   OR EXISTS (SELECT 1 FROM game_appearances ga JOIN games g ON g.id = ga.game_id
+                               WHERE ga.game_id = xs.game_id AND ga.player_id = pss.player_id
+                                 AND ga.is_reserve IS NOT TRUE AND g.ca_called_off IS NOT TRUE
+                                 AND NOT __OFF_g__))
+        ) xm
+        CROSS JOIN LATERAL (
+            SELECT COUNT(*) FILTER (WHERE NOT COALESCE(bi.did_not_bat, FALSE))::integer AS x_inn,
+                   COALESCE(SUM(bi.runs) FILTER (WHERE NOT COALESCE(bi.did_not_bat, FALSE)), 0)::integer AS x_runs,
+                   COUNT(*) FILTER (WHERE COALESCE(bi.not_out, FALSE)
+                                      AND NOT COALESCE(bi.did_not_bat, FALSE))::integer AS x_no,
+                   COALESCE(SUM(bi.balls) FILTER (WHERE NOT COALESCE(bi.did_not_bat, FALSE)), 0)::integer AS x_bf,
+                   COUNT(*) FILTER (WHERE bi.runs >= 50 AND bi.runs < 100
+                                      AND NOT COALESCE(bi.did_not_bat, FALSE))::integer AS x_50,
+                   COUNT(*) FILTER (WHERE bi.runs >= 100 AND NOT COALESCE(bi.did_not_bat, FALSE))::integer AS x_100,
+                   COUNT(*) FILTER (WHERE bi.runs = 0 AND NOT COALESCE(bi.not_out, FALSE)
+                                      AND NOT COALESCE(bi.did_not_bat, FALSE))::integer AS x_ducks,
+                   COALESCE(SUM(bi.fours) FILTER (WHERE NOT COALESCE(bi.did_not_bat, FALSE)), 0)::integer AS x_4,
+                   COALESCE(SUM(bi.sixes) FILTER (WHERE NOT COALESCE(bi.did_not_bat, FALSE)), 0)::integer AS x_6,
+                   MAX(bi.runs) FILTER (WHERE NOT COALESCE(bi.did_not_bat, FALSE)) AS x_hs
+            FROM batting_innings bi
+            WHERE bi.player_id = pss.player_id
+              AND bi.game_id IN (SELECT xs.game_id FROM v_stat_excluded_seasons xs
+                                  WHERE xs.season_id = pss.season_id)
+        ) xb
+        CROSS JOIN LATERAL (
+            SELECT COUNT(*)::integer AS x_binn,
+                   COALESCE(SUM(bs.wickets), 0)::integer AS x_wk,
+                   COALESCE(SUM(FLOOR(bs.overs)::integer * 6
+                                + ((bs.overs - FLOOR(bs.overs)) * 10)::integer), 0)::integer AS x_balls,
+                   COALESCE(SUM(bs.runs), 0)::integer AS x_rc,
+                   COALESCE(SUM(bs.maidens), 0)::integer AS x_md,
+                   COUNT(*) FILTER (WHERE bs.wickets >= 5)::integer AS x_5w,
+                   COALESCE(SUM(bs.wides), 0)::integer AS x_wd,
+                   COALESCE(SUM(bs.no_balls), 0)::integer AS x_nb,
+                   MAX(bs.wickets) AS x_bbw
+            FROM bowling_spells bs
+            WHERE bs.player_id = pss.player_id
+              AND bs.game_id IN (SELECT xs.game_id FROM v_stat_excluded_seasons xs
+                                  WHERE xs.season_id = pss.season_id)
+        ) xw
+        CROSS JOIN LATERAL (
+            SELECT COALESCE(SUM(fs.catches), 0)::integer AS x_ct,
+                   COALESCE(SUM(fs.catches_wk), 0)::integer AS x_ctwk,
+                   COALESCE(SUM(fs.run_outs), 0)::integer AS x_ro,
+                   COALESCE(SUM(fs.stumpings), 0)::integer AS x_st
+            FROM fielding_stats fs
+            WHERE fs.player_id = pss.player_id
+              AND """ + _NOT_A_SUB.format(t="fs") + """
+              AND fs.game_id IN (SELECT xs.game_id FROM v_stat_excluded_seasons xs
+                                  WHERE xs.season_id = pss.season_id)
+        ) xf
+        -- A SEASON BEST THAT CAME IN AN EXCLUDED MATCH: the best of the season's other scorecards.
+        -- Only read when the excluded match held it (the CASEs above); a game we hold no card for
+        -- cannot be seen here, the one figure subtraction cannot answer exactly.
+        CROSS JOIN LATERAL (
+            SELECT MAX(bi.runs) AS r_hs,
+                   (ARRAY_AGG(COALESCE(bi.not_out, FALSE) ORDER BY bi.runs DESC NULLS LAST,
+                              COALESCE(bi.not_out, FALSE) DESC))[1] AS r_hs_no
+            FROM batting_innings bi
+            JOIN games g ON g.id = bi.game_id
+            JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons gs ON gs.id = gr.season_id
+            JOIN seasons ps ON ps.id = pss.season_id
+            WHERE bi.player_id = pss.player_id
+              AND NOT COALESCE(bi.did_not_bat, FALSE)
+              AND (gs.id = ps.id OR (ps.grassroots_id IS NOT NULL AND gs.grassroots_id = ps.grassroots_id)
+                   OR (ps.year IS NOT NULL AND gs.year = ps.year))
+              AND bi.game_id NOT IN (SELECT xs.game_id FROM v_stat_excluded_seasons xs
+                                      WHERE xs.season_id = pss.season_id)
+        ) hs
+        CROSS JOIN LATERAL (
+            SELECT MAX(bs.wickets) AS r_bbw,
+                   (ARRAY_AGG(bs.wickets::text || '-' || bs.runs::text ORDER BY bs.wickets DESC, bs.runs ASC)
+                    FILTER (WHERE bs.wickets > 0))[1] AS r_bbf
+            FROM bowling_spells bs
+            JOIN games g ON g.id = bs.game_id
+            JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons gs ON gs.id = gr.season_id
+            JOIN seasons ps ON ps.id = pss.season_id
+            WHERE bs.player_id = pss.player_id
+              AND (gs.id = ps.id OR (ps.grassroots_id IS NOT NULL AND gs.grassroots_id = ps.grassroots_id)
+                   OR (ps.year IS NOT NULL AND gs.year = ps.year))
+              AND bs.game_id NOT IN (SELECT xs.game_id FROM v_stat_excluded_seasons xs
+                                      WHERE xs.season_id = pss.season_id)
+        ) bb
+        WHERE EXISTS (SELECT 1 FROM v_stat_excluded_seasons xs WHERE xs.season_id = pss.season_id)
+    ) sx ON TRUE
     -- Only surface a season-stats row when its season belongs to the same
     -- organisation as the player. Filters out cross-club rows that CA's shared
     -- participant GUID lets a second club's sync attach to a player owned by
