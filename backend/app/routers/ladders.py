@@ -86,6 +86,9 @@ def _parse_ladder_payload(raw, club) -> list:
                     "team_id": t.get("id"),
                     "team_name": name,
                     "logo_url": org.get("logoUrl"),
+                    # Cricket Australia's own crest link, kept when ours replaces it.
+                    "ca_logo_url": org.get("logoUrl"),
+                    "org_id": org.get("id"),
                     # By the owning organisation id; the name (team, club and
                     # short name) only when the row has none. A name test alone
                     # lit up "North Beach" on North Perth's ladder.
@@ -167,7 +170,45 @@ async def _compute_team_ladders(
         }
 
     results = list(await asyncio.gather(*[one(t) for t in linked])) if linked else []
+    await _use_stored_crests(db, org, results)
     return {"teams": results, "unlinked": unlinked}
+
+
+async def _use_stored_crests(db: AsyncSession, club: Organisation, teams: list) -> None:
+    """Swap Cricket Australia's crest link for the crest a club keeps with us.
+
+    Cricket Australia's ``logoUrl`` is often missing or a link that 404s, so a
+    ladder drew a monogram for every team, our own included. A row whose
+    owning organisation is a club here with a crest on file (and not archived:
+    an archived club's upload is old) gets that crest; our own row always gets
+    ours when we have one. Matched by organisation id only, never by name.
+    Nothing is written."""
+    ids = set()
+    for t in teams:
+        for v in t.get("views") or []:
+            for row in v.get("rows") or []:
+                oid = row.get("org_id")
+                try:
+                    if oid:
+                        ids.add(uuid.UUID(str(oid)))
+                except ValueError:
+                    pass
+    crests = {}
+    if ids:
+        found = (await db.execute(
+            select(Organisation.id, Organisation.logo_url)
+            .where(Organisation.id.in_(list(ids)), Organisation.logo_url.isnot(None), Organisation.archived_at.is_(None))
+        )).all()
+        crests = {str(i).lower(): u for i, u in found if u}
+    own = club.logo_url if getattr(club, "logo_url", None) and not getattr(club, "archived_at", None) else None
+    for t in teams:
+        for v in t.get("views") or []:
+            for row in v.get("rows") or []:
+                mine = crests.get(str(row.get("org_id") or "").lower())
+                if row.get("is_club") and own:
+                    mine = own
+                if mine:
+                    row["logo_url"] = mine
 
 
 @router.get("/teams")

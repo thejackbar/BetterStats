@@ -985,6 +985,63 @@ const tilesOf = async (page) => page.evaluate(() => [...document.querySelectorAl
   }
 }
 
+// ── 4n. Ladder: crests and columns (v9.166.0) ───────────────────────────────
+// The ladder a club sent: points and net run rate ran together ("480.969" was
+// 24 and 80.969) and every row drew a monogram, our own included.
+{
+  const cols = [['played', 'P'], ['won', 'W'], ['lost', 'L'], ['competitionPoints', 'PTS'], ['netRunRate', 'NRR']].map(([id, heading]) => ({ id, heading }))
+  const T = [['Applecross 7th XI', 24, 80.969, true, null], ["WSCC One Day 4's", 32, 1.03, false, '/api/images/organisations/wscc/logo?v=1'], ['High Wycombe 4th XI', 28, 0.265],
+    ['North Perth 4th XI', 24, 0.507], ['Bentley 5th XI', 24, -0.071], ['SMCC 8th XI - One Day', 24, -0.317], ['Balcatta Stirling 5th XI', 12, -0.679], ['SPSTCC 5th XI', 0, -1.679]]
+  const rows = T.map(([name, pts, nrr, ours = false, logo = null], i) => ({ rank: i + 1, team_name: name, logo_url: logo, is_club: ours, stats: { played: 6, won: [6, 4, 3, 3, 3, 3, 1, 0][i], lost: [0, 1, 2, 3, 3, 3, 4, 6][i], competitionPoints: pts, netRunRate: nrr } }))
+  const LADDERS = { teams: [{ team_id: 't1', team_name: '7th XI', grade_id: 'g1', grade_name: 'One Day Grade 4', available: true, views: [{ name: 'One Day', columns: cols, rows }] }], unlinked: [] }
+  const settings = { ...CLUB, logo_url: '/api/images/organisations/org-1/logo?v=1' }
+  const ctx = await browser.newContext({ viewport: { width: 1600, height: 1000 }, acceptDownloads: true })
+  const page = await ctx.newPage()
+  const errors = []
+  page.on('pageerror', (e) => errors.push(String(e)))
+  const json = (b) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(b) })
+  await page.route('**/api/**', (route) => {
+    const url = route.request().url()
+    if (/\/auth\/me/.test(url)) return route.fulfill(json({ id: 'u1', role: 'club_admin', club_slug: 'tcc', entitlements: { modules: ['socials', 'select', 'stats'], status: 'active' } }))
+    if (/\/club-admin\/settings/.test(url)) return route.fulfill(json(settings))
+    if (/\/images\/organisations\//.test(url)) return route.fulfill({ status: 200, contentType: 'image/png', body: PHOTO })
+    if (/\/ladders\/teams/.test(url)) return route.fulfill(json(LADDERS))
+    if (/social\/media|templates|sponsors|players|leaderboard|seasons|head-to-head/.test(url)) return route.fulfill(json([]))
+    return route.fulfill(json({}))
+  })
+  await page.goto(`${BASE}/admin/social-post?template=DL21`, { waitUntil: 'domcontentloaded' })
+  await page.getByRole('button', { name: /DOWNLOAD PNG|SLIDES/ }).first().waitFor({ timeout: 25000 }).catch(() => {})
+  await page.waitForTimeout(1200)
+  const lay = await page.evaluate(() => {
+    const h = [...document.querySelectorAll('div')].find((d) => d.style.left === '-9999px' && d.style.position === 'absolute')
+    const rowsEl = h ? [...h.querySelectorAll('[data-ladder-row]')] : []
+    return rowsEl.map((r) => {
+      const rb = r.getBoundingClientRect()
+      const spans = [...r.children]
+      const figs = spans.slice(3).map((s) => { const b = s.getBoundingClientRect(); const range = document.createRange(); range.selectNodeContents(s); const t = range.getBoundingClientRect(); return { l: b.left, r: b.right, tl: t.left, tr: t.right, text: s.textContent } })
+      const img = r.querySelector('[data-ladder-crest] img')
+      return { club: r.getAttribute('data-ladder-row') === 'club', right: rb.right, figs, img: img ? img.getAttribute('src') : null }
+    })
+  })
+  ck('the ladder draws all eight rows', lay.length === 8, String(lay.length))
+  // Each figure's text sits inside its own column, and columns do not overlap.
+  const clash = lay.flatMap((r, i) => r.figs.flatMap((x, k) => {
+    const bad = []
+    if (x.tl < x.l - 1 || x.tr > x.r + 1) bad.push(`row ${i + 1} ${x.text} spills its column`)
+    if (k > 0 && x.tl < r.figs[k - 1].tr + 4) bad.push(`row ${i + 1} ${x.text} touches ${r.figs[k - 1].text}`)
+    if (x.tr > r.right + 1) bad.push(`row ${i + 1} ${x.text} runs off the row`)
+    return bad
+  }))
+  ck('points and net run rate never run together (every figure inside its column)', lay.length === 8 && clash.length === 0, clash.slice(0, 3).join('; '))
+  ck('control: row 1 reads 24 points and 80.969', lay[0] && lay[0].figs.map((x) => x.text).join(' ') === '6 6 0 24 80.969', lay[0] && lay[0].figs.map((x) => x.text).join(' '))
+  const ours = lay.find((r) => r.club)
+  ck("our row draws the club's own crest, not a monogram", ours && /images\/organisations\/org-1\/logo/.test(ours.img || ''), String(ours && ours.img))
+  ck('a row with a crest on file draws it', lay[1] && /organisations\/wscc\/logo/.test(lay[1].img || ''), String(lay[1] && lay[1].img))
+  ck('a row with no crest falls back to its monogram', lay[2] && lay[2].img === null)
+  ck('no page errors on the ladder', errors.length === 0, errors.slice(0, 2).join(' | '))
+  await ctx.close()
+}
+
 // ── 5. Association Socials workspace has the same tools ────────────────────
 {
   const { ctx, page, errors } = await openEditor({ settings: WORKSPACE, assoc: true })

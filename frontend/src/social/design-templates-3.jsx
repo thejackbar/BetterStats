@@ -24,7 +24,16 @@ const Credit = ({ g, ink }) => (
   <div data-layer="Platform credit" style={{ position: 'absolute', right: 30, bottom: g.bottom, pointerEvents: 'none' }}><CreditMark ink={ink} h={Math.round(30 * g.f)} /></div>
 )
 const fmt = (v) => (v === null || v === undefined || v === '' ? '' : (typeof v === 'number' && !Number.isInteger(v) ? v.toFixed(3).replace(/0+$/, '').replace(/\.$/, '') : String(v)))
-const mono = (name) => String(name || '').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase()
+// Initials of the club, not of the grade words after it ("North Perth 4th XI"
+// is NP, "WSCC One Day 4's" is WSCC's first two letters).
+const GRADE_WORD = /^(\d+(st|nd|rd|th)?|xi|one|day|t20|grade|div(ision)?|[ivx]+|\d+'?s|-|women'?s|men'?s|u\d+|colts|res|reserves|club)$/i
+const mono = (name) => {
+  const words = String(name || '').replace(/[()]/g, ' ').split(/\s+/).filter(Boolean)
+  const club = words.filter((w) => !GRADE_WORD.test(w))
+  const use = club.length ? club : words
+  if (use[0] && /^[A-Z]{3,6}$/.test(use[0])) return use[0].slice(0, 3)
+  return use.slice(0, 2).map((w) => w[0]).join('').toUpperCase()
+}
 
 function Empty({ text, g }) {
   return (
@@ -54,12 +63,22 @@ export function DesignLadder({ width = 1080, height = 1080, team = {}, palette =
   const cols = (s.columns || []).filter((c) => ['played', 'won', 'lost', 'competitionPoints', 'netRunRate', 'quotient'].includes(c.id)).slice(0, 5)
   const headH = Math.round(150 * f)
   const top = g.top + headH
-  const avail = g.slotY - 20 - top - Math.round(46 * f)
+  const avail = g.slotY - 20 - top - Math.round(84 * f)
   const max = pick(A, { square: 10, portrait: 12, story: 14 })
   const rows = ladderRowsShown(s.rows, max)
-  const rowH = Math.min(Math.round(78 * f), Math.floor(avail / Math.max(1, rows.length)))
-  const colW = Math.round(92 * f)
-  const fs = Math.round(Math.min(34 * f, rowH * 0.46))
+  const rowH = Math.min(Math.round(pick(A, { square: 84, portrait: 96, story: 118 }) * f), Math.floor(avail / Math.max(1, rows.length)))
+  const fs = Math.round(Math.min(pick(A, { square: 30, portrait: 32, story: 36 }) * f, rowH * 0.4))
+  const numFs = Math.round(fs * 0.9)
+  const pad = Math.round(16 * f)
+  const crestBox = Math.round(rowH * 0.62)
+  // Each figure column is as wide as its longest entry (heading included), so a
+  // net run rate like -0.071 never runs into the points beside it.
+  const colW = (c) => {
+    const longest = Math.max(...rows.map((r) => fmt(r.stats?.[c.id]).length), 2)
+    return Math.max(Math.round(52 * f), Math.round(longest * numFs * 0.62 + 14 * f))
+  }
+  const widths = cols.map(colW)
+  const bright = (id) => id === 'competitionPoints'
   return (
     <LayerRoot style={{ width, height, position: 'relative', overflow: 'hidden', background: ground, color: ink, fontFamily: FONT, fontWeight: WEIGHT }}>
       {texture && <Paths layer="Grain" paths={grungePaths(width, height, 27)} color="#000000" width={width} height={height} opacity={0.25} />}
@@ -71,27 +90,30 @@ export function DesignLadder({ width = 1080, height = 1080, team = {}, palette =
         <ClubLogo src={team.logo} monogram={team.monogram} color={ink} size={Math.round(90 * f)} shape="shield" />
       </div>
       {rows.length ? (
-        <div data-layer="Table" style={{ position: 'absolute', left: 40, right: 40, top }}>
-          <div style={{ display: 'flex', alignItems: 'center', height: Math.round(40 * f), fontFamily: MONO, fontSize: Math.round(15 * f), letterSpacing: 2, opacity: 0.75 }}>
-            <span style={{ width: Math.round(64 * f) }}>#</span>
+        <div data-layer="Table" style={{ position: 'absolute', left: 40, right: 40, top: top + Math.round(10 * f) }}>
+          <div style={{ display: 'flex', alignItems: 'center', height: Math.round(36 * f), padding: `0 ${pad}px`, fontFamily: MONO, fontSize: Math.round(14 * f), letterSpacing: 2, opacity: 0.7 }}>
+            <span style={{ width: Math.round(46 * f) }}>#</span>
+            <span style={{ width: crestBox + Math.round(16 * f) }} />
             <span style={{ flex: 1 }}>TEAM</span>
-            {cols.map((c) => <span key={c.id} style={{ width: colW, textAlign: 'right' }}>{upper(c.heading)}</span>)}
+            {cols.map((c, k) => <span key={c.id} style={{ width: widths[k], textAlign: 'right' }}>{upper(c.heading)}</span>)}
           </div>
           {rows.map((r, i) => {
             const ours = !!r.is_club
             const gap = i > 0 && rows[i - 1].rank != null && r.rank != null && r.rank - rows[i - 1].rank > 1
+            const rowInk = ours ? inkOn(lit) : ink
             return (
               <div key={`${r.team_name}-${i}`} data-ladder-row={ours ? 'club' : ''} style={{
-                display: 'flex', alignItems: 'center', height: rowH - 6, marginTop: gap ? 14 : 6, padding: `0 ${Math.round(14 * f)}px`,
-                background: ours ? lit : 'rgba(255,255,255,0.07)', color: ours ? inkOn(lit) : ink, fontSize: fs,
-                clipPath: 'polygon(0 0, 100% 0, calc(100% - 14px) 100%, 0 100%)',
+                display: 'flex', alignItems: 'center', height: rowH - 6, marginTop: gap ? 16 : 6, padding: `0 ${pad}px`, borderRadius: 4,
+                background: ours ? lit : (i % 2 ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.09)'), color: rowInk, fontSize: fs,
               }}>
-                <span style={{ width: Math.round(50 * f) }}>{r.rank ?? ''}</span>
-                <span style={{ width: Math.round(rowH * 0.7), height: Math.round(rowH * 0.7), marginRight: 14, display: 'grid', placeItems: 'center' }}>
-                  <ClubLogo src={r.logo_url} monogram={mono(r.team_name)} color={ours ? inkOn(lit) : ink} size={Math.round(rowH * 0.62)} shape="shield" />
+                <span style={{ width: Math.round(46 * f), fontVariantNumeric: 'tabular-nums' }}>{r.rank ?? ''}</span>
+                <span data-ladder-crest="" style={{ width: crestBox, height: crestBox, marginRight: Math.round(16 * f), display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+                  <ClubLogo src={ours ? (team.logo || r.logo_url) : r.logo_url} monogram={ours ? (team.monogram || mono(r.team_name)) : mono(r.team_name)} color={rowInk} size={Math.round(crestBox * 0.92)} shape="shield" />
                 </span>
                 <span style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{upper(r.team_name)}</span>
-                {cols.map((c) => <span key={c.id} style={{ width: colW, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmt(r.stats?.[c.id])}</span>)}
+                {cols.map((c, k) => (
+                  <span key={c.id} style={{ width: widths[k], flexShrink: 0, textAlign: 'right', fontSize: numFs, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', opacity: bright(c.id) || ours ? 1 : 0.78 }}>{fmt(r.stats?.[c.id])}</span>
+                ))}
               </div>
             )
           })}
@@ -151,7 +173,7 @@ export function HeadToHead({ width = 1080, height = 1080, team = {}, opponent = 
       </div>
       <div data-layer="Crests" style={{ position: 'absolute', left: 48, right: 48, top: g.top + Math.round(120 * f), display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', gap: 20 }}>
         <div style={{ textAlign: 'center' }}>
-          <div style={{ display: 'flex', justifyContent: 'center' }}><ClubLogo src={us?.logo_url || team.logo} monogram={team.monogram} color={usC} size={crest} shape="shield" /></div>
+          <div style={{ display: 'flex', justifyContent: 'center' }}><ClubLogo src={team.logo || us?.logo_url} monogram={team.monogram} color={usC} size={crest} shape="shield" /></div>
           <div style={{ fontSize: Math.round(30 * f), marginTop: 8, color: usC, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{usName}</div>
         </div>
         <div style={{ fontSize: Math.round(64 * f) }}>VS</div>
