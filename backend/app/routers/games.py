@@ -9,7 +9,7 @@ import uuid
 logger = logging.getLogger(__name__)
 
 from app.models.db import Game, Grade, Season, Organisation, BattingInnings, BowlingSpell, FieldingStat, Player, ManualGame, ManualBattingInnings, ManualBowlingSpell, ManualFieldingStat, ManualInnings, User, get_db
-from app.routers.auth import get_optional_user, public_junior_hiding
+from app.routers.auth import get_optional_user, public_junior_hiding, user_can_view_org_private
 from app.services import dismissal, grade_scope, merge_redirects, participant_names
 from app.services.aggregations import get_game_fall_of_wickets, get_game_partnerships
 from app.services.club_match import fixture_side
@@ -380,6 +380,146 @@ def _looks_redacted(name: Optional[str]) -> bool:
     literal asterisk-redaction placeholder for a privacy-protected participant."""
     cleaned = (name or "").strip()
     return not cleaned or set(cleaned) == {"*"}
+
+
+def _score_name_key(n: str) -> tuple[str, str]:
+    """(surname, first_initial): handles "Baker, Daniel" (DB format) vs
+    "D Baker" (GR playerShortName). The fallback for when GR's participant GUID
+    for a match matches nothing stored: CA is known to issue a different GUID
+    for the same real person across a MyCricket/PlayHQ migration boundary."""
+    n = (n or "").strip()
+    if "," in n:
+        parts = n.split(",", 1)
+        surname = parts[0].strip().lower()
+        first = parts[1].strip()
+        return (surname, first[0].lower() if first else "")
+    words = n.split()
+    if not words:
+        return ("", "")
+    return (words[-1].lower(), words[0][0].lower() if words[0] else "")
+
+
+async def _club_link_resolver(db: AsyncSession, club: Optional[Organisation],
+                              pid_to_name: dict[str, str], exclude_ids=frozenset()):
+    """Build ``(resolve, id_to_display)`` for one club's players.
+
+    ``resolve(pid_str, name)`` says which of ``club``'s players (if any) a
+    Grassroots participant is: purely for a hyperlink, never for deciding a
+    row's stats or which team it is on. Tries the literal id, then the stored
+    raw GUID, then a followed merge, then an explicit admin-recorded name alias
+    (a rename, see services/player_aliases.py), then the team sheet's full name
+    held by one player, then a loose surname-and-initial match for the ordinary
+    GUID-mismatch case.
+
+    ``pid_to_name`` is read at call time, so the caller may fill it after this
+    returns. Ids in ``exclude_ids`` are never returned (a player the club hides
+    from this viewer).
+
+    Used for the viewing club's own side and, when the other side is also a
+    BetterCricket club, for theirs.
+    """
+    player_rows = []
+    alias_map: dict[str, str] = {}
+    merged_redirect: dict[str, uuid.UUID] = {}
+    normalise_name_key = short_name_alias = None
+    if club:
+        # `Player.display_name` is a Python @property (display_name_override
+        # or name), not a mapped column: select the two real columns behind it.
+        player_res = await db.execute(
+            select(Player.id, Player.grassroots_id, Player.display_name_override, Player.name)
+            .where(Player.organisation_id == club.id)
+        )
+        player_rows = [r for r in player_res.all() if r[0] not in exclude_ids]
+        from app.services.player_aliases import normalise_name_key, org_alias_map, short_name_alias
+        alias_map = await org_alias_map(db, club.id)
+        # A merged-away player's id (the raw CA GUID, or uuid5(org, guid)) is
+        # still what a team sheet carries. Sync follows merge_logs for it; the
+        # card has to as well, or a merged player reads as a FILL-IN.
+        merged_redirect = await _live_merge_redirects(db, club.id)
+    known_ids: set = {r[0] for r in player_rows}
+    guid_to_pid: dict[str, uuid.UUID] = {r[1]: r[0] for r in player_rows if r[1]}
+    id_to_display: dict[uuid.UUID, str] = {r[0]: (r[2] or r[3]) for r in player_rows}
+    id_by_str: dict[str, uuid.UUID] = {str(r[0]): r[0] for r in player_rows}
+    # (surname, first initial) is ambiguous at any club with two "A Taylor"s:
+    # keep every holder of the key and only link when exactly one has it,
+    # rather than silently picking whichever row came first.
+    nk_holders: dict[tuple, set] = {}
+    for _pid, _guid, _override, _name in player_rows:
+        _dname = _override or _name
+        if _dname and not _looks_redacted(_dname):
+            nk_holders.setdefault(_score_name_key(_dname), set()).add(_pid)
+    nk_to_pid: dict[tuple, uuid.UUID] = {k: next(iter(v)) for k, v in nk_holders.items() if len(v) == 1}
+    # The team sheet carries the full name even where the batting row only has
+    # an initial, and a full name held by one player beats an initial.
+    full_to_pid = participant_names.unique_by_full_name(
+        [(r[0], r[2] or r[3]) for r in player_rows])
+
+    def resolve(pid_str: str, name: str) -> Optional[uuid.UUID]:
+        try:
+            pid = uuid.UUID(pid_str)
+        except (TypeError, ValueError):
+            pid = None
+        if pid is not None and pid in known_ids:
+            return pid
+        if pid_str in guid_to_pid:
+            return guid_to_pid[pid_str]
+        if merged_redirect and pid_str:
+            kept = merged_redirect.get(pid_str.lower())
+            if kept is None and club is not None:
+                kept = merged_redirect.get(str(uuid.uuid5(uuid.UUID(str(club.id)), pid_str)))
+            if kept is not None and kept in known_ids:
+                return kept
+        if name and alias_map:
+            alias_pid = alias_map.get(normalise_name_key(name))
+            if alias_pid:
+                return id_by_str.get(alias_pid)
+            alias_pid = short_name_alias(alias_map, name)
+            if alias_pid:
+                return id_by_str.get(alias_pid)
+        roster_name = pid_to_name.get(pid_str)
+        if roster_name and participant_names.looks_full(roster_name):
+            full_pid = full_to_pid.get(participant_names.full_name_key(roster_name))
+            if full_pid is not None:
+                return full_pid
+        if name and not _looks_redacted(name):
+            cand = nk_to_pid.get(_score_name_key(name))
+            # The team sheet gave a full name that matched nobody. A player who
+            # shares only the surname and initial (Angus for Ashton Taylor) is a
+            # different person, so the loose match needs a compatible given name.
+            if cand is not None and roster_name and participant_names.looks_full(roster_name) \
+                    and not participant_names.first_names_compatible(roster_name, id_to_display.get(cand)):
+                return None
+            return cand
+        return None
+
+    return resolve, id_to_display
+
+
+async def _other_bettercricket_club(db: AsyncSession, owner_id, viewing_club: Optional[Organisation]):
+    """The BetterCricket club behind the other side of a fixture, when it has a
+    live public site: our ``organisations.id`` IS the CA organisation GUID, so a
+    team's ``owningOrganisation.id`` names it exactly. None for a club we do not
+    hold, the viewing club itself (an in-house game), or one whose public pages
+    are off (inactive, archived, BetterStats not live, or behind a PIN), since a
+    link there would only land on a closed page."""
+    if not owner_id:
+        return None
+    try:
+        oid = uuid.UUID(str(owner_id))
+    except (TypeError, ValueError):
+        return None
+    if viewing_club is not None and oid == viewing_club.id:
+        return None
+    from sqlalchemy.orm import selectinload
+    from app.auth.modules import org_core_live
+    club = (await db.execute(
+        select(Organisation).where(Organisation.id == oid)
+        .options(selectinload(Organisation.module_subscriptions))
+    )).scalar_one_or_none()
+    if club is None or not club.slug or not club.is_active or club.archived_at is not None \
+            or club.password_protected or not org_core_live(club):
+        return None
+    return club
 
 
 def _classify_unlinked_name(raw_name: Optional[str], batting_position=None) -> tuple[str, bool, bool]:
@@ -1041,17 +1181,7 @@ async def get_scorecard(
             # we have stored at all — CA is known to issue a different GUID
             # for the same real person across a MyCricket/PlayHQ migration
             # boundary, so id-only matching alone misses them.
-            def _name_key(n: str) -> tuple[str, str]:
-                n = (n or "").strip()
-                if "," in n:
-                    parts = n.split(",", 1)
-                    surname = parts[0].strip().lower()
-                    first = parts[1].strip()
-                    return (surname, first[0].lower() if first else "")
-                words = n.split()
-                if not words:
-                    return ("", "")
-                return (words[-1].lower(), words[0][0].lower() if words[0] else "")
+            _name_key = _score_name_key
 
             # `org` can legitimately be unresolvable (see `include_fillins_stats`
             # above) — that only means no `players` row can ever be linked for
@@ -1062,82 +1192,8 @@ async def get_scorecard(
             # (doing so throws at request time, not at import/compile time,
             # which is how this got past a syntax check). Select the two real
             # columns behind it and compute the same fallback in Python.
-            player_rows = []
-            alias_map: dict[str, str] = {}
-            merged_redirect: dict[str, uuid.UUID] = {}
-            if org:
-                player_res = await db.execute(
-                    select(Player.id, Player.grassroots_id, Player.display_name_override, Player.name)
-                    .where(Player.organisation_id == org.id)
-                )
-                player_rows = player_res.all()
-                from app.services.player_aliases import normalise_name_key, org_alias_map, short_name_alias
-                alias_map = await org_alias_map(db, org.id)
-                # A merged-away player's id (the raw CA GUID, or uuid5(org, guid)) is
-                # still what a team sheet carries. Sync follows merge_logs for it; the
-                # card has to as well, or a merged player reads as a FILL-IN.
-                merged_redirect = await _live_merge_redirects(db, org.id)
-            known_ids: set = {r[0] for r in player_rows}
-            guid_to_pid: dict[str, uuid.UUID] = {r[1]: r[0] for r in player_rows if r[1]}
-            id_to_display: dict[uuid.UUID, str] = {r[0]: (r[2] or r[3]) for r in player_rows}
-            id_by_str: dict[str, uuid.UUID] = {str(r[0]): r[0] for r in player_rows}
-            # (surname, first initial) is ambiguous at any club with two "A Taylor"s:
-            # keep every holder of the key and only link when exactly one has it,
-            # rather than silently picking whichever row came first.
-            nk_holders: dict[tuple, set] = {}
-            for _pid, _guid, _override, _name in player_rows:
-                _dname = _override or _name
-                if _dname and not _looks_redacted(_dname):
-                    nk_holders.setdefault(_name_key(_dname), set()).add(_pid)
-            nk_to_pid: dict[tuple, uuid.UUID] = {k: next(iter(v)) for k, v in nk_holders.items() if len(v) == 1}
-            # The team sheet carries the full name even where the batting row only has
-            # an initial, and a full name held by one player beats an initial.
-            full_to_pid = participant_names.unique_by_full_name(
-                [(r[0], r[2] or r[3]) for r in player_rows])
-
-            def _resolve_linked_id(pid_str: str, name: str) -> Optional[uuid.UUID]:
-                """Which of our own players (if any) this GR participant is —
-                purely for a hyperlink, never for deciding a row's stats or
-                which team it's on. Tries the literal id, then the stored raw
-                GUID alias, then an explicit admin-recorded name alias (a
-                rename — see services/player_aliases.py), then a loose
-                surname-and-initial match for the ordinary GUID-mismatch case."""
-                try:
-                    pid = uuid.UUID(pid_str)
-                except (TypeError, ValueError):
-                    pid = None
-                if pid is not None and pid in known_ids:
-                    return pid
-                if pid_str in guid_to_pid:
-                    return guid_to_pid[pid_str]
-                if merged_redirect and pid_str:
-                    kept = merged_redirect.get(pid_str.lower())
-                    if kept is None and org is not None:
-                        kept = merged_redirect.get(str(uuid.uuid5(uuid.UUID(str(org.id)), pid_str)))
-                    if kept is not None and kept in known_ids:
-                        return kept
-                if name:
-                    alias_pid = alias_map.get(normalise_name_key(name))
-                    if alias_pid:
-                        return id_by_str.get(alias_pid)
-                    alias_pid = short_name_alias(alias_map, name)
-                    if alias_pid:
-                        return id_by_str.get(alias_pid)
-                roster_name = pid_to_name.get(pid_str)
-                if roster_name and participant_names.looks_full(roster_name):
-                    full_pid = full_to_pid.get(participant_names.full_name_key(roster_name))
-                    if full_pid is not None:
-                        return full_pid
-                if name and not _looks_redacted(name):
-                    cand = nk_to_pid.get(_name_key(name))
-                    # The team sheet gave a full name that matched nobody. A player who
-                    # shares only the surname and initial (Angus for Ashton Taylor) is a
-                    # different person, so the loose match needs a compatible given name.
-                    if cand is not None and roster_name and participant_names.looks_full(roster_name) \
-                            and not participant_names.first_names_compatible(roster_name, id_to_display.get(cand)):
-                        return None
-                    return cand
-                return None
+            pid_to_name: dict[str, str] = {}
+            _resolve_linked_id, id_to_display = await _club_link_resolver(db, org, pid_to_name)
 
             # Org name first word — the PRIMARY signal for which GR team is
             # ours: it's authoritative for "which real-world club is this",
@@ -1238,9 +1294,10 @@ async def get_scorecard(
                 _our_tid = max(_team_overlap, key=_team_overlap.get)
 
             # Pass 3: populate the roster sets now that "ours" is settled.
-            pid_to_name: dict[str, str] = {}
+            # (pid_to_name is the dict both link resolvers read at call time.)
             opp_roster_pids: set[str] = set()
             our_team_roster_pids: set[str] = set()
+            opp_pid_team: dict[str, str] = {}
             for _tid, _members in _team_members.items():
                 _is_our_team = _tid == _our_tid
                 for _pl in _members:
@@ -1253,6 +1310,46 @@ async def get_scorecard(
                         our_team_roster_pids.add(_pid)
                     elif not _is_our_team and _pid:
                         opp_roster_pids.add(_pid)
+                        opp_pid_team[_pid] = _tid
+
+            # The other side can be a BetterCricket club too. Its players then
+            # have profiles of their own, so link them the same way ours are
+            # linked, against THAT club's players only. Display only: no row
+            # changes team or numbers, and a club hiding a player from this
+            # viewer keeps them unlinked.
+            opp_resolvers: dict[str, tuple] = {}
+            opp_club_by_tid: dict[str, Organisation] = {}
+            if _our_tid is not None:
+                for _t in _teams_raw:
+                    _tid = str(_t.get("id") or "").lower()
+                    if not _tid or _tid == _our_tid:
+                        continue
+                    _other = await _other_bettercricket_club(
+                        db, (_t.get("owningOrganisation") or {}).get("id"), org)
+                    if _other is None:
+                        continue
+                    _hidden = set()
+                    _hiding = await public_junior_hiding(db, viewer, _other.id)
+                    if _hiding.enabled:
+                        _hidden |= {uuid.UUID(x) for x in _hiding.player_ids}
+                    if not await user_can_view_org_private(db, viewer, str(_other.id)):
+                        _hidden |= set((await db.execute(
+                            select(Player.id).where(Player.organisation_id == _other.id,
+                                                    Player.is_public.is_(False))
+                        )).scalars().all())
+                    opp_resolvers[_tid] = await _club_link_resolver(db, _other, pid_to_name, _hidden)
+                    opp_club_by_tid[_tid] = _other
+
+            def _opp_link(pid_str: str, name: str) -> dict:
+                """player_id / player_name for an opposition row: linked when the
+                other side is a BetterCricket club and the participant is one of
+                its players, else the plain unlinked row it always was."""
+                _r = opp_resolvers.get(opp_pid_team.get(pid_str))
+                if _r is not None:
+                    _lid = _r[0](pid_str, name)
+                    if _lid:
+                        return {"player_id": str(_lid), "player_name": _r[1].get(_lid) or name}
+                return {"player_id": None, "player_name": name}
 
             summary_teams = (gr_data.get("matchSummary") or {}).get("teams") or []
             home_name = next((t.get("displayName", "") for t in summary_teams if t.get("isHome") is True), "") or game.home_team or ""
@@ -1302,6 +1399,10 @@ async def get_scorecard(
                     "overs": inn.get("oversBowled"),
                     "batting_team": gr_team_name_by_id.get(bt_id) or (our_display_name if _bt_is_ours else opp_display_name),
                     "logo_url": (_our_logo if _bt_is_ours else None) or gr_team_logo_by_id.get(bt_id),
+                    # The club page this side links to: ours, or the other side's
+                    # when it is a BetterCricket club with a live public site.
+                    "club_slug": (org.slug if (_bt_is_ours and org) else
+                                  (opp_club_by_tid[bt_id].slug if bt_id in opp_club_by_tid else None)),
                 }
 
                 for row in (inn.get("batting") or []):
@@ -1348,7 +1449,7 @@ async def get_scorecard(
                                                  "is_fill_in": _is_fi, "is_redacted": _is_red,
                                                  "grassroots_participant_id": pid_str if _is_fi else None})
                     else:
-                        new_opp_batting.append({**base, "player_id": None, "player_name": name})
+                        new_opp_batting.append({**base, **_opp_link(pid_str, name)})
 
                     if not is_dnb:
                         totals = new_innings_totals[inn_num]
@@ -1383,7 +1484,7 @@ async def get_scorecard(
                                                  "is_fill_in": _is_fi, "is_redacted": _is_red,
                                                  "grassroots_participant_id": pid_str if _is_fi else None})
                     else:
-                        new_opp_bowling.append({**base, "player_id": None, "player_name": name})
+                        new_opp_bowling.append({**base, **_opp_link(pid_str, name)})
 
             # Roster members GR lists per team (incl. non-playing squad members)
             # who never appear in any innings' batting array at all — a DNB row
@@ -1415,7 +1516,7 @@ async def get_scorecard(
                 if not name:
                     continue
                 new_opp_batting.append({
-                    "innings_number": opp_dnb_inn, "player_id": None, "player_name": name,
+                    "innings_number": opp_dnb_inn, **_opp_link(dnb_pid_str, name),
                     "runs": None, "balls": None, "fours": None, "sixes": None,
                     "dismissal_type": None, "caught_behind": False, "not_out": False,
                     "batting_position": None, "did_not_bat": True,

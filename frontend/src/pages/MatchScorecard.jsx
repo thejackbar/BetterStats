@@ -271,7 +271,7 @@ function MatchHeader({ game, innings }) {
     const balls = t.overs != null ? oversToBalls(t.overs) : sumOversBalls(inn.bowling)
     const oversStr = ballsToOversStr(balls)
     const rr = (runs != null && balls > 0) ? (runs / (balls / 6)).toFixed(2) : null
-    return { ...inn, runs, wickets, oversStr, rr, battingTeam: t.batting_team || '', logoUrl: t.logo_url || null }
+    return { ...inn, runs, wickets, oversStr, rr, battingTeam: t.batting_team || '', logoUrl: t.logo_url || null, clubSlug: t.club_slug || null }
   })
   // A margin in wickets depends on who batted last, so a match whose scorebook
   // never recorded the batting order draws none rather than a guessed one.
@@ -332,7 +332,7 @@ function MatchHeader({ game, innings }) {
         <div className={`flex items-center gap-2.5 ${align === 'right' ? 'flex-row-reverse' : ''}`}>
           <TeamBadge name={teamName} logoUrl={inns[0]?.logoUrl} size={32} />
           <div className="font-display font-bold text-[14px] sm:text-[18px] text-pb-text tracking-tight leading-tight">
-            {teamName || '—'}
+            <ClubName slug={inns[0]?.clubSlug} name={teamName || '—'} />
           </div>
           {won && <WinnerTag />}
         </div>
@@ -380,6 +380,18 @@ function MatchHeader({ game, innings }) {
         <Side label={homeAwayKnown ? 'AWAY' : ''} teamName={awayTeam} inns={awayInns} won={awayWon} align="right" />
       </div>
     </div>
+  )
+}
+
+// A side's name, linked to its club's BetterCricket page when the backend
+// names one (`innings_totals[n].club_slug`: the viewing club, or the other
+// side when it is a BetterCricket club too). Plain text otherwise.
+function ClubName({ slug, name }) {
+  if (!slug) return <>{name}</>
+  return (
+    <Link to={`/${slug}`} className="hover:text-pb-accent transition-colors" data-testid="club-link">
+      {name}
+    </Link>
   )
 }
 
@@ -460,7 +472,7 @@ function TeamCard({ label, teamName, opponentName, won = false, batting = [], bo
             </div>
             <div className="flex items-center gap-2 min-w-0">
               <div className="font-display font-bold text-[16px] sm:text-[18px] tracking-tight text-pb-text leading-tight truncate">
-                {teamName}
+                <ClubName slug={inningsTotal?.club_slug} name={teamName} />
               </div>
               {won && <WinnerTag />}
             </div>
