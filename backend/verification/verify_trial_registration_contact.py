@@ -47,7 +47,7 @@ from starlette.requests import Request  # noqa: E402
 
 import app.models.db as mdb  # noqa: E402
 from app.models.db import (  # noqa: E402
-    Base, ClubMembership, CommsContact, CommsSegment, CommsSegmentMember, MarketingClub,
+    Base, ClubMembership, CommsContact, CommsSegment, CommsSegmentMember, EmailSuppression, MarketingClub,
     MarketingClubContact, Organisation, SelfServeAcknowledgement, User,
 )
 from app.routers import organisations as orgs_router  # noqa: E402
@@ -279,6 +279,76 @@ async def main() -> int:
                                                               "pat@patcc.example"} <= await segment_audience(),
           str(await segment_audience()))
     check("...and not to them", "quit@optout.example" not in await segment_audience())
+
+    # ── 4b. the club's Clubs Directory contacts ──────────────────────────────
+    # Registration stores the admin as a Directory contact of their club unless they already are
+    # one (admin_directory_contacts.find_contact: same address, or the same full name).
+    print("Clubs Directory contact")
+
+    async def dir_contacts(mc_id):
+        async with Session() as db:
+            return (await db.execute(select(MarketingClubContact).where(
+                MarketingClubContact.marketing_club_id == mc_id))).scalars().all()
+
+    async def seed_club(name, *contacts):
+        async with Session() as db:
+            mc = MarketingClub(grassroots_guid=f"g-{uuid.uuid4()}", name=name, kind="club", status="target", source="api")
+            db.add(mc)
+            await db.flush()
+            for full, mail, role, rank in contacts:
+                db.add(MarketingClubContact(marketing_club_id=mc.id, full_name=full, email=mail, role=role,
+                                            role_rank=rank, source="api", outreach_selected=True))
+            await db.commit()
+            return mc.id
+
+    def snap(c):
+        return (c.id, c.full_name, c.email, c.mobile, c.role, c.role_rank, c.source, c.outreach_selected, c.subscribed)
+
+    # a club the Directory never knew: the registrant becomes its first contact
+    rows = await dir_contacts(mc2.id) if mc2 is not None else []
+    check("a club that was not in the Directory gets the admin as a contact",
+          len(rows) == 1 and rows[0].email == "alex@brandnew.example" and rows[0].role == "Club Admin",
+          str([(r.email, r.role) for r in rows]))
+
+    # the committee member who signs up with a personal address and their full name
+    quinn_mc = await seed_club("Quinn CC", ("Quinn Rivers", "quinn@quinncc.org", "President", 1))
+    before_q = {c.id: snap(c) for c in await dir_contacts(quinn_mc)}
+    res, _ = await register("Quinn CC", "q.rivers@gmail.com", first="Rivers Quinn", ip="198.51.100.45")
+    check("the registration completes", res.get("status") == "completed", str(res)[:300])
+    after_q = await dir_contacts(quinn_mc)
+    check("a committee member signing up by full name is NOT added a second time",
+          len(after_q) == 1 and after_q[0].email == "quinn@quinncc.org", str([(c.full_name, c.email) for c in after_q]))
+    check("...and their existing contact is untouched", {c.id: snap(c) for c in after_q} == before_q)
+    check("...but they are still on the internal Comms list under the address they used",
+          len(await contact_rows("q.rivers@gmail.com")) == 1)
+
+    # a first name alone is not an identity
+    sam_mc = await seed_club("Sammy CC", ("Sam", "sam@sammy.org", "Treasurer", 3))
+    res, _ = await register("Sammy CC", "sam.two@gmail.com", first="Sam", ip="198.51.100.46")
+    rows = await dir_contacts(sam_mc)
+    check("control: a first name alone is not a match, so the admin IS added",
+          sorted(c.email for c in rows) == ["sam.two@gmail.com", "sam@sammy.org"], str([(c.full_name, c.email) for c in rows]))
+
+    # the same address is not duplicated
+    tee_mc = await seed_club("Tee CC", ("Terry Tee", "terry@teecc.org", "Secretary", 2))
+    res, _ = await register("Tee CC", "terry@teecc.org", first="Terry", ip="198.51.100.47")
+    rows = await dir_contacts(tee_mc)
+    check("an address already on file is not added twice", len(rows) == 1, str([(c.full_name, c.email) for c in rows]))
+
+    # an opted-out address is stored as a contact that says so
+    async with Session() as db:
+        db.add(EmailSuppression(email="blocked@sup.example", reason="manual"))
+        await db.commit()
+    sup_mc = await seed_club("Sup CC")
+    res, _ = await register("Sup CC", "blocked@sup.example", first="Bo", ip="198.51.100.48")
+    rows = await dir_contacts(sup_mc)
+    check("a suppressed address is stored as NOT subscribed and NOT ticked",
+          len(rows) == 1 and rows[0].subscribed is False and rows[0].outreach_selected is False,
+          str([(c.email, c.subscribed, c.outreach_selected) for c in rows]))
+    ok_rows = await dir_contacts(known_mc_id)
+    check("control: an ordinary registrant is subscribed and ticked (the flags can be on)",
+          any(c.email == "sam@known.example" and c.subscribed and c.outreach_selected for c in ok_rows),
+          str([(c.email, c.subscribed, c.outreach_selected) for c in ok_rows]))
 
     # ── 5. nowhere to put it is not a failure ────────────────────────────────
     print("no outreach org designated")

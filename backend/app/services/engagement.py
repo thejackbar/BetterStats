@@ -1067,22 +1067,35 @@ async def _resolve_self_serve_club(session, *, org_id, org_name: str, contact_na
         await session.flush()
     club.existing_org_id = org_id
 
-    contact = None
+    # Is this person already one of the club's Directory contacts? The ONE definition is
+    # admin_directory_contacts.find_contact (the same rules the backfill script follows): the same
+    # address, or the same full name under another address (the committee member who signs up with
+    # a personal email). A first name alone is never enough.
+    from app.services import admin_directory_contacts as adc
+    contact, via = None, None
     if email_l:
         contact = (await session.execute(
             select(MarketingClubContact).where(
                 MarketingClubContact.marketing_club_id == club.id,
                 func.lower(MarketingClubContact.email) == email_l)
         )).scalars().first()
+        via = "email" if contact is not None else None
     if contact is None:
+        contact = await adc.find_contact(session, club.id, email=email_l, name=contact_name)
+        via = "name" if contact is not None else None
+    if contact is None:
+        # An address that is suppressed or unsubscribed is stored as a contact that says so,
+        # never one that reads as reachable.
+        blocked = await adc.is_opted_out(session, email_l)
         contact = MarketingClubContact(
             marketing_club_id=club.id, full_name=(contact_name or "").strip()[:200] or None,
             email=email_l or None, mobile=phone, role="Club Admin", role_rank=1,
-            source=source, subscribed=True, outreach_selected=True,
+            source=source, subscribed=not blocked, outreach_selected=not blocked,
         )
         session.add(contact)
         await session.flush()
-    elif not contact.outreach_selected:
+    elif via == "email" and not contact.outreach_selected:
+        # Same address: unchanged behaviour. A contact matched by NAME only is never edited here.
         contact.outreach_selected = True
 
     return club, contact

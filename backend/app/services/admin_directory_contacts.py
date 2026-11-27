@@ -85,17 +85,80 @@ def _full_name(user) -> str:
     return display or joined
 
 
-def _name_keys(user) -> set:
-    """Order-independent keys for every full name the account carries. A single word
-    yields none: a first name alone is not enough to say two records are one person."""
+def _keys_for(*names) -> set:
+    """Order-independent keys for each full name given. A single word yields none: a first
+    name alone is not enough to say two records are one person."""
     out = set()
-    for raw in (getattr(user, "display_name", ""),
-                " ".join(p for p in (_clean(getattr(user, "first_name", "")),
-                                     _clean(getattr(user, "last_name", ""))) if p)):
+    for raw in names:
         key = normalise_name_key(raw)
         if len(key.split()) >= 2:
             out.add(key)
     return out
+
+
+def _name_keys(user) -> set:
+    """Every full name the account carries (display name, and first + last)."""
+    return _keys_for(getattr(user, "display_name", ""),
+                     " ".join(p for p in (_clean(getattr(user, "first_name", "")),
+                                          _clean(getattr(user, "last_name", ""))) if p))
+
+
+class ContactIndex:
+    """One club's Directory contacts, indexed the way a person is recognised in them. THE
+    definition of "already a Contact", shared by the backfill (``plan``) and a live
+    registration (``find_contact``), so the two cannot disagree.
+
+    ``by_email`` an address (an identity); ``by_name`` a full name (two words or more, any
+    order; the person may have used another address); ``by_exact`` an address-less contact
+    by its exact full name, which is the store's own dedupe key for one."""
+
+    def __init__(self, contacts=()):
+        self.by_email: dict = {}
+        self.by_name: dict = {}
+        self.by_exact: dict = {}
+        for c in contacts:
+            self.add(c)
+
+    def add(self, c) -> None:
+        e = (c.email or "").strip().lower()
+        if e:
+            self.by_email.setdefault(e, c)
+        else:
+            self.by_exact.setdefault((c.full_name or "").strip().lower(), c)
+        for k in _keys_for(c.full_name):
+            self.by_name.setdefault(k, c)
+
+    def find(self, *, email, name, name_keys, allow_name_match=True):
+        """``(contact, via)`` with via 'email' | 'name', or ``(None, None)``."""
+        hit = self.by_email.get(email) if email else None
+        if hit is not None:
+            return hit, "email"
+        if allow_name_match:
+            for key in name_keys:
+                if key in self.by_name:
+                    return self.by_name[key], "name"
+        if not email and name:
+            hit = self.by_exact.get(name.strip().lower())
+            if hit is not None:
+                return hit, "name"
+        return None, None
+
+
+async def find_contact(session: AsyncSession, club_id, *, email, name):
+    """The existing Directory contact of ``club_id`` that this person already is, or None.
+    What a live registration asks before storing one (same rules as the backfill)."""
+    email = (email or "").strip().lower() or None
+    contacts = (await session.execute(select(MarketingClubContact).where(
+        MarketingClubContact.marketing_club_id == club_id))).scalars().all()
+    hit, _via = ContactIndex(contacts).find(
+        email=email, name=_clean(name), name_keys=_keys_for(name))
+    return hit
+
+
+async def is_opted_out(session: AsyncSession, email) -> bool:
+    """Whether this address must not read as reachable (see ``_opted_out_emails``)."""
+    e = (email or "").strip().lower()
+    return bool(e) and e in await _opted_out_emails(session, [e])
 
 
 def _chunks(items, n=_CHUNK):
@@ -152,21 +215,8 @@ async def plan(session: AsyncSession, *, club_id=None, allow_name_match: bool = 
     opted_out = await _opted_out_emails(
         session, [(u.email or "").strip().lower() for u, _, _ in rows])
 
-    # Per club: addresses, full-name keys and (for people with no address) exact names
-    # already on file, then grown as additions are planned.
-    index: dict = {}
-    for mc in mc_by_org.values():
-        by_email, by_name, by_exact = {}, {}, {}
-        for c in contacts.get(mc.id, []):
-            e = (c.email or "").strip().lower()
-            if e:
-                by_email.setdefault(e, c)
-            else:
-                by_exact.setdefault((c.full_name or "").strip().lower(), c)
-            k = normalise_name_key(c.full_name)
-            if len(k.split()) >= 2:
-                by_name.setdefault(k, c)
-        index[mc.id] = (by_email, by_name, by_exact)
+    # Per club, grown as additions are planned.
+    index = {mc.id: ContactIndex(contacts.get(mc.id, [])) for mc in mc_by_org.values()}
 
     entries: list[dict] = []
     for user, membership, org in rows:
@@ -190,24 +240,14 @@ async def plan(session: AsyncSession, *, club_id=None, allow_name_match: bool = 
             entries.append({**base, "status": "privacy_removed"})
             continue
 
-        by_email, by_name, by_exact = index[mc.id]
-        hit = by_email.get(email) if email else None
-        if hit is not None:
+        hit, via = index[mc.id].find(email=email, name=name, name_keys=_name_keys(user),
+                                     allow_name_match=allow_name_match)
+        if hit is not None and via == "email":
             entries.append({**base, "status": "have_email", "contact_id": hit.id,
                             "contact_name": hit.full_name, "contact_role": hit.role,
                             "former": hit.former_at is not None,
                             "planned": getattr(hit, "_planned", False)})
             continue
-        hit = None
-        if allow_name_match:
-            for key in _name_keys(user):
-                if key in by_name:
-                    hit = by_name[key]
-                    break
-        if hit is None and not email:
-            # The store's own dedupe key for an address-less contact (club + full name):
-            # a match here would otherwise be EDITED by the store, which this never does.
-            hit = by_exact.get(name.lower()) if name else None
         if hit is not None:
             entries.append({**base, "status": "have_name", "contact_id": hit.id,
                             "contact_name": hit.full_name, "contact_email": hit.email,
@@ -217,15 +257,8 @@ async def plan(session: AsyncSession, *, club_id=None, allow_name_match: bool = 
         blocked = bool(email) and email in opted_out
         entries.append({**base, "status": "add", "blocked": blocked})
         # Count the planned row as a Contact for whoever comes next at this club.
-        planned = type("Planned", (), {"email": email or None, "full_name": name, "role": ROLE,
-                                       "former_at": None, "id": None, "_planned": True})()
-        if email:
-            by_email.setdefault(email, planned)
-        else:
-            by_exact.setdefault(name.lower(), planned)
-        k = normalise_name_key(name)
-        if len(k.split()) >= 2:
-            by_name.setdefault(k, planned)
+        index[mc.id].add(type("Planned", (), {"email": email or None, "full_name": name, "role": ROLE,
+                                              "former_at": None, "id": None, "_planned": True})())
     return {"entries": entries}
 
 
