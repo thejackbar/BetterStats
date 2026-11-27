@@ -239,6 +239,12 @@ export const api = {
   getSocialScorecard: (matchId) => request(`/admin/social/scorecard/${matchId}`),
   socialMatchLookup: (q) => request(`/admin/social/match-lookup?q=${encodeURIComponent(q)}`),
   getSocialFixtures: (q) => request(`/admin/social/fixtures${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  // Past results against several opponents at once (a roundup's rows): items [{ opponent, grade }].
+  getSocialHeadToHeadBatch: (items = []) => {
+    const qs = new URLSearchParams()
+    items.forEach((it) => { qs.append('o', it.opponent || ''); qs.append('g', it.grade || '') })
+    return request(`/admin/social/head-to-head/batch?${qs}`)
+  },
   // Our past results against one opponent (matched by club name), optionally one grade.
   getSocialHeadToHead: (opponent, grade = '') => request(`/admin/social/head-to-head?opponent=${encodeURIComponent(opponent || '')}${grade ? `&grade=${encodeURIComponent(grade)}` : ''}`),
   getSocialResults: (q, { live = false } = {}) => {

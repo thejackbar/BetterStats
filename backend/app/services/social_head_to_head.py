@@ -78,14 +78,15 @@ def _outcome(r, ours: str, theirs: str, club) -> Optional[str]:
     return None
 
 
-async def head_to_head(db: AsyncSession, club, opponent: str, grade: Optional[str] = None) -> dict:
-    target = (opponent or "").strip()
-    base = {"found": False, "opponent": target or None, "grade": grade or None,
+def _empty(target: str, grade: Optional[str]) -> dict:
+    return {"found": False, "opponent": target or None, "grade": grade or None,
             "meetings": 0, "wins": 0, "losses": 0, "draws": 0, "ties": 0, "no_result": 0,
             "form": [], "recent": []}
-    if not target or not _club_core_tokens(target):
-        return {**base, "reason": "no opponent name to match"}
 
+
+async def _club_games(db: AsyncSession, club) -> list[dict]:
+    """Every past game that is the club's, each with our side, their team and
+    the key their club is grouped under. Read once, matched per opponent."""
     rows = (await db.execute(text(f"""
         SELECT g.id::text AS id, g.played_at, g.home_team, g.away_team,
                g.home_org_id::text AS home_org_id, g.away_org_id::text AS away_org_id,
@@ -98,12 +99,6 @@ async def head_to_head(db: AsyncSession, club, opponent: str, grade: Optional[st
         ORDER BY g.played_at DESC, g.id
         LIMIT 3000
     """), {"club_org": str(club.id), "today": date.today()})).mappings().all()
-
-    aliases = await grade_alias_map(db, club.id) if grade else {}
-    want_grade = None
-    if grade:
-        k = grade_key(grade)
-        want_grade = aliases.get(k, k)
 
     games = []
     for r in rows:
@@ -143,6 +138,14 @@ async def head_to_head(db: AsyncSession, club, opponent: str, grade: Optional[st
             owners = org_tokens.get(frozenset(_club_core_tokens(gm["club_name"])))
             if owners and len(owners) == 1:
                 gm["key"] = next(iter(owners))
+    return games
+
+
+def _record(games: list[dict], club, opponent: str, grade: Optional[str], aliases: dict) -> dict:
+    target = (opponent or "").strip()
+    base = _empty(target, grade)
+    if not target or not _club_core_tokens(target):
+        return {**base, "reason": "no opponent name to match"}
     candidates = {}
     for gm in games:
         candidates.setdefault(gm["key"], gm["club_name"])
@@ -153,11 +156,14 @@ async def head_to_head(db: AsyncSession, club, opponent: str, grade: Optional[st
     best_tokens = _club_core_tokens(best_name)
     picked = [gm for gm in games if gm["key"] == best_key
               or (gm["key"].startswith("name:") and _club_core_tokens(gm["club_name"]) == best_tokens)]
-    if want_grade:
+    if grade:
+        k = grade_key(grade)
+        want = aliases.get(k, k)
+
         def _gk(name):
-            k = grade_key(name)
-            return aliases.get(k, k)
-        picked = [gm for gm in picked if gm["r"]["grade_name"] and _gk(gm["r"]["grade_name"]) == want_grade]
+            kk = grade_key(name)
+            return aliases.get(kk, kk)
+        picked = [gm for gm in picked if gm["r"]["grade_name"] and _gk(gm["r"]["grade_name"]) == want]
 
     out = {**base, "found": True, "opponent": best_name}
     tally = {"W": "wins", "L": "losses", "D": "draws", "T": "ties", "NR": "no_result"}
@@ -179,3 +185,27 @@ async def head_to_head(db: AsyncSession, club, opponent: str, grade: Optional[st
     out["recent"] = recent
     out["form"] = [x["outcome"] for x in recent if x["outcome"] in ("W", "L", "D", "T")][:FORM_LIMIT]
     return out
+
+
+async def head_to_head(db: AsyncSession, club, opponent: str, grade: Optional[str] = None) -> dict:
+    target = (opponent or "").strip()
+    if not target or not _club_core_tokens(target):
+        return {**_empty(target, grade), "reason": "no opponent name to match"}
+    games = await _club_games(db, club)
+    aliases = await grade_alias_map(db, club.id) if grade else {}
+    return _record(games, club, target, grade, aliases)
+
+
+MAX_BATCH = 40
+
+
+async def head_to_head_many(db: AsyncSession, club, items: list[dict]) -> list[dict]:
+    """The same answer for several opponents at once (a roundup's rows): the
+    club's games are read once. ``items``: ``[{opponent, grade}]``, answered in
+    the same order."""
+    items = list(items or [])[:MAX_BATCH]
+    if not items:
+        return []
+    games = await _club_games(db, club)
+    aliases = await grade_alias_map(db, club.id) if any((it or {}).get("grade") for it in items) else {}
+    return [_record(games, club, (it or {}).get("opponent") or "", (it or {}).get("grade") or None, aliases) for it in items]

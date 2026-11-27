@@ -20,7 +20,8 @@ Run:
   DATABASE_URL=postgresql+asyncpg://postgres@127.0.0.1:5433/bstest \
   python verification/verify_social_head_to_head.py
 Control: against the previous commit the route does not exist; every check reports
-FAIL (read through a presence-safe accessor) instead of crashing.
+FAIL (read through a presence-safe accessor) instead of crashing. The batch checks
+(v9.159.0) likewise fail on v9.158.0, which has only the single route.
 """
 from __future__ import annotations
 
@@ -147,6 +148,30 @@ async def main() -> None:
 
     none = await h2h("Never Played CC")
     check("a club we have never played says so, with no record", none.get("found") is False and none.get("meetings") == 0 and none.get("reason"), str(none)[:160])
+
+    # The roundups ask for several opponents at once: one answer per item, in order,
+    # each the same as asking for it alone.
+    fnb = getattr(admin_router, "get_social_head_to_head_batch", None)
+    club = SimpleNamespace(id=str(ORG), name="Willetton Cricket Club", short_name="Willetton", playhq_id=None, workspace_kind=None)
+    if fnb is None:
+        b = {}
+    else:
+        async with base.Session() as s2:
+            b = await fnb(o=["Subiaco-Floreat 1st XI", "Gosnells 1st XI", "Never Played CC", "Subiaco-Floreat 2nd XI"], g=["", "", "", "B Grade"], db=s2, club=club)
+    res = (b or {}).get("results") or []
+    check("batch: one answer per opponent, in order", len(res) == 4 and [x.get("found") for x in res] == [True, True, False, True], str([x.get("opponent") for x in res]))
+    single = await h2h("SUBIACO-FLOREAT 1ST XI")
+    check("batch: each answer is the same as asking alone", bool(res) and {k: res[0].get(k) for k in ("meetings", "wins", "losses", "ties", "form")} == {k: single.get(k) for k in ("meetings", "wins", "losses", "ties", "form")})
+    check("batch: Gosnells is its own record (one loss)", len(res) > 1 and res[1].get("meetings") == 1 and res[1].get("losses") == 1, str(res[1] if len(res) > 1 else None)[:120])
+    check("batch: a grade on one item narrows only that item (B Grade: one win)", len(res) > 3 and res[3].get("meetings") == 1 and res[3].get("wins") == 1, str(res[3] if len(res) > 3 else None)[:120])
+    if fnb is not None:
+        async with base.Session() as s3:
+            many = await fnb(o=["Subiaco-Floreat"] * 55, g=[], db=s3, club=club)
+            none_ = await fnb(o=[], g=[], db=s3, club=club)
+    else:
+        many, none_ = {}, None
+    check("batch: capped at forty", len((many or {}).get("results") or []) == 40)
+    check("batch: an empty list is an empty answer", none_ == {"results": []}, str(none_))
 
     print(f"\n{PASS} passed, {FAIL} failed")
     await base.engine.dispose()

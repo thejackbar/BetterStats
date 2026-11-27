@@ -28,7 +28,7 @@ import { niceName } from './card-kit'
 import { pc, pt, inkOn, registerParts, colorPart, textPart } from './layoutParts'
 import { usePostLook } from './postLook'
 import FramedImage from './FramedImage'
-import { PastStrip, hasPast } from './pastMeetings'
+import { PastStrip, hasPast, RowForm } from './pastMeetings'
 import { FRAMES, framePoints, frameClip, burstPaths, speedPaths, brushPaths, tornPaperPaths, grungePaths, splatterPaths } from './designFx'
 
 export const FONT = "var(--social-display-font, 'Anton', 'Hanken Grotesk', sans-serif)"
@@ -584,6 +584,7 @@ function RoundEcho({ width, height, palette, meta = {}, rows = [], club = {}, pa
                 <span style={{ flex: 1, minWidth: 0, fontSize: Math.round(Math.min(40, h * 0.42) * f), lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {kind === 'fixtures' ? `${r.ha === 'A' ? '@ ' : 'V '}${upper(r.opp)}` : upper(r.opp)}
                 </span>
+                <RowForm past={r.past} size={Math.round(Math.min(24, h * 0.3) * f)} />
                 {kind === 'fixtures' ? (
                   <span style={{ fontSize: Math.round(Math.min(30, h * 0.34) * f), whiteSpace: 'nowrap', color: base }}>{upper(joinDot(r.time, r.venue))}</span>
                 ) : (

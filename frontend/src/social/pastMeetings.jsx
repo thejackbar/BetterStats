@@ -70,3 +70,14 @@ export function PastBlock({ past, x, y, w, h, f = 1, color = '#fff', usC, rows =
     </div>
   )
 }
+
+// A roundup row's last results against that row's opponent, as small chips
+// beside the name. Nothing when the row has no past games.
+export function RowForm({ past, size = 20, gap = 3, max = 5, style }) {
+  if (!hasPast(past) || !(past.form || []).length) return null
+  return (
+    <span data-row-form="" title={recordLine(past)} style={{ display: 'inline-flex', alignItems: 'center', gap, flexShrink: 0, marginLeft: Math.round(size * 0.4), verticalAlign: 'middle', ...style }}>
+      {past.form.slice(0, max).map((o, i) => <Chip key={i} o={o} size={size} />)}
+    </span>
+  )
+}

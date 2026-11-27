@@ -2185,6 +2185,28 @@ async def get_social_head_to_head(opponent: str = "", grade: str = "", db: Async
         raise HTTPException(500, f"Head to head error: {exc}") from exc
 
 
+@router.get("/social/head-to-head/batch", dependencies=[Depends(require_cap(MANAGE_SOCIAL)), Depends(require_module("socials"))])
+async def get_social_head_to_head_batch(
+    o: list[str] = Query(default=[]), g: list[str] = Query(default=[]),
+    db: AsyncSession = Depends(get_db), club=Depends(get_current_club),
+):
+    """Past results against several opponents at once, for the Fixtures and
+    Results roundups (a row each). ``o`` is each opponent, ``g`` the grade for
+    the same position ('' for every grade); one answer per ``o``, in order, up
+    to 40. A GET: it only reads, and a capability held at View may read."""
+    from app.services.social_head_to_head import head_to_head_many, MAX_BATCH
+    from app.services.social_competition import is_association
+    items = [{"opponent": opp, "grade": (g[i] if i < len(g) else "")} for i, opp in enumerate(o[:MAX_BATCH])]
+    if is_association(club):
+        return {"results": [{"found": False, "opponent": it["opponent"] or None, "reason": "an association workspace has no games of its own",
+                             "meetings": 0, "wins": 0, "losses": 0, "draws": 0, "ties": 0, "no_result": 0, "form": [], "recent": []} for it in items]}
+    try:
+        return {"results": await head_to_head_many(db, club, items)}
+    except Exception as exc:
+        log.exception("social head to head batch failed for %s", getattr(club, "id", "?"))
+        raise HTTPException(500, f"Head to head error: {exc}") from exc
+
+
 @router.get("/social/results", dependencies=[Depends(require_cap(MANAGE_SOCIAL)), Depends(require_module("socials"))])
 async def get_social_results(
     q: str = "", live: bool = False, db: AsyncSession = Depends(get_db), club=Depends(get_current_club),

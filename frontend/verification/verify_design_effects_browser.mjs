@@ -610,6 +610,63 @@ const tilesOf = async (page) => page.evaluate(() => [...document.querySelectorAl
   await ctx.close()
 }
 
+// ── 4h. Roundups: each row's last results against that row's opponent ──────
+{
+  const FOUND = { found: true, opponent: 'Subiaco-Floreat', meetings: 4, wins: 2, losses: 2, draws: 0, ties: 0, no_result: 0, form: ['W', 'L', 'W', 'L'], recent: [] }
+  const MISS = { found: false, opponent: null, meetings: 0, wins: 0, losses: 0, draws: 0, ties: 0, no_result: 0, form: [], recent: [], reason: 'no past games against that club' }
+  const ctx = await browser.newContext({ viewport: { width: 1600, height: 1000 } })
+  const page = await ctx.newPage()
+  const errors = []
+  const asks = []
+  page.on('pageerror', (e) => errors.push(String(e)))
+  const json = (b) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(b) })
+  await page.route('**/api/**', (route) => {
+    const url = route.request().url()
+    if (/\/admin\/social\/head-to-head\/batch/.test(url)) {
+      asks.push({ url, method: route.request().method() })
+      const os = new URL(url).searchParams.getAll('o')
+      return route.fulfill(json({ results: os.map((o) => (/subiaco/i.test(o) ? { ...FOUND, opponent: o } : MISS)) }))
+    }
+    if (/\/auth\/me/.test(url)) return route.fulfill(json({ id: 'u1', role: 'club_admin', club_slug: 'tcc', entitlements: { modules: ['socials', 'select', 'stats'], status: 'active' } }))
+    if (/\/club-admin\/settings/.test(url)) return route.fulfill(json(CLUB))
+    if (/social\/media|templates|sponsors|players|ladders/.test(url)) return route.fulfill(json([]))
+    return route.fulfill(json({}))
+  })
+  const rowForms = async () => page.evaluate(() => {
+    const h = [...document.querySelectorAll('div')].find((d) => d.style.left === '-9999px')
+    return h ? h.querySelectorAll('[data-row-form]').length : -1
+  })
+  await page.goto(`${BASE}/admin/social-post?template=FX1`, { waitUntil: 'domcontentloaded' })
+  await page.getByRole('button', { name: /DOWNLOAD PNG|SLIDES/ }).first().waitFor({ timeout: 25000 }).catch(() => {})
+  await page.waitForTimeout(1200)
+  const first = asks[0]
+  const os = first ? new URL(first.url).searchParams.getAll('o') : []
+  ck('a roundup asks once for every row\'s opponent, as a GET', asks.length === 1 && first.method === 'GET' && os.length >= 4 && os.some((o) => /subiaco/i.test(o)), first ? `${first.method} ${os.join(', ')}` : 'none')
+  ck('each opponent is asked once, for every grade', new Set(os.map((o) => o.toLowerCase())).size === os.length && new URL(first?.url || 'http://x').searchParams.getAll('g').every((g) => g === ''))
+  ck('FX1: only the row against a club we have played carries chips', await rowForms() === 1, String(await rowForms()))
+  await press(page.getByRole('button', { name: 'Content', exact: true }))
+  await page.waitForTimeout(200)
+  ck('Content says how many opponents have past games', /Past games found against 1 of \d+ opponents/.test(await textOf(page.getByTestId('past-status'))), await textOf(page.getByTestId('past-status')))
+  await press(page.getByTestId('past-grade'))
+  await page.waitForTimeout(900)
+  const g2 = asks.length > 1 ? new URL(asks[asks.length - 1].url).searchParams.getAll('g') : []
+  ck("each row's own grade goes with its opponent when asked", g2.length >= 4 && g2.every((g) => g.length > 0), g2.join(', '))
+  await press(page.getByTestId('past-grade'))
+  await press(page.getByTestId('past-on'))
+  await page.waitForTimeout(300)
+  ck('switched off, no row carries chips', await rowForms() === 0)
+  await press(page.getByTestId('past-on'))
+  for (const id of ['FX2', 'FX3', 'FX4', 'FX5', 'FX6', 'DL4', 'RR1', 'RR2', 'RR3', 'RR4', 'RR5', 'RR6', 'RR7', 'RR8', 'DL5']) {
+    await page.goto(`${BASE}/admin/social-post?template=${id}`, { waitUntil: 'domcontentloaded' }).catch(() => {})
+    await page.getByRole('button', { name: /DOWNLOAD PNG|SLIDES/ }).first().waitFor({ timeout: 25000 }).catch(() => {})
+    await page.waitForTimeout(1100)
+    const n = await rowForms()
+    ck(`${id} puts the chips on the Subiaco-Floreat row and nowhere else`, n === 1, String(n))
+  }
+  ck('no page errors through the roundups', errors.length === 0, errors.slice(0, 2).join(' | '))
+  await ctx.close()
+}
+
 // ── 5. Association Socials workspace has the same tools ────────────────────
 {
   const { ctx, page, errors } = await openEditor({ settings: WORKSPACE, assoc: true })
