@@ -331,7 +331,7 @@ async def _stands(db: AsyncSession, org_id, game_id, innings: int) -> list[dict]
         SELECT pt.wicket_number, pt.runs, COALESCE(pt.is_unbroken, FALSE) AS is_unbroken,
                COALESCE(p1.display_name_override, p1.name, pt.batter1_name) AS batter1_name,
                COALESCE(p2.display_name_override, p2.name, pt.batter2_name) AS batter2_name
-          FROM v_effective_partnerships pt
+          FROM v_card_partnerships pt  -- the whole card, excluded match or not (migration 401)
           LEFT JOIN players p1 ON p1.id = pt.batter1_id AND p1.organisation_id = CAST(:o AS UUID)
           LEFT JOIN players p2 ON p2.id = pt.batter2_id AND p2.organisation_id = CAST(:o AS UUID)
          WHERE pt.game_id = CAST(:g AS UUID) AND pt.innings_number = :i

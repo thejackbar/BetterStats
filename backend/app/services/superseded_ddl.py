@@ -45,6 +45,13 @@ from __future__ import annotations
 from app.services.game_exclusion_ddl import STATEMENTS as _GX_STATEMENTS  # noqa: E402
 
 _GX_TABLE = _GX_STATEMENTS[0]
+
+# A WHOLE MATCH a club left out of its players' figures (migration 401, services/stat_exclusions.py):
+# a friendly or pre-season cup Cricket Australia lists like any other fixture. The views below read
+# the table, so it is created here first, as `game_exclusions` is above.
+from app.services.stat_exclusion_ddl import (  # noqa: E402
+    STATEMENTS as _SX_STATEMENTS, kept_sql as _sx_kept, kept_for_org_sql as _sx_kept_org,
+)
 # A SUBSTITUTE FIELDER the club marked as not having played (services/game_exclusions.py): their
 # catch, stumping or run out in that game is a sub's ("c sub") and is not theirs, so the row leaves
 # the fielding view, and with it the game from every count that reads a fielding line as played.
@@ -68,6 +75,8 @@ STATEMENTS: tuple[str, ...] = (
     # it, and migrations 287 to 389 replay this list before 391 exists. Same statement, so the
     # two cannot drift; idempotent.
     _GX_TABLE,
+    # Migration 401's table and its two indexes, for the same reason (services/stat_exclusion_ddl).
+    *_SX_STATEMENTS,
     # Left in place and read by nothing since the per-match pairing replaced
     # it; kept so a club's own earlier choice is not silently destroyed.
     "ALTER TABLE seasons ADD COLUMN IF NOT EXISTS stats_source TEXT",
@@ -141,7 +150,31 @@ STATEMENTS: tuple[str, ...] = (
     SELECT mg.season_id FROM manual_games mg
      WHERE mg.superseded_by_game_id IS NOT NULL
        AND mg.pair_prefers_import
-       AND mg.review_choice IS NOT NULL""",
+       AND mg.review_choice IS NOT NULL
+    -- A THIRD WAY IN: the club left a synced match out of its players' figures
+    -- (`game_stat_exclusions`, migration 401). Cricket Australia's season total
+    -- carries that match and cannot step aside for it, so the season is counted
+    -- from its scorecards, where the 'api_scorecard' branch leaves the match out.
+    -- The season is the CLUB'S OWN for that real season: the game's own season
+    -- when the club holds it, else the club's season for the same CA season, else
+    -- the same year, and exactly one of them, the rule the shared-fixture arm of
+    -- that branch already keeps.
+    UNION
+    SELECT season_id FROM (
+        SELECT DISTINCT ON (x.id) s.id AS season_id
+        FROM game_stat_exclusions x
+        JOIN games g ON g.id = x.game_id
+        JOIN grades gr ON gr.id = g.grade_id
+        JOIN seasons gs ON gs.id = gr.season_id
+        JOIN seasons s ON s.organisation_id = x.organisation_id
+                      AND (s.id = gs.id
+                           OR (s.grassroots_id IS NOT NULL AND s.grassroots_id = gs.grassroots_id)
+                           OR (s.year IS NOT NULL AND s.year = gs.year))
+        WHERE x.restored_at IS NULL
+        ORDER BY x.id, (s.id = gs.id) DESC,
+                 (s.grassroots_id IS NOT NULL AND s.grassroots_id = gs.grassroots_id) DESC,
+                 s.id
+    ) sx""",
     # Migration 266's column, guarded for the same reason: this module owns
     # v_effective_games and v_effective_player_season_stats, both of which read
     # `games.status`, and it runs BEFORE the 266 mirror further down the boot.
@@ -549,10 +582,12 @@ STATEMENTS: tuple[str, ...] = (
         WITH counts_here AS NOT MATERIALIZED (
             SELECT mg.id AS manual_game_id, mg.season_id, mg.grade_id
             FROM manual_games mg
-            WHERE mg.superseded_by_game_id IS NULL
-               OR (mg.pair_prefers_import
-                   AND EXISTS (SELECT 1 FROM v_club_sourced_seasons cs
-                               WHERE cs.season_id = mg.season_id))
+            WHERE (mg.superseded_by_game_id IS NULL
+                   OR (mg.pair_prefers_import
+                       AND EXISTS (SELECT 1 FROM v_club_sourced_seasons cs
+                                   WHERE cs.season_id = mg.season_id)))
+              -- An uploaded or imported card the club left out of its figures (migration 401).
+              AND """ + _sx_kept_org("mg.id", "mg.organisation_id") + """
         ),
         player_games AS NOT MATERIALIZED (
             SELECT ch.manual_game_id, ch.season_id, ch.grade_id, mbi.player_id
@@ -765,6 +800,8 @@ STATEMENTS: tuple[str, ...] = (
             WHERE NOT EXISTS (SELECT 1 FROM manual_games pm
                                WHERE pm.superseded_by_game_id = g.id
                                  AND pm.pair_prefers_import)
+              -- A match the club left out of its figures (migration 401).
+              AND """ + _sx_kept_org("g.id", "s.organisation_id") + """
             UNION
             SELECT game_id, season_id, grade_id, organisation_id, status, ca_called_off
             FROM (
@@ -784,6 +821,7 @@ STATEMENTS: tuple[str, ...] = (
                   AND NOT EXISTS (SELECT 1 FROM manual_games pm
                                    WHERE pm.superseded_by_game_id = g.id
                                      AND pm.pair_prefers_import)
+                  AND """ + _sx_kept_org("g.id", "s.organisation_id") + """
                 ORDER BY g.id,
                          (s.grassroots_id IS NOT NULL
                           AND s.grassroots_id = theirs.grassroots_id) DESC,
@@ -991,17 +1029,33 @@ _MANUAL_SOURCE_JOIN = """
 
 def _per_innings(view: str, synced_table: str, manual_table: str,
                  synced_cols: str, manual_cols: str, *,
-                 filtered: bool = True, synced_where: str = "") -> str:
+                 filtered: bool = True, synced_where: str = "",
+                 excluded_by: tuple[str, ...] = ()) -> str:
     """One per-innings view, with the source rule or without it.
 
     `filtered=False` is what DOWNGRADE emits — the same column list with the
     joins removed, so undoing 287 leaves nothing referencing `stats_source`
     and the column can actually be dropped.
+
+    `excluded_by` names the player id columns whose club can leave the row's
+    match out of its figures (migration 401, `game_stat_exclusions`). Empty
+    for the `v_card_*` copies the scorecard reads, which show the match whole.
     """
     synced_tail = _SYNCED_SOURCE_JOIN.format(t="t") if filtered else "\n"
-    if filtered and synced_where:
-        synced_tail = synced_tail.rstrip("\n") + f"\n      AND {synced_where}\n"
     manual_tail = _MANUAL_SOURCE_JOIN.format(t="t") if filtered else "\n"
+    synced_extra = [synced_where] if (filtered and synced_where) else []
+    manual_extra: list[str] = []
+    if filtered and excluded_by:
+        cols = tuple(f"t.{c}" for c in excluded_by)
+        synced_extra.append(_sx_kept("t.game_id", *cols))
+        manual_extra.append(_sx_kept("t.manual_game_id", *cols))
+    if synced_extra:
+        synced_tail = synced_tail.rstrip("\n") + "".join(f"\n      AND {w}" for w in synced_extra) + "\n"
+    if manual_extra:
+        # The source rule is an OR, so it is bracketed before anything is ANDed onto it.
+        manual_tail = (manual_tail.replace("WHERE mg.superseded_by_game_id IS NULL OR mg.pair_prefers_import",
+                                           "WHERE (mg.superseded_by_game_id IS NULL OR mg.pair_prefers_import)")
+                       .rstrip("\n") + "".join(f"\n      AND {w}" for w in manual_extra) + "\n")
     return (
         f"CREATE OR REPLACE VIEW {view} AS\n"
         f"    SELECT {synced_cols}\n"
@@ -1078,13 +1132,36 @@ _PER_INNINGS_SPECS = (
     ),
 )
 
+# WHOSE CLUB CAN LEAVE EACH VIEW'S ROWS OUT (migration 401, services/stat_exclusions.py). The player
+# the row belongs to: the batter, the bowler, the fielder, the batter who fell, either batter in a
+# stand, the bowler or fielder behind a wicket. A row of the other club's on the same match has a
+# player of theirs and stays.
+_EXCLUDED_BY: dict[str, tuple[str, ...]] = {
+    "v_effective_batting_innings": ("player_id",),
+    "v_effective_bowling_spells": ("player_id",),
+    "v_effective_fielding_stats": ("player_id",),
+    "v_effective_fall_of_wickets": ("player_id",),
+    "v_effective_partnerships": ("batter1_id", "batter2_id"),
+    "v_effective_bowler_wickets": ("bowler_id", "fielder_id"),
+}
+
 PER_INNINGS_VIEWS: tuple[str, ...] = tuple(
-    _per_innings(*spec, synced_where=_NOT_A_SUB.format(t="t") if spec[0] == "v_effective_fielding_stats" else "")
+    _per_innings(*spec, synced_where=_NOT_A_SUB.format(t="t") if spec[0] == "v_effective_fielding_stats" else "",
+                 excluded_by=_EXCLUDED_BY.get(spec[0], ()))
     for spec in _PER_INNINGS_SPECS)
 PER_INNINGS_ORIGINALS: tuple[str, ...] = tuple(
     _per_innings(*spec, filtered=False) for spec in _PER_INNINGS_SPECS)
 
-STATEMENTS = STATEMENTS + PER_INNINGS_VIEWS
+# THE SCORECARD SHOWS AN EXCLUDED MATCH WHOLE. Its fall of wickets and partnerships are read
+# through views (an uploaded card has them too), and the effective views above now leave out the
+# rows of a match the club excluded, so the card reads these copies: the same definition, the same
+# source rule, without the exclusion. Built from the same spec, so the two cannot drift.
+CARD_VIEWS: tuple[str, ...] = tuple(
+    _per_innings(spec[0].replace("v_effective_", "v_card_"), *spec[1:])
+    for spec in _PER_INNINGS_SPECS
+    if spec[0] in ("v_effective_fall_of_wickets", "v_effective_partnerships"))
+
+STATEMENTS = STATEMENTS + PER_INNINGS_VIEWS + CARD_VIEWS
 
 # "CA's status says this fixture did not happen", written once in services/game_status.py
 # (an ABANDONED game with play in it still counts) and dropped into the views here. Only the

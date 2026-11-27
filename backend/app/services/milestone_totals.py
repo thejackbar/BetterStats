@@ -39,6 +39,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.game_status import not_played_game_sql
+from app.services.stat_exclusion_ddl import kept_sql  # a match the club left out of its stats (401)
 from app.services.grade_labels import GRADE_CATEGORIES, categories_for_name, org_grade_category_sets
 from app.services.summary_only_seasons import held_years_cte, summary_only_seasons_clause
 from app.services.grade_scope import DEFAULT_CATEGORIES, GradeScope, club_default_categories, resolve_scope
@@ -135,6 +136,7 @@ async def _scoped(session: AsyncSession, org_id, pids: list[str],
             JOIN games ag ON ag.id = ga.game_id
              WHERE ga.player_id = ANY({_PIDS})
                AND NOT {not_played_game_sql('ag')}
+               AND {kept_sql("ga.game_id", "ga.player_id")}
         )
         SELECT ap.player_id::text AS pid, COUNT(DISTINCT g.id) AS v
         FROM ap JOIN v_effective_games g ON g.id = ap.game_id
@@ -231,6 +233,7 @@ async def played_grade_names(session: AsyncSession, org_id, pids: Iterable) -> d
             UNION
             SELECT ga.player_id, ga.game_id FROM game_appearances ga
              WHERE ga.player_id = ANY({_PIDS})
+               AND {kept_sql("ga.game_id", "ga.player_id")}
         ),
         played AS (
             SELECT pg.player_id, g.grade_id

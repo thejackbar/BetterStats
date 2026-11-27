@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 from app.models.db import Game, Grade, Season, Organisation, BattingInnings, BowlingSpell, FieldingStat, Player, ManualGame, ManualBattingInnings, ManualBowlingSpell, ManualFieldingStat, ManualInnings, User, get_db
 from app.routers.auth import get_optional_user, public_junior_hiding, user_can_view_org_private
-from app.services import dismissal, grade_scope, merge_redirects, participant_names
+from app.services import dismissal, grade_scope, merge_redirects, participant_names, stat_exclusions
 from app.services.aggregations import get_game_fall_of_wickets, get_game_partnerships
 from app.services.club_match import fixture_side
 from app.services.sync import _caught_by_keeper, _innings_keeper_names
@@ -1646,6 +1646,10 @@ async def get_scorecard(
         # Lets the scorecard page fetch the owning club and wear its theme
         # (colours + fonts) without needing an ?org= query param on the link.
         "organisation_id": str(org.id) if org else None,
+        # The club this card is read from has left the match out of its players' stats (a friendly,
+        # a pre-season cup; services/stat_exclusions.py). The page says so under the header. The
+        # other club on a shared fixture keeps it, so this is per club, never per match.
+        "stats_excluded": await stat_exclusions.is_excluded(db, org.id, game.id) if org else False,
         "grade": {"id": str(grade.id), "name": grade.display_name, "raw_name": grade.name} if grade else None,
         "season": {"id": str(season.id), "name": season.name} if season else None,
         "innings_totals": innings_totals,

@@ -587,7 +587,7 @@ async def recompute_fee_match_days(organisation_id: str, season_id: str | None =
             await session.execute(
                 select(GameAppearance).where(
                     GameAppearance.game_id.in_(game_ids),
-                    text(appearance_counts_as_match("game_appearances")),
+                    text(appearance_counts_as_match("game_appearances", for_stats=False)),
                 )
             )
         ).scalars().all() if game_ids else []

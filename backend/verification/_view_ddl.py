@@ -102,6 +102,15 @@ def view_statements() -> list[tuple[str, str]]:
     for name, sql in out:
         latest[name] = sql
     views = [(n, latest[n]) for n in dict.fromkeys(n for n, _ in out)]
+    # Migration 401: `game_stat_exclusions`, a table, not a view, but `game_status.appearance_counts_as_match`
+    # and the effective views read it, and the lifespan creates it on every boot (services/stat_exclusion_ddl,
+    # through superseded_ddl). FIRST, so anything after can read it. The name is a placeholder no relation
+    # carries, because every harness runs `DROP VIEW IF EXISTS <name>` before the statement.
+    try:
+        from app.services.stat_exclusion_ddl import STATEMENTS as _SX
+    except ImportError:          # a control run on a commit before the table existed
+        _SX = []
+    views = [(f"_harness_stat_exclusions_{i}", st) for i, st in enumerate(_SX)] + views
     # `v_game_roles` (migration 382) is not a `v_effective_*` view, but the captain and keeper lenses join it, so a
     # harness that builds the effective views needs it too. Read from the one list the migration and the lifespan
     # run. It needs `manual_game_roles`, which `Base.metadata.create_all` makes before any harness builds views.
@@ -126,4 +135,15 @@ def view_statements() -> list[tuple[str, str]]:
         views = [(n, re.sub(r"batter2_name(\s+FROM\s+(?:manual_)?partnerships\b)", r"batter2_name, is_unbroken\1", sql)
                   if n == "v_effective_partnerships" and "is_unbroken" not in sql else sql)
                  for n, sql in views]
+    # Migration 401: the scorecard reads `v_card_fall_of_wickets` and `v_card_partnerships`, the effective views
+    # without a club's stat exclusion. The harness's effective views are read from migration literals and carry
+    # no exclusion, so here the card copies are those views as they stand. Last, so their sources exist.
+    try:
+        from app.services.superseded_ddl import CARD_VIEWS
+    except ImportError:
+        CARD_VIEWS = ()
+    for stmt in CARD_VIEWS:
+        m = re.search(r"VIEW\s+(v_card_\w+)\s+AS", stmt)
+        if m:
+            views.append((m.group(1), f"CREATE VIEW {m.group(1)} AS SELECT * FROM {m.group(1).replace('v_card_', 'v_effective_')}"))
     return views

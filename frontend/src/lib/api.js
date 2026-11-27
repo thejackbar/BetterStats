@@ -549,6 +549,12 @@ export const api = {
   unmarkNotPlayed: (gameId, playerId) =>
     request(`/games/${gameId}/not-played/${playerId}`, { method: 'DELETE' }),
   getPlayerGamesForExclusion: (playerId) => request(`/club-admin/game-exclusions/players/${playerId}/games`),
+  // A whole match the club leaves out of its players' stats (a friendly, a pre-season cup).
+  getStatExclusions: () => request('/club-admin/stat-exclusions'),
+  lookupStatExclusion: (link) => request(`/club-admin/stat-exclusions/lookup?link=${encodeURIComponent(link)}`),
+  excludeMatchFromStats: (data) =>
+    request('/club-admin/stat-exclusions', { method: 'POST', body: JSON.stringify(data) }),
+  restoreMatchToStats: (id) => request(`/club-admin/stat-exclusions/${id}`, { method: 'DELETE' }),
   getGamesToCheck: () => request('/club-admin/game-exclusions/suggestions'),
   getBigSheets: () => request('/club-admin/game-exclusions/sheets'),
   checkSheet: (data) =>

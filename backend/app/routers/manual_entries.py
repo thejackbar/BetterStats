@@ -2307,7 +2307,25 @@ async def undo_edit(
         f = (await db.execute(select(ManualFieldingStat.player_id).where(ManualFieldingStat.manual_game_id == gid))).scalars().all()
         return {pid for pid in (list(b) + list(o) + list(f)) if pid}
 
-    if table == "game_exclusions" and action in ("create", "delete"):
+    if table == "game_stat_exclusions" and action in ("create", "delete"):
+        # A whole match the club left out of its players' stats (services/stat_exclusions.py).
+        # Undoing the exclusion counts the match again; undoing "counted again" leaves it out again.
+        from app.services import stat_exclusions as _sx
+        if action == "create":
+            snap = await _sx.restore(db, club.id, current_user.id, int(target_id))
+            if snap is None:
+                raise HTTPException(status_code=409, detail="That match is already counted in your stats.")
+        else:
+            snap = dict(log.before_json or {})
+            if not snap.get("game_id"):
+                raise HTTPException(status_code=400, detail="No snapshot available for this entry")
+            try:
+                await _sx.exclude(db, club.id, current_user.id, uuid.UUID(str(snap["game_id"])),
+                                  snap.get("source") or "api", snap.get("note"))
+            except _sx.Refused as e:
+                raise HTTPException(status_code=e.status, detail=str(e))
+        undo_player_ids |= set(await _sx.players_in(db, club.id, snap["game_id"], snap.get("source") or "api"))
+    elif table == "game_exclusions" and action in ("create", "delete"):
         # A player marked as named for a synced game but not having played it
         # (services/game_exclusions.py). Undoing the mark counts the game again;
         # undoing its removal marks it again, unless the player has since got a

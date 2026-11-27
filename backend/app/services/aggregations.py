@@ -14,6 +14,10 @@ from app.services.summary_only_seasons import (
 )
 from app.services.grade_scope import GradeScope
 from app.services.game_status import appearance_counts_as_match, called_off_sql, not_played_game_sql
+# A match the player's club left out of its stats (migration 401, services/stat_exclusions.py). The
+# effective views already leave its rows out; these are for the raw `game_appearances` reads below.
+from app.services.stat_exclusion_ddl import kept_sql as _kept_sql
+_KEPT_GA = _kept_sql("ga.game_id", "ga.player_id")
 from app.services import rate_coverage as rc
 from app.services.game_sides import sides_sql
 
@@ -549,6 +553,7 @@ async def _scoped_games_played(
             JOIN games ag ON ag.id = ga.game_id
             WHERE ga.player_id = CAST(:pid AS UUID)
               AND NOT {not_played_game_sql('ag')}
+              AND {_KEPT_GA}
         )
         {season_clause}{scope_clause}
     """
@@ -888,6 +893,7 @@ def _build_recent_games_cte(
             SELECT fs.game_id FROM v_effective_fielding_stats fs WHERE fs.player_id = CAST(:{player_id_param} AS UUID)
             UNION
             SELECT ga.game_id FROM game_appearances ga WHERE ga.player_id = CAST(:{player_id_param} AS UUID)
+              AND {_KEPT_GA}
         ) ap
         JOIN v_effective_games g ON g.id = ap.game_id
         WHERE TRUE{club_clause}
@@ -934,6 +940,7 @@ def _build_date_filtered_games_cte(
             SELECT fs.game_id FROM v_effective_fielding_stats fs WHERE fs.player_id = CAST(:{player_id_param} AS UUID)
             UNION
             SELECT ga.game_id FROM game_appearances ga WHERE ga.player_id = CAST(:{player_id_param} AS UUID)
+              AND {_KEPT_GA}
         ) ap
         JOIN v_effective_games g ON g.id = ap.game_id
         LEFT JOIN grades gr ON gr.id = g.grade_id
@@ -2990,6 +2997,7 @@ async def _season_by_season_scoped(
                           JOIN games ag ON ag.id = ga.game_id
                           WHERE ga.player_id = CAST(:pid AS UUID)
                             AND NOT {not_played_game_sql('ag')}
+                            AND {_KEPT_GA}
                 ) t
                 JOIN scoped_games sg ON sg.game_id = t.game_id
                 GROUP BY sg.sid
@@ -3453,7 +3461,8 @@ async def get_game_fall_of_wickets(session: AsyncSession, game_id: str, org_id: 
                 COALESCE(p.display_name_override, p.name, fow.batter_name) AS player_name,
                 p.id::text AS player_id,
                 fow.batter_name
-            FROM v_effective_fall_of_wickets fow
+            -- The card copy: a match the club left out of its stats still shows whole (migration 401).
+            FROM v_card_fall_of_wickets fow
             LEFT JOIN players p ON p.id = fow.player_id
                 AND (CAST(:org_id AS uuid) IS NULL OR p.organisation_id = CAST(:org_id AS uuid))
             WHERE fow.game_id = :gid
@@ -4984,6 +4993,8 @@ async def get_player_by_opposition(
                 CROSS JOIN player_org po
                 LEFT JOIN game_appearances ga ON ga.game_id = pgi.game_id AND ga.player_id = CAST(:pid AS UUID)
                 WHERE TRUE{scope_clause}
+                  -- A match the player's club left out of its stats (migration 401).
+                  AND {_kept_sql("pgi.game_id", "CAST(:pid AS UUID)")}
             ),
             player_games AS (
                 SELECT * FROM player_games_raw
@@ -5555,7 +5566,8 @@ async def get_game_partnerships(session: AsyncSession, game_id: str, org_id: str
                 COALESCE(p2.display_name_override, p2.name, pt.batter2_name) AS batter2_name,
                 -- A stand no wicket ended (a retirement or the end of the innings), migration 389.
                 COALESCE(pt.is_unbroken, FALSE) AS is_unbroken
-            FROM v_effective_partnerships pt
+            -- The card copy: a match the club left out of its stats still shows whole (migration 401).
+            FROM v_card_partnerships pt
             LEFT JOIN players p1 ON p1.id = pt.batter1_id
                 AND (CAST(:org_id AS uuid) IS NULL OR p1.organisation_id = CAST(:org_id AS uuid))
             LEFT JOIN players p2 ON p2.id = pt.batter2_id

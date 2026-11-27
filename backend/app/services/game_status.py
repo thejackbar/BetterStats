@@ -199,7 +199,7 @@ def not_played_game_sql(g: str) -> str:
             f"OR {looks_unplayed_sql(g)}), FALSE)")
 
 
-def appearance_counts_as_match(ga: str = "ga") -> str:
+def appearance_counts_as_match(ga: str = "ga", *, for_stats: bool = True) -> str:
     """SQL predicate: does this `game_appearances` row count as a match played?
 
     Being named in a side is what makes a match a match, EXCEPT for a fixture
@@ -229,8 +229,16 @@ def appearance_counts_as_match(ga: str = "ga") -> str:
     (a game with a recorded contribution arrives there anyway) and load-bearing
     where this is the only source of the count, as in StatLab's `appear` CTE.
     They are kept in both cases so there is one predicate rather than two.
+
+    A MATCH THE PLAYER'S CLUB LEFT OUT OF ITS STATS (`game_stat_exclusions`, migration 401: a
+    friendly, a pre-season cup) is not a match played for any figure. ``for_stats=False`` keeps it,
+    for the one reader that is not a figure: fees, where a player who turned out for a friendly
+    still played a match day. The effective views behind the three EXISTS branches already leave
+    the match's rows out, so only the team-sheet branch needed the extra test.
     """
-    return f"""(
+    from app.services.stat_exclusion_ddl import kept_sql
+    kept = f"\n            AND {kept_sql(f'{ga}.game_id', f'{ga}.player_id')}" if for_stats else ""
+    return f"""((
                 (NOT EXISTS (
                     SELECT 1 FROM games _co
                     WHERE _co.id = {ga}.game_id
@@ -249,4 +257,4 @@ def appearance_counts_as_match(ga: str = "ga") -> str:
                     SELECT 1 FROM v_effective_fielding_stats _cf
                     WHERE _cf.game_id = {ga}.game_id AND _cf.player_id = {ga}.player_id
                 )
-            )"""
+            ){kept})"""

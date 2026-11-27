@@ -14,6 +14,7 @@ import PremiersTick from '../components/PremiersTick'
 import TeamBadge from '../components/TeamBadge'
 import FallOfWicketsEditor from '../components/FallOfWicketsEditor'
 import { NotPlayedNote, TeamListPanel } from '../components/admin/GameExclusions'
+import { MatchStatsExclusion } from '../components/admin/StatExclusions'
 
 // Cricket overs are base-6: 3.4 + 2.3 = 6.1 (3 ov 4 balls + 2 ov 3 balls = 6 ov 1 ball)
 function sumOversBalls(bowlingRows) {
@@ -957,7 +958,7 @@ export default function MatchScorecard() {
   const [error, setError] = useState(null)
   const [orgData, setOrgData] = useState(null)
   const fmtName = useNameFormat(orgData)
-  const { hasCapability } = useAuth()
+  const { hasCapability, user } = useAuth()
   const canManage = hasCapability(CAP.MANAGE_PLAYERS)
   // Typing the fall of wickets Cricket Australia is missing: a synced match only (an uploaded card is
   // edited from Manual entries).
@@ -1069,6 +1070,17 @@ export default function MatchScorecard() {
         </button>
 
         <MatchHeader game={game} innings={innings} />
+
+        {/* The club this card is read from left the match out of its players' stats (a friendly, a
+            pre-season cup), and an admin of a club that played in it can exclude it or count it again. */}
+        <MatchStatsExclusion
+          gameId={gameId}
+          excluded={!!game.stats_excluded}
+          clubName={orgData?.name}
+          adminClubName={user?.club_name}
+          canEdit={canEditFow}
+          onChanged={() => api.getScorecard(gameId, orgId || readClubSlug()).then(setGame).catch(() => {})}
+        />
 
         <PremiershipBanner gameId={gameId} orgId={effectiveOrgId} refreshKey={premiersKey} />
         <PremiersTick gameId={gameId} onChanged={() => setPremiersKey(k => k + 1)} />
