@@ -2717,7 +2717,7 @@ function PerfPanel({ title, titleColor, titleOpacity = 1, edge, batters = [], bo
   )
 }
 
-export function C4_FinalScore({ width = 1080, height = 1080, result, team, opponent, match, palette, parts, swap = false }) {
+export function C4_FinalScore({ width = 1080, height = 1080, result, team, opponent, match, palette, parts, swap = false, pastRoom = 0 }) {
   const winnerSide = result?.winner === 'OPPONENT' ? 'opponent' : (result?.winner === 'TIE' ? 'tie' : 'team')
   const tb = result?.topBatters || {}
   const tw = result?.topBowlers || {}
@@ -2802,6 +2802,8 @@ export function C4_FinalScore({ width = 1080, height = 1080, result, team, oppon
             </div>
           </div>
         </div>
+        {/* Room for the past-results strip the club put on the post (absent: as it was). */}
+        {pastRoom > 0 ? <div data-past-room="" style={{ height: pastRoom, flexShrink: 0 }} /> : null}
         <div style={{ margin: '6px 48px 18px', flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, minHeight: 0 }}>
           <PerfPanel title={`${pt(parts, 'c4TeamLabel', '').trim() || team.short} · ${pt(parts, 'c4PerfTitle', 'TOP PERFORMERS')}`} titleColor={pc(parts, 'c4TeamTitle', palette.accent)} edge={pc(parts, 'cardBorder', palette.accent)}
             batters={teamBatters} bowlers={teamBowlers} palette={palette} Perf={Perf} tall={A !== 'square'} parts={parts} />

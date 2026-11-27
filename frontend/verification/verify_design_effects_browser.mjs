@@ -727,6 +727,56 @@ const tilesOf = async (page) => page.evaluate(() => [...document.querySelectorAl
   await ctx.close()
 }
 
+// ── 4j. On Toss and Result · Classic the strip lands clear of the layout's text ─
+{
+  const PAST = { found: true, opponent: 'Subiaco-Floreat', meetings: 5, wins: 3, losses: 1, draws: 0, ties: 1, no_result: 0, form: ['W', 'W', 'L', 'T', 'W'], recent: [] }
+  const json = (b) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(b) })
+  for (const id of ['C2', 'C4']) for (const size of ['Square', 'Portrait', 'Story']) {
+    const ctx = await browser.newContext({ viewport: { width: 1600, height: 1000 } })
+    const page = await ctx.newPage()
+    await page.route('**/api/**', (route) => {
+      const url = route.request().url()
+      if (/\/admin\/social\/head-to-head\?/.test(url)) return route.fulfill(json(PAST))
+      if (/\/auth\/me/.test(url)) return route.fulfill(json({ id: 'u1', role: 'club_admin', club_slug: 'tcc', entitlements: { modules: ['socials'], status: 'active' } }))
+      if (/\/club-admin\/settings/.test(url)) return route.fulfill(json(CLUB))
+      if (/social\/media|templates|sponsors|players|ladders/.test(url)) return route.fulfill(json([]))
+      return route.fulfill(json({}))
+    })
+    await page.goto(`${BASE}/admin/social-post?template=${id}`, { waitUntil: 'domcontentloaded' })
+    await page.getByRole('button', { name: /DOWNLOAD PNG|SLIDES/ }).first().waitFor({ timeout: 25000 }).catch(() => {})
+    await press(page.getByRole('button', { name: 'Design', exact: true }))
+    await press(page.getByRole('button', { name: new RegExp(`^${size}`) }))
+    await page.waitForTimeout(300)
+    await press(page.getByRole('button', { name: 'Content', exact: true }))
+    await press(page.getByTestId('past-block-on'))
+    await page.getByPlaceholder('Subiaco CC').first().fill('Subiaco-Floreat').catch(() => {})
+    await page.waitForTimeout(1300)
+    const r = await page.evaluate(() => {
+      const h = [...document.querySelectorAll('div')].find((d) => d.style.left === '-9999px')
+      const root = h && h.firstElementChild
+      const strip = root && root.querySelector('[data-past-line]')
+      if (!strip) return null
+      const s = strip.getBoundingClientRect()
+      const hits = [...root.querySelectorAll('*')]
+        .filter((e) => !strip.contains(e) && [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()))
+        .map((e) => ({ t: e.textContent.trim().slice(0, 16), r: e.getBoundingClientRect() }))
+        // The giant ghost word behind Toss is texture, drawn under everything.
+        .filter((x) => !(x.r.height > 300))
+        .filter((x) => x.r.bottom > s.top + 1 && x.r.top < s.bottom - 1 && x.r.right > s.left && x.r.left < s.right)
+        .map((x) => x.t)
+      // Result · Classic: the Top Performers panel is a box that is mostly empty
+      // space, so text alone cannot tell the strip is on it. Its top edge is
+      // its border; the strip must end above the panel's heading row.
+      const perf = [...root.querySelectorAll('*')].find((e) => /TOP PERFORMERS/.test(e.textContent || '') && e.children.length === 0)
+      const panelTop = perf ? perf.parentElement.getBoundingClientRect().top : null
+      return { hits, aboveTop: panelTop === null ? null : s.bottom <= panelTop + 1 }
+    })
+    ck(`${id} ${size}: the strip lands clear of the layout's own text`, !!r && r.hits.length === 0, r ? r.hits.join(' | ') : 'no strip')
+    if (id === 'C4') ck(`C4 ${size}: and above the Top Performers panel, not on it`, !!r && r.aboveTop === true, JSON.stringify(r && r.aboveTop))
+    await ctx.close()
+  }
+}
+
 // ── 5. Association Socials workspace has the same tools ────────────────────
 {
   const { ctx, page, errors } = await openEditor({ settings: WORKSPACE, assoc: true })

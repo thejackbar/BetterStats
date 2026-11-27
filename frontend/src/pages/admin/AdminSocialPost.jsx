@@ -57,6 +57,18 @@ const PAST_ROUND_TEMPLATES = ['FX1', 'FX2', 'FX3', 'FX4', 'FX5', 'FX6', 'RR1', '
 // top of the layout (Club data, "Past results v opponent"), placed for them.
 const PAST_BLOCK_TABS = ['lineup', 'result', 'toss', 'motm']
 const isPastBlock = (it) => it && it.type === 'data' && it.kind === 'past'
+// Where the strip goes on a layout whose sponsor-slot default would sit on its
+// own content, by post shape (measured from the layouts: Toss's gap between
+// FIRST and the date row, Result · Classic's band between the score row and
+// Top Performers, which is the same at every size).
+const PAST_BLOCK_SPOTS = {
+  C2: { square: { y: 762 }, portrait: { y: 962 }, story: { y: 1300 } },
+  // Result · Classic has no free band, so it makes one: with the strip on, the
+  // Top Performers panels start PAST_ROOM_C4 lower and the strip sits in the gap.
+  C4: { square: { y: 312, h: 64 }, portrait: { y: 312, h: 64 }, story: { y: 312, h: 64 } },
+}
+const PAST_ROOM_C4 = 76
+const shapeOf = (w, h) => (h <= w ? 'square' : h / w > 1.5 ? 'story' : 'portrait')
 const rowPastKey = (r, gradeOnly) => `${String(r.oppClub || r.opp || '').trim().toLowerCase()}|${gradeOnly ? String(r.grade || '').trim().toLowerCase() : ''}`
 import { MilestoneCards, MilestoneBoard, MILESTONE_MAX } from '../../social/milestone-templates'
 import { ReviewWrap, ReviewPerformers, ReviewPlayer, ReviewMatch, ReviewResults, ReviewLeaders, ReviewMilestones, ReviewLadder, ReviewFixtures } from '../../social/round-review-templates'
@@ -4175,6 +4187,7 @@ export default function AdminSocialPost() {
   if (templateId === 'T13' || templateId === 'C5' || templateId === 'RR8') extraProps.sponsorCount = gridLogoCount
   if (templateId === 'C4') {
     if (resultSwap) extraProps.swap = true
+    if (overlay.items.some(isPastBlock)) extraProps.pastRoom = PAST_ROOM_C4
     extraProps.result = {
       winner: result.winner, margin: result.margin, grade: result.grade, teamScore: result.teamScore,
       // What a game with no winner says: "MATCH TIED", "MATCH ABANDONED"...
@@ -7154,9 +7167,10 @@ export default function AdminSocialPost() {
               const blocks = layer.items.filter(isPastBlock)
               const on = blocks.length > 0
               const place = () => {
+                const spot = PAST_BLOCK_SPOTS[templateId]?.[shapeOf(W, H)]
                 const slot = sponsorSlotFor(templateId, W, H, 1)
-                const h = 64
-                const y = slot && slot.y > H * 0.5 ? slot.y - h - 18 : H - h - 96
+                const h = spot?.h || 64
+                const y = spot ? spot.y : slot && slot.y > H * 0.5 ? slot.y - h - 18 : H - h - 96
                 addBlock('data', { kind: 'past', x: 60, y: Math.max(20, Math.round(y)), w: W - 120, h })
               }
               return (
