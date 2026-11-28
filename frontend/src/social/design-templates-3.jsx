@@ -133,15 +133,33 @@ const H2H_STATS = [
   { id: 'won', label: 'WON' },
   { id: 'lost', label: 'LOST', lowerWins: true },
   { id: 'competitionPoints', label: 'POINTS' },
-  { id: 'netRunRate', label: 'NET RUN RATE' },
-  { id: 'quotient', label: 'QUOTIENT' },
+  { id: 'netRunRate', label: 'NET RUN RATE', signed: true },
+  { id: 'quotient', label: 'QUOTIENT', signed: true },
 ]
+// How long each side's bar is, 0 to 1. Counts (played, won, points) scale from
+// zero; a rate that can go below zero, and a "fewer is better" figure, scale
+// across the two values, so the better side is always the longer bar and no
+// bar ever passes full length (a side on 0 losses drew one twice as long).
+export function h2hShares(st, a, b) {
+  const clamp = (v) => Math.max(0.06, Math.min(1, v))
+  if (a === null && b === null) return [0, 0]
+  if (st.lowerWins || st.signed) {
+    if (a === null || b === null) return [a === null ? 0 : 1, b === null ? 0 : 1]
+    if (a === b) return [1, 1]
+    const lo = Math.min(a, b), hi = Math.max(a, b)
+    const of = (v) => clamp(0.3 + 0.7 * (st.lowerWins ? (hi - v) : (v - lo)) / (hi - lo))
+    return [of(a), of(b)]
+  }
+  const mag = Math.max(Math.abs(a ?? 0), Math.abs(b ?? 0))
+  if (!mag) return [a === null ? 0 : 0.06, b === null ? 0 : 0.06]
+  return [a === null ? 0 : clamp(Math.abs(a) / mag), b === null ? 0 : clamp(Math.abs(b) / mag)]
+}
 const statOf = (row, id) => (id === 'rank' ? row?.rank : row?.stats?.[id])
 const num = (v) => (v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v))
 export function HeadToHead({ width = 1080, height = 1080, team = {}, opponent = {}, match = {}, palette = {}, standings = {}, parts }) {
   const texture = usePostLook().texture !== false
   const g = geo(width, height)
-  const { f } = g
+  const { f, A } = g
   const ground = pc(parts, 'dl22Ground', '#101114')
   const usC = pc(parts, 'dl22Us', readable(palette.accent || '#ffc233', ground, '#ffffff'))
   const themC = pc(parts, 'dl22Them', '#9aa3b2')
@@ -157,11 +175,20 @@ export function HeadToHead({ width = 1080, height = 1080, team = {}, opponent = 
   const pastH = hasPast(past) ? Math.round(Math.min(5, (past.recent || []).length) * 44 * f + 70 * f) : 0
   const pastY = g.slotY - 56 - pastH
   const avail = (pastH ? pastY - 16 : g.slotY - 70) - top
-  const rowH = Math.min(Math.round(100 * f), Math.floor(avail / Math.max(1, stats.length)))
+  const rowH = Math.min(Math.round(pick(A, { square: 96, portrait: 118, story: 150 }) * f), Math.floor(avail / Math.max(1, stats.length)))
+  const numFs = Math.round(Math.min(36 * f, rowH * 0.5))
+  // Room for the widest figure on each side, so the bars start in one line.
+  const figW = Math.round(Math.max(2, ...stats.flatMap((st) => [fmt(statOf(us, st.id)).length, fmt(statOf(them, st.id)).length])) * numFs * 0.6 + 6)
   // Each side's column, less room for its figure, so a full bar never pushes the number off the post.
-  const half = (width - 96 - Math.round(180 * f)) / 2 - Math.round(110 * f)
+  const half = (width - 96 - Math.round(180 * f)) / 2 - figW - 24
   const usName = upper(us?.team_name || team.name)
   const themName = upper(them?.team_name || opponent.name || 'OPPONENT')
+  // Match Info's opponent may be another club than the one picked off the
+  // ladder: its crest is used only when the names share their first word.
+  const first = (v) => String(v || '').trim().split(/\s+/)[0].toLowerCase()
+  const sameOpp = !them || (opponent.name && first(opponent.name) === first(them.team_name))
+  const themLogo = them?.logo_url || (sameOpp ? opponent.logo : null)
+  const themMono = them ? mono(them.team_name) : (opponent.monogram || mono(themName))
   return (
     <LayerRoot style={{ width, height, position: 'relative', overflow: 'hidden', background: ground, color: ink, fontFamily: FONT, fontWeight: WEIGHT }}>
       <div data-layer="Our side" style={{ position: 'absolute', inset: 0, background: `linear-gradient(90deg, ${usC}22, transparent 50%)` }} />
@@ -178,7 +205,7 @@ export function HeadToHead({ width = 1080, height = 1080, team = {}, opponent = 
         </div>
         <div style={{ fontSize: Math.round(64 * f) }}>VS</div>
         <div style={{ textAlign: 'center' }}>
-          <div style={{ display: 'flex', justifyContent: 'center' }}><ClubLogo src={them?.logo_url || opponent.logo} monogram={opponent.monogram || mono(themName)} color={themC} size={crest} shape="shield" /></div>
+          <div style={{ display: 'flex', justifyContent: 'center' }}><ClubLogo src={themLogo} monogram={themMono} color={themC} size={crest} shape="shield" /></div>
           <div style={{ fontSize: Math.round(30 * f), marginTop: 8, color: themC, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{themName}</div>
         </div>
       </div>
@@ -187,21 +214,19 @@ export function HeadToHead({ width = 1080, height = 1080, team = {}, opponent = 
           {stats.map((st) => {
             const a = num(statOf(us, st.id))
             const b = num(statOf(them, st.id))
-            const mag = Math.max(Math.abs(a ?? 0), Math.abs(b ?? 0)) || 1
-            // Position: the smaller number is the better place, so the bar is flipped.
-            const share = (v) => (v === null ? 0 : st.lowerWins ? (mag - v + 1) / mag : Math.max(0.04, Math.abs(v) / mag))
+            const [shA, shB] = h2hShares(st, a, b)
             const aWins = a !== null && b !== null && (st.lowerWins ? a < b : a > b)
             const bWins = a !== null && b !== null && (st.lowerWins ? b < a : b > a)
             return (
               <div key={st.id} data-h2h-row={st.id} style={{ height: rowH, display: 'grid', gridTemplateColumns: `1fr ${Math.round(180 * f)}px 1fr`, alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12 }}>
-                  <span style={{ fontSize: Math.round(36 * f), color: aWins ? usC : ink }}>{fmt(statOf(us, st.id))}</span>
-                  <span style={{ width: Math.round(half * share(a)), height: Math.round(rowH * 0.28), background: usC, opacity: aWins ? 1 : 0.45 }} />
+                  <span data-h2h-fig="us" style={{ fontSize: numFs, color: aWins ? usC : ink, width: figW, textAlign: 'right', flexShrink: 0, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{fmt(statOf(us, st.id))}</span>
+                  <span data-h2h-bar="us" style={{ width: Math.round(half * shA), height: Math.round(Math.min(rowH * 0.28, 30 * f)), background: usC, opacity: aWins ? 1 : 0.45, borderRadius: 3, flexShrink: 0 }} />
                 </div>
                 <div style={{ textAlign: 'center', fontFamily: MONO, fontSize: Math.round(14 * f), letterSpacing: 2, opacity: 0.8 }}>{st.label}</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <span style={{ width: Math.round(half * share(b)), height: Math.round(rowH * 0.28), background: themC, opacity: bWins ? 1 : 0.45 }} />
-                  <span style={{ fontSize: Math.round(36 * f), color: bWins ? themC : ink }}>{fmt(statOf(them, st.id))}</span>
+                  <span data-h2h-bar="them" style={{ width: Math.round(half * shB), height: Math.round(Math.min(rowH * 0.28, 30 * f)), background: themC, opacity: bWins ? 1 : 0.45, borderRadius: 3, flexShrink: 0 }} />
+                  <span data-h2h-fig="them" style={{ fontSize: numFs, color: bWins ? themC : ink, width: figW, flexShrink: 0, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{fmt(statOf(them, st.id))}</span>
                 </div>
               </div>
             )
@@ -228,7 +253,13 @@ export function StatLeaders({ width = 1080, height = 1080, team = {}, palette = 
   const rows = (L.rows || []).slice(0, pick(A, { square: 5, portrait: 6, story: 7 }))
   const [lead, ...rest] = rows
   const heroTop = g.top + Math.round(150 * f)
-  const restH = rest.length * Math.round(78 * f)
+  const rowH = Math.round(pick(A, { square: 78, portrait: 86, story: 100 }) * f)
+  const restH = rest.length * rowH
+  const valFs = Math.round(pick(A, { square: 44, portrait: 46, story: 52 }) * f)
+  const nameFs = Math.round(pick(A, { square: 36, portrait: 38, story: 42 }) * f)
+  const subFs = Math.round(14 * f)
+  const valW = Math.round(Math.max(2, ...rest.map((r) => String(r.value).length)) * valFs * 0.6 + 8)
+  const subW = rest.some((r) => r.sub) ? Math.min(Math.round(width * 0.36), Math.round(Math.max(...rest.map((r) => String(r.sub || '').length)) * subFs * 0.66 + 8)) : 0
   const restY = g.slotY - 20 - restH
   const heroH = restY - 20 - heroTop
   const dots = halftoneDots(width, height, Math.round(20 * f))
@@ -260,11 +291,11 @@ export function StatLeaders({ width = 1080, height = 1080, team = {}, palette = 
           </div>
           <div data-layer="Others" style={{ position: 'absolute', left: 48, right: 48, top: restY }}>
             {rest.map((r, i) => (
-              <div key={`${r.name}-${i}`} data-leader-row="" style={{ height: Math.round(78 * f), display: 'flex', alignItems: 'center', gap: 18, borderTop: `1px solid ${ink}26` }}>
-                <span style={{ fontFamily: MONO, fontSize: Math.round(18 * f), width: Math.round(40 * f), opacity: 0.7 }}>{i + 2}</span>
-                <span style={{ flex: 1, minWidth: 0, fontSize: Math.round(36 * f), whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{upper(r.name)}</span>
-                {r.sub && <span style={{ fontFamily: MONO, fontSize: Math.round(14 * f), letterSpacing: 1, opacity: 0.7 }}>{upper(r.sub)}</span>}
-                <span style={{ fontSize: Math.round(44 * f), color: lit, width: Math.round(130 * f), textAlign: 'right' }}>{r.value}</span>
+              <div key={`${r.name}-${i}`} data-leader-row="" style={{ height: rowH, display: 'flex', alignItems: 'center', gap: 18, borderTop: `1px solid ${ink}26` }}>
+                <span style={{ fontFamily: MONO, fontSize: Math.round(18 * f), width: Math.round(40 * f), opacity: 0.7, flexShrink: 0 }}>{i + 2}</span>
+                <span style={{ flex: 1, minWidth: 0, fontSize: nameFs, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{upper(r.name)}</span>
+                {subW > 0 && <span data-leader-sub="" style={{ fontFamily: MONO, fontSize: subFs, letterSpacing: 1, opacity: 0.7, width: subW, flexShrink: 0, textAlign: 'right', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{upper(r.sub || '')}</span>}
+                <span data-leader-value="" style={{ fontSize: valFs, color: lit, width: valW, flexShrink: 0, textAlign: 'right', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{r.value}</span>
               </div>
             ))}
           </div>

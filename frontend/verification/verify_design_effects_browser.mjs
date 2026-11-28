@@ -1042,6 +1042,105 @@ const tilesOf = async (page) => page.evaluate(() => [...document.querySelectorAl
   await ctx.close()
 }
 
+// ── 4o. Head to Head and Stat Leaders: bars, crests and columns (v9.167.0) ──
+{
+  const cols = [['played', 'P'], ['won', 'W'], ['lost', 'L'], ['competitionPoints', 'PTS'], ['netRunRate', 'NRR']].map(([id, heading]) => ({ id, heading }))
+  const mk = (rank, name, w, l, pts, nrr, extra = {}) => ({ rank, team_name: name, logo_url: null, is_club: false, stats: { played: 6, won: w, lost: l, competitionPoints: pts, netRunRate: nrr }, ...extra })
+  const rows = [mk(1, 'Applecross 7th XI', 6, 0, 24, 0.3, { is_club: true }), mk(2, "WSCC One Day 4's", 4, 1, 32, -1.5, { logo_url: '/api/images/organisations/wscc/logo?v=1' }), mk(3, 'High Wycombe 4th XI', 3, 2, 28, 0.265)]
+  const LADDERS = { teams: [{ team_id: 't1', team_name: '7th XI', grade_id: 'g1', grade_name: 'One Day Grade 4', available: true, views: [{ name: 'One Day', columns: cols, rows }] }], unlinked: [] }
+  const BAT = [['Harrison Kucan', 1204, 17, '75.3', '161*'], ['Angus Castley', 355, 7, '50.7', '98*'], ['Jack Barendse', 98, 6, '19.6', '41'], ['Tom Reid', 7, 2, '3.5', '5'], ['Lachlan Moore', 1030, 16, '64.4', '140']]
+    .map(([n, r, i, a, h], k) => ({ player_id: `p${k + 1}`, name: n, total_runs: r, innings: i, average: a, high_score: h }))
+  const open2 = async (query) => {
+    const ctx = await browser.newContext({ viewport: { width: 1600, height: 1000 } })
+    const page = await ctx.newPage()
+    const errors = []
+    page.on('pageerror', (e) => errors.push(String(e)))
+    const json = (b) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(b) })
+    await page.route('**/api/**', (route) => {
+      const url = route.request().url()
+      if (/\/auth\/me/.test(url)) return route.fulfill(json({ id: 'u1', role: 'club_admin', club_slug: 'tcc', entitlements: { modules: ['socials', 'select', 'stats'], status: 'active' } }))
+      if (/\/club-admin\/settings/.test(url)) return route.fulfill(json({ ...CLUB, logo_url: '/api/images/organisations/org-1/logo?v=1' }))
+      if (/\/images\/organisations\//.test(url)) return route.fulfill({ status: 200, contentType: 'image/png', body: PHOTO })
+      if (/\/ladders\/teams/.test(url)) return route.fulfill(json(LADDERS))
+      if (/\/leaderboard\/batting/.test(url)) return route.fulfill(json(BAT))
+      if (/\/club-admin\/seasons/.test(url)) return route.fulfill(json([{ id: 's1', name: '2026-27', year: 2026 }]))
+      if (/social\/media|templates|sponsors|players|leaderboard|head-to-head/.test(url)) return route.fulfill(json([]))
+      return route.fulfill(json({}))
+    })
+    await page.goto(`${BASE}/admin/social-post${query}`, { waitUntil: 'domcontentloaded' })
+    await page.getByRole('button', { name: /DOWNLOAD PNG|SLIDES/ }).first().waitFor({ timeout: 25000 }).catch(() => {})
+    await page.waitForTimeout(900)
+    return { ctx, page, errors }
+  }
+  const pickOpp = async (page, re) => {
+    await press(page.getByRole('button', { name: 'Data', exact: true }))
+    await page.waitForTimeout(250)
+    for (const sel of await page.locator('select').all()) {
+      const hit = (await sel.locator('option').allTextContents()).find((o) => re.test(o))
+      if (hit) { await sel.selectOption({ label: hit }).catch(() => {}); break }
+    }
+    await page.waitForTimeout(500)
+  }
+  const h2h = (page) => page.evaluate(() => {
+    const h = [...document.querySelectorAll('div')].find((d) => d.style.left === '-9999px' && d.style.position === 'absolute')
+    const root = h && h.firstElementChild
+    const rw = root ? root.getBoundingClientRect() : null
+    const out = {}
+    for (const row of h ? h.querySelectorAll('[data-h2h-row]') : []) {
+      // Read by position, not by marker, so the same check runs on a build
+      // without the markers: left cell [figure, bar], label, right cell [bar, figure].
+      const b = (e) => { if (!e) return null; const r = e.getBoundingClientRect(); return { l: r.left, r: r.right, w: r.width, text: e.textContent } }
+      const [left, mid, right] = row.children
+      const label = mid.getBoundingClientRect()
+      out[row.getAttribute('data-h2h-row')] = { us: b(left?.children[1]), them: b(right?.children[0]), usFig: b(left?.children[0]), themFig: b(right?.children[1]), labelL: label.left, labelR: label.right, rootL: rw.left, rootR: rw.right }
+    }
+    const crests = [...(h ? h.querySelectorAll('[data-layer="Crests"] img, [data-layer="Crests"] svg') : [])].map((e) => (e.tagName === 'IMG' ? e.getAttribute('src') : `mono:${e.textContent}`))
+    return { rows: out, crests }
+  })
+  {
+    const { ctx, page, errors } = await open2('?template=DL22')
+    await pickOpp(page, /WSCC/)
+    const d = await h2h(page)
+    const lost = d.rows.lost
+    ck('H2H LOST: no lost games (0) is the longer bar than 1', lost && lost.us && lost.them && lost.us.w > lost.them.w, JSON.stringify(lost && [lost.us?.w, lost.them?.w]))
+    const inside = Object.entries(d.rows).filter(([, x]) => !(x.us && x.them && x.usFig && x.themFig && x.us.r <= x.labelL + 1 && x.them.l >= x.labelR - 1 && x.usFig.l >= x.rootL && x.themFig.r <= x.rootR))
+    ck('H2H: every bar stays on its own side of the label and every figure on the post', Object.keys(d.rows).length >= 5 && inside.length === 0, inside.map(([k]) => k).join(','))
+    const nrr = d.rows.netRunRate
+    ck('H2H NET RUN RATE: +0.3 is the longer bar than -1.5 (the sign counts)', nrr?.us && nrr?.them && nrr.us.w > nrr.them.w, JSON.stringify(nrr && [nrr.us?.w, nrr.them?.w]))
+    const pts = d.rows.competitionPoints
+    ck('control: a count still scales from zero (24 points against 32)', pts?.us && pts?.them && Math.abs(pts.us.w / pts.them.w - 0.75) < 0.05, JSON.stringify(pts && [pts.us?.w, pts.them?.w]))
+    ck("H2H: our crest is the club's own", /organisations\/org-1\/logo/.test(d.crests[0] || ''), d.crests.join(' | '))
+    ck("H2H: their crest is the one their ladder row carries", /organisations\/wscc\/logo/.test(d.crests[1] || ''), d.crests.join(' | '))
+    await pickOpp(page, /High Wycombe/)
+    const d2 = await h2h(page)
+    ck('H2H: a ladder club with no crest shows its own initials', d2.crests[1] === 'mono:HW', d2.crests.join(' | '))
+    ck('no page errors on Head to Head', errors.length === 0, errors.slice(0, 2).join(' | '))
+    await ctx.close()
+  }
+  {
+    const { ctx, page, errors } = await open2('?template=DL23')
+    await page.waitForTimeout(600)
+    const L = await page.evaluate(() => {
+      const h = [...document.querySelectorAll('div')].find((d) => d.style.left === '-9999px' && d.style.position === 'absolute')
+      return [...(h ? h.querySelectorAll('[data-leader-row]') : [])].map((row) => {
+        const rr = row.getBoundingClientRect()
+        // By position: rank, name, [detail], figure (the figure is always last).
+        const box = (e) => { if (!e) return null; const b = e.getBoundingClientRect(); const rg = document.createRange(); rg.selectNodeContents(e); const t = rg.getBoundingClientRect(); return { l: b.left, r: b.right, tl: t.left, tr: t.right, text: e.textContent } }
+        const kids = [...row.children]
+        return { right: rr.right, sub: kids.length > 3 ? box(kids[kids.length - 2]) : null, val: box(kids[kids.length - 1]) }
+      })
+    })
+    ck('Stat Leaders draws the four runners-up', L.length === 4, String(L.length))
+    const bad = L.filter((x) => !x.val || x.val.tl < x.val.l - 1 || x.val.tr > x.right + 1 || (x.sub && x.sub.r > x.val.l + 1))
+    ck('Stat Leaders: every figure fits its column and never meets the detail line', L.length === 4 && bad.length === 0, JSON.stringify(bad[0] || ''))
+    const same = (k) => L.every((x) => x[k] && Math.abs(x[k].r - L[0][k].r) < 1 && Math.abs(x[k].l - L[0][k].l) < 1)
+    ck('Stat Leaders: figures and detail lines sit in one column down the list', L.length === 4 && same('val') && same('sub'))
+    ck('control: the list holds a four-digit figure and a one-digit one, so the column is tested wide', L.some((x) => x.val && x.val.text === '1030') && L.some((x) => x.val && x.val.text === '7'), L.map((x) => x.val && x.val.text).join(','))
+    ck('no page errors on Stat Leaders', errors.length === 0, errors.slice(0, 2).join(' | '))
+    await ctx.close()
+  }
+}
+
 // ── 5. Association Socials workspace has the same tools ────────────────────
 {
   const { ctx, page, errors } = await openEditor({ settings: WORKSPACE, assoc: true })
